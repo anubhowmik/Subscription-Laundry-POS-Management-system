@@ -1,0 +1,2191 @@
+// Saudi Laundry Management System - Database Schema
+// Multi-tenant SaaS: every tenant is an Organization. See docs/POS-ZATCA-PLAN.md for ZATCA
+// e-invoicing details and docs/MULTI-TENANT-PLAN.md (if present) for tenancy notes.
+//
+// Scope built so far: auth/RBAC, business locations, master data, inventory, sales/POS,
+// ZATCA e-invoicing (Phases A-D), multi-tenant foundation (Organization + Plan/Subscription
+// skeleton - payment collection itself is a later phase, not yet built).
+//
+// NOTE: a platform-level "manage all tenants" super-admin panel is NOT built yet - every User
+// in this schema belongs to exactly one Organization for now. That's a deliberate scope cut,
+// not an oversight.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TaxType {
+  INCLUSIVE
+  EXCLUSIVE
+}
+
+enum ProductType {
+  STANDARD
+  VARIABLE
+}
+
+enum SaleStatus {
+  DRAFT
+  FINAL
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  DUE
+  OVERPAID
+}
+
+enum InventoryTransactionType {
+  STOCK_IN
+  STOCK_OUT
+  SALE
+  SALE_RETURN
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+enum CompensationReason {
+  LOST
+  DAMAGED
+  DELAYED
+  OTHER
+}
+
+enum CompensationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum LoyaltyTransactionType {
+  EARN
+  REDEEM
+  ADJUSTMENT
+}
+
+enum BookingType {
+  PICKUP
+  DELIVERY
+}
+
+enum BookingStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationProvider {
+  UNIFONIC
+}
+
+enum NotificationStatus {
+  SENT
+  FAILED
+  TEST // provider not configured/enabled yet - logged instead of actually sent, per-org "log mode"
+}
+
+// Matches the reference site's return-reason taxonomy exactly (Not Washable, Damaged, Not
+// Found, or a generic Sell Return/Other).
+enum SellReturnReason {
+  NOT_WASHABLE
+  DAMAGED
+  NOT_FOUND
+  OTHER
+}
+
+enum PaymentType {
+  SALE_PAYMENT
+  REFUND
+}
+
+enum PurchaseStatus {
+  RECEIVED
+  CANCELLED
+}
+
+// The reference site's "Inventory Counting" module turned out to be a periodic branch
+// reconciliation - not a product stock-take. Its "Create Inventory Posting" screen buckets open
+// laundry orders into In Stock / In Warehouse / Out Stock and pairs that with a cash-in-drawer
+// count, then saves the whole thing as an audit record. We already track per-item state via
+// ItemFulfillmentStatus and cash counts via RegisterSession; InventoryPosting is the periodic
+// snapshot that ties both together the way the reference site does.
+enum InventoryPostingStatus {
+  PENDING
+  CONFIRMED
+}
+
+// The reference site's "Announcements" module: a date-ranged notice, optionally scoped to one
+// business location (null = all locations), with a published/draft toggle.
+model Announcement {
+  id             String   @id @default(uuid())
+  organizationId String
+  fromDate       DateTime
+  toDate         DateTime
+  content        String   @db.Text
+  isPublished    Boolean  @default(true)
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser User                   @relation(fields: [createdBy], references: [id])
+  locations     AnnouncementLocation[]
+
+  @@index([organizationId])
+}
+
+// No rows for an announcement = targets every business location (matches the reference site's
+// "empty locations_id = all locations" behavior). Replaces a single nullable FK because the
+// reference site lets an announcement target several specific branches at once, not just one or all.
+model AnnouncementLocation {
+  announcementId     String
+  businessLocationId String
+
+  announcement     Announcement     @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@id([announcementId, businessLocationId])
+  @@index([businessLocationId])
+}
+
+// The reference site's "Messages" module turned out to be branch-to-branch, not user-to-user:
+// every message is addressed From one BusinessLocation To another (e.g. a branch escalating a
+// customer complaint to HQ), and "Reply" just opens a new compose form with locations swapped -
+// there's no threaded conversation view, so parentMessageId here is for traceability only.
+
+// Kept separate from SellReturnReason - a purchase going back to a vendor fails for different
+// reasons than a customer returning a finished garment.
+enum PurchaseReturnReason {
+  DEFECTIVE
+  WRONG_ITEM
+  OVERSTOCK
+  OTHER
+}
+
+// Per-item garment lifecycle, tracked independently of the invoice-level SaleStatus.
+enum ItemFulfillmentStatus {
+  PENDING
+  IN_PROGRESS
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum RegisterSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum CouponDiscountMode {
+  PERCENT
+  FIXED
+}
+
+// ZATCA (Fatoora) e-invoicing enums - see docs/POS-ZATCA-PLAN.md
+enum ZatcaInvoiceType {
+  STANDARD // B2B/B2G - buyer has a VAT number - requires Clearance (pre-delivery)
+  SIMPLIFIED // B2C - requires Reporting (post-delivery, within 24h)
+}
+
+enum ZatcaTransactionType {
+  INVOICE
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum ZatcaClearanceStatus {
+  NOT_SUBMITTED // Phase A/B: hash chain + QR exist locally, no ZATCA API call made yet
+  PENDING
+  CLEARED
+  REPORTED
+  FAILED
+  QUEUED_OFFLINE
+}
+
+enum TaxCategoryCode {
+  S // Standard rate
+  Z // Zero-rated
+  E // Exempt
+  O // Out of scope
+}
+
+enum ZatcaCertificateStatus {
+  KEY_GENERATED // EC keypair + CSR created locally, nothing submitted to ZATCA yet
+  COMPLIANCE_ISSUED // Phase D: compliance CSID obtained
+  PRODUCTION_ISSUED // Phase D: production CSID obtained
+  FAILED
+}
+
+// --- Multi-tenant / billing enums ---
+
+enum OrganizationStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+  LIFETIME // one-time payment, never expires - Subscription.currentPeriodEnd stays null
+}
+
+enum BillingPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenant foundation
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id          String             @id @default(uuid())
+  nameEn      String
+  nameAr      String
+  slug        String             @unique // url-safe identifier
+  status      OrganizationStatus @default(TRIAL)
+  trialEndsAt DateTime?
+
+  // --- Org-wide settings (P6-4) ---
+  fiscalYearStartMonth Int      @default(1) // 1-12
+  dateFormat           String   @default("DD/MM/YYYY")
+  timeFormat24h        Boolean  @default(false)
+  reportHeaderText     String?
+  reportFooterText     String?
+  logoUrl              String?
+  themeColor           String? // hex accent color
+  rewardPointsEnabled  Boolean  @default(true)
+  rewardPointsName     String   @default("Points")
+  pointValueSar        Decimal  @default(0.1) @db.Decimal(6, 3) // SAR value of 1 redeemed point - replaces the old hardcoded POINT_VALUE constant
+  pointsEarnDivisor    Decimal  @default(10) @db.Decimal(6, 2) // SAR spent per point earned - replaces the old hardcoded EARN_DIVISOR constant
+  minOrderForPoints    Decimal  @default(0) @db.Decimal(12, 2)
+  maxPointsPerOrder    Int?
+  minRedeemPoints      Int      @default(0)
+  maxRedeemPoints      Int?
+  pointsExpiryDays     Int?
+
+  // --- Payment reminder scheduler (P7-4) - see backend/src/jobs/paymentReminder.job.ts ---
+  paymentReminderEnabled      Boolean @default(false)
+  paymentReminderAfterDays    Int     @default(7) // days overdue before the first reminder
+  paymentReminderIntervalDays Int     @default(7) // days between repeat reminders
+
+  // --- Customer approval workflow (P8-3) - when on, new customers start PENDING and are blocked
+  // from checkout until approved. Off by default so existing orgs see no behavior change. ---
+  customerApprovalRequired Boolean @default(false)
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  users             User[]
+  roles             Role[]
+  userGroups        UserGroup[]
+  businessLocations BusinessLocation[]
+  businessLocationGroups BusinessLocationGroup[]
+  customerGroups    CustomerGroup[]
+  customers         Customer[]
+  categories        Category[]
+  brands            Brand[]
+  units             Unit[]
+  taxes             Tax[]
+  products          Product[]
+  serviceCategories ServiceCategory[]
+  services          Service[]
+  paymentMethods    PaymentMethod[]
+  sales             Sale[]
+  auditLogs         AuditLog[]
+  billingPayments   BillingPayment[]
+  subscription      Subscription?
+  registerSessions  RegisterSession[]
+  heldSales         HeldSale[]
+  coupons             Coupon[]
+  priceLists          PriceList[]
+  compensations       Compensation[]
+  loyaltyTransactions LoyaltyTransaction[]
+  cashbackTransactions CashbackTransaction[]
+  bookings            Booking[]
+  notificationSettings NotificationSettings?
+  notificationLogs     NotificationLog[]
+  notificationTemplates NotificationTemplate[]
+  sellReturns          SellReturn[]
+  suppliers            Supplier[]
+  purchases            Purchase[]
+  purchaseReturns      PurchaseReturn[]
+  inventoryPostings    InventoryPosting[]
+  messages             Message[]
+  announcements        Announcement[]
+  stockTransfers       StockTransfer[]
+  expenseCategories    ExpenseCategory[]
+  expenses             Expense[]
+  stockAdjustments     StockAdjustment[]
+}
+
+// Billing plan catalog - global, not tenant-scoped (the plans a tenant can subscribe to).
+model Plan {
+  id            String   @id @default(uuid())
+  code          String   @unique // "starter" | "pro" | "enterprise"
+  nameEn        String
+  nameAr        String
+  priceMonthly  Decimal  @db.Decimal(10, 2)
+  priceAnnual   Decimal  @db.Decimal(10, 2)
+  priceLifetime Decimal? @db.Decimal(10, 2) // null = this plan is not sold as a one-time lifetime purchase
+  maxBranches   Int? // null = unlimited
+  maxUsers      Int? // null = unlimited
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptions   Subscription[]
+  billingPayments BillingPayment[]
+}
+
+// One subscription per Organization.
+//
+// Access is decided from DATES, not from `status` alone - see billing/entitlement.service.ts.
+// That means no cron job is needed to "expire" anything: a trial whose currentPeriodEnd has
+// passed simply stops granting access the next time it is checked. `status` is descriptive.
+//
+// currentPeriodEnd is NULL only for LIFETIME subscriptions, which never expire.
+model Subscription {
+  id                 String             @id @default(uuid())
+  organizationId     String             @unique
+  planId             String
+  status             SubscriptionStatus @default(TRIALING)
+  billingInterval    BillingInterval    @default(MONTHLY)
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime? // null = lifetime, never expires
+  cancelAtPeriodEnd  Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  plan            Plan             @relation(fields: [planId], references: [id])
+  billingPayments BillingPayment[]
+}
+
+// What a COMPANY pays US to use the platform. Deliberately separate from SalePayment, which is
+// what a company's own walk-in customer pays THEM at the POS counter.
+model BillingPayment {
+  id                 String               @id @default(uuid())
+  organizationId     String
+  subscriptionId     String?
+  planId             String
+  amount             Decimal              @db.Decimal(10, 2)
+  currency           String               @default("SAR")
+  billingInterval    BillingInterval
+  status             BillingPaymentStatus @default(PENDING)
+  gateway            String               @default("moyasar")
+  gatewayPaymentId   String?              @unique // Moyasar payment id, set once the payment is created there
+  gatewayResponseRaw Json?
+  failureReason      String?
+  paidAt             DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  plan         Plan          @relation(fields: [planId], references: [id])
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Auth / RBAC (tenant-scoped)
+// ---------------------------------------------------------------------------
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  description    String?
+  isSystem       Boolean  @default(false) // built-in roles cannot be deleted
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@unique([organizationId, nameEn])
+  @@index([organizationId])
+}
+
+// Global catalog of permission codes - same across every tenant, not tenant-scoped.
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g. "users.view"
+  module      String // e.g. "users"
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions      RolePermission[]
+  userGroupPermissions UserGroupPermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id             String     @id @default(uuid())
+  organizationId String
+  username       String?    @unique // null for non-login staff (P8-5) - Postgres unique index permits multiple nulls
+  email          String?    @unique
+  passwordHash   String? // null when allowLogin is false - login/changePassword must guard this, never compare against null
+  fullNameEn     String
+  fullNameAr     String?
+  phone          String?
+  roleId         String
+  role           Role       @relation(fields: [roleId], references: [id])
+  status         UserStatus @default(ACTIVE)
+  isSystemAdmin  Boolean    @default(false) // full access within their OWN organization only - bypasses business-location scoping, does not cross tenant boundaries
+  allowLogin     Boolean    @default(true) // false = a staff record that exists only to be referenced (e.g. createdBy) - see (a) in P8-5
+  maxDiscountPercent Decimal? @db.Decimal(5, 2) // null = unlimited - per-cashier invoice-discount ceiling (P8-5b), never applies to isSystemAdmin
+  lastLoginAt    DateTime?
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocations      UserBusinessLocation[]
+  userGroups             UserUserGroup[]
+  refreshTokens          RefreshToken[]
+  loginAttempts          LoginAttempt[]
+  auditLogs              AuditLog[]
+  sales                  Sale[]
+  payments               Payment[]
+  inventoryTxns          InventoryTransaction[]
+  saleItemStatusChanges  SaleItemStatusHistory[]
+  registerSessionsOpened RegisterSession[]       @relation("RegisterSessionOpenedBy")
+  registerSessionsClosed RegisterSession[]       @relation("RegisterSessionClosedBy")
+  heldSales              HeldSale[]
+  compensationsCreated   Compensation[]          @relation("CompensationCreatedBy")
+  compensationsResolved  Compensation[]          @relation("CompensationResolvedBy")
+  loyaltyTransactions    LoyaltyTransaction[]
+  cashbackTransactions   CashbackTransaction[]
+  bookingsCreated        Booking[]
+  sellReturnsCreated     SellReturn[]
+  purchasesCreated       Purchase[]
+  purchaseReturnsCreated PurchaseReturn[]
+  inventoryPostingsCreated InventoryPosting[]
+  messagesSent             Message[]
+  messageReads             MessageRead[]
+  announcementsCreated     Announcement[]
+  stockTransfersCreated    StockTransfer[] @relation("StockTransferCreatedBy")
+  stockTransfersReceived   StockTransfer[] @relation("StockTransferReceivedBy")
+  expensesCreated          Expense[]
+  stockAdjustmentsCreated  StockAdjustment[]
+  customerRestrictions         UserCustomer[]
+  customerGroupRestrictions    UserCustomerGroup[]
+  transferFromLocationRestrictions UserTransferFromLocation[]
+
+  @@index([status])
+  @@index([organizationId])
+}
+
+model UserGroup {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  nameEn             String
+  nameAr             String
+  description        String?
+  businessLocationId String?
+  status             UserStatus @default(ACTIVE)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation?     @relation(fields: [businessLocationId], references: [id])
+  permissions      UserGroupPermission[]
+  users            UserUserGroup[]
+
+  @@index([organizationId])
+}
+
+model UserGroupPermission {
+  userGroupId  String
+  permissionId String
+  userGroup    UserGroup  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userGroupId, permissionId])
+}
+
+model UserUserGroup {
+  userId      String
+  userGroupId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userGroup   UserGroup @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, userGroupId])
+}
+
+model UserBusinessLocation {
+  userId             String
+  businessLocationId String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessLocation   BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, businessLocationId])
+}
+
+// Per-user access restrictions (P8-5c/d) - unlike UserBusinessLocation above, EMPTY rows here mean
+// UNRESTRICTED (matches today's default behavior with zero migration pain - most users get zero
+// restriction rows and nothing changes for them). Only a user with at least one row here is
+// actually limited to that set. See authenticate.ts for how this is computed into req.user.
+model UserCustomer {
+  userId     String
+  customerId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, customerId])
+}
+
+model UserCustomerGroup {
+  userId          String
+  customerGroupId String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, customerGroupId])
+}
+
+model UserTransferFromLocation {
+  userId             String
+  businessLocationId String
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessLocation   BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, businessLocationId])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Platform operator (the SaaS owner) - DELIBERATELY separate from User.
+//
+// A PlatformAdmin is not a member of any Organization. Keeping these accounts in their own
+// table, with their own refresh tokens and their own JWT type claim, means there is no code
+// path by which a tenant's user can be promoted into a platform operator - the tenant-facing
+// user API physically cannot write to this table.
+//
+// Per the product decision, a platform operator sees company METADATA only (status, plan,
+// payments). There is no impersonation and no endpoint that exposes a tenant's customers,
+// sales, or invoices.
+// ---------------------------------------------------------------------------
+
+model PlatformAdmin {
+  id           String     @id @default(uuid())
+  username     String     @unique
+  email        String     @unique
+  passwordHash String
+  fullName     String
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  refreshTokens PlatformRefreshToken[]
+}
+
+model PlatformRefreshToken {
+  id              String    @id @default(uuid())
+  platformAdminId String
+  tokenHash       String    @unique
+  userAgent       String?
+  ipAddress       String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  platformAdmin PlatformAdmin @relation(fields: [platformAdminId], references: [id], onDelete: Cascade)
+
+  @@index([platformAdminId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(uuid())
+  userId    String?
+  username  String
+  success   Boolean
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([username])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Business Locations
+// ---------------------------------------------------------------------------
+
+model BusinessLocation {
+  id                    String     @id @default(uuid())
+  organizationId        String
+  businessNameEn        String
+  businessNameAr        String
+  branchName            String
+  branchNameAr          String?
+  branchCode            String
+  address               String?
+  city                  String?
+  district              String?
+  postalCode            String?
+  buildingNo            String? // ZATCA national address building number
+  phone                 String?
+  email                 String?
+  vatNumber             String?
+  crNumber              String?
+  nationalAddress       String?
+  currency              String     @default("SAR")
+  timezone              String     @default("Asia/Riyadh")
+  status                UserStatus @default(ACTIVE)
+  lastIcv               Int        @default(0) // ZATCA Invoice Counter Value - last issued, per location
+  groupId               String?
+  defaultPriceListId    String?
+  receiptPrinterType    String     @default("browser") // "browser" | "printer" - no distinct Printer entity yet, just the toggle
+  printReceiptOnInvoice Boolean    @default(true)
+  printerName           String? // human-readable name/identifier of the configured receipt printer (P7-5)
+  paperWidthMm          Int? // drives the default invoice templateKey suggestion for this branch (P7-5)
+
+  // --- Document numbering (P7-5, extended P8-1) - moved from Organization to per-branch. Each
+  // pair is an atomic row-lock counter, same pattern as lastIcv above. All kinds share one
+  // yearly-reset event: the first number claimed of any kind after the calendar year rolls over
+  // (when numberResetYearly is on) zeroes every sequence together and stamps lastNumberResetYear,
+  // rather than resetting independently. ---
+  invoiceNumberPrefix String  @default("INV-")
+  lastInvoiceSeq       Int     @default(0)
+  quoteNumberPrefix    String  @default("QT-")
+  lastQuoteSeq         Int     @default(0)
+  draftNumberPrefix    String  @default("DFT-")
+  lastDraftSeq         Int     @default(0)
+  returnNumberPrefix   String  @default("CN-")
+  lastReturnSeq        Int     @default(0)
+  reissueNumberPrefix  String  @default("RE-")
+  lastReissueSeq       Int     @default(0)
+  expenseNumberPrefix  String  @default("EXP-")
+  lastExpenseSeq       Int     @default(0)
+  adjustmentNumberPrefix String @default("ADJ-")
+  lastAdjustmentSeq      Int    @default(0)
+  numberResetYearly    Boolean @default(false)
+  lastNumberResetYear  Int?
+
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group            BusinessLocationGroup?    @relation(fields: [groupId], references: [id])
+  defaultPriceList PriceList?                @relation(fields: [defaultPriceListId], references: [id])
+  invoiceLayoutSettings InvoiceLayoutSettings?
+  users            UserBusinessLocation[]
+  userGroups       UserGroup[]
+  customers        Customer[]
+  products         ProductBusinessLocation[]
+  services         ServiceBusinessLocation[]
+  productStocks    ProductStock[]
+  sales            Sale[]
+  inventoryTxns    InventoryTransaction[]
+  payments         Payment[]
+  zatcaCertificate ZatcaDeviceCertificate?
+  registerSessions RegisterSession[]
+  heldSales        HeldSale[]
+  compensations    Compensation[]
+  bookings         Booking[]
+  sellReturns      SellReturn[]
+  suppliers        Supplier[]
+  purchases        Purchase[]
+  purchaseReturns  PurchaseReturn[]
+  inventoryPostings InventoryPosting[]
+  messagesFrom     Message[] @relation("MessageFromLocation")
+  messagesTo       Message[] @relation("MessageToLocation")
+  announcementLocations AnnouncementLocation[]
+  stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
+  stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
+  coupons            Coupon[]
+  expenses           Expense[]
+  stockAdjustments   StockAdjustment[]
+  userTransferFromRestrictions UserTransferFromLocation[]
+
+  @@unique([organizationId, branchCode])
+  @@index([organizationId])
+  @@index([status])
+  @@index([groupId])
+}
+
+// Per-branch invoice/receipt display config (P7-5). One row per BusinessLocation, created lazily
+// on first PUT - a location with no row here just renders the "standard" template with every
+// toggle on and every label at its hardcoded default (see InvoicePage.tsx's DEFAULT_LABELS), so
+// existing invoices render identically until an admin actually customizes something.
+model InvoiceLayoutSettings {
+  id                 String  @id @default(uuid())
+  businessLocationId String  @unique
+  templateKey        String  @default("standard") // standard | thermal58 | thermal80 | a4Full | a5 | garmentTag
+  logoUrl            String?
+  accentColor        String? // hex
+
+  // Show/hide toggles - all default true so an unconfigured row renders every field the original
+  // single-template InvoicePage.tsx always rendered unconditionally.
+  showLogo               Boolean @default(true)
+  showBranchName         Boolean @default(true)
+  showCity               Boolean @default(true)
+  showQrCode             Boolean @default(true)
+  showVatNumber          Boolean @default(true)
+  showCrNumber           Boolean @default(true)
+  showInvoiceUuid        Boolean @default(true)
+  showIcv                Boolean @default(true)
+  showCustomerVat        Boolean @default(true)
+  showCustomerPhone      Boolean @default(true)
+  showItemSku            Boolean @default(true)
+  showDiscountLine       Boolean @default(true)
+  showPaidDue            Boolean @default(true)
+  showEstimatedReady     Boolean @default(true)
+  showRegisterSession    Boolean @default(true)
+  showDigitalSignatureNote Boolean @default(true)
+
+  // Sparse { [labelKey]: { en, ar } } map - a missing key falls back to the hardcoded default text
+  // (see DEFAULT_LABELS in the frontend templates module).
+  labelOverrides Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+}
+
+// Groups branches (e.g. by city/region) mainly for reporting roll-ups - mirrors the reference
+// site's business_location_groups table.
+model BusinessLocationGroup {
+  id             String   @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  locations    BusinessLocation[]
+
+  @@index([organizationId])
+}
+
+// ZATCA (Fatoora) e-invoicing: one signing identity per business location ("EGS unit" in
+// ZATCA's terminology). See docs/POS-ZATCA-PLAN.md Phase C.
+model ZatcaDeviceCertificate {
+  id                        String                 @id @default(uuid())
+  businessLocationId        String                 @unique
+  privateKeyEncrypted       String                 @db.Text // AES-256-GCM encrypted PKCS8 PEM
+  publicKeyPem              String                 @db.Text
+  csrPem                    String?                @db.Text
+  status                    ZatcaCertificateStatus @default(KEY_GENERATED)
+  // Phase D fields (populated once we actually call ZATCA's onboarding APIs):
+  complianceRequestId       String? // returned alongside the compliance CSID, needed for the production CSID exchange
+  complianceCsid            String?                @db.Text
+  complianceSecretEncrypted String?
+  productionCsid            String?                @db.Text
+  productionSecretEncrypted String?
+  lastError                 String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+model CustomerGroup {
+  id               String     @id @default(uuid())
+  organizationId   String
+  nameEn           String
+  nameAr           String
+  description      String?
+  discountPercent  Decimal    @default(0) @db.Decimal(5, 2)
+  creditLimit      Decimal    @default(0) @db.Decimal(12, 2)
+  paymentTermsDays Int        @default(0)
+  priceListId      String? // negotiated pricing for this whole group (e.g. a corporate contract) - a customer's own priceListId wins over this
+  status           UserStatus @default(ACTIVE)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  // --- Monthly spend/volume caps (P8-3) - all null = unrestricted, matching Coupon's established
+  // all-null-unrestricted targeting convention. Enforced across the WHOLE group's combined FINAL
+  // sales in the current calendar month, checked at checkout in pos.service.ts. ---
+  maxAmountPerMonth   Decimal? @db.Decimal(12, 2)
+  maxInvoicesPerMonth Int?
+  maxQtyPerMonth      Decimal? @db.Decimal(12, 3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  priceList    PriceList?   @relation(fields: [priceListId], references: [id])
+  customers    Customer[]
+  coupons      Coupon[]
+  userRestrictions UserCustomerGroup[]
+
+  @@index([organizationId])
+}
+
+model Customer {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  code               String
+  nameEn             String
+  nameAr             String?
+  phone              String
+  altPhone           String?
+  email              String?
+  customerGroupId    String?
+  businessLocationId String?
+  priceListId        String? // wins over the customer group's price list when both are set
+  address            String?
+  city               String?
+  district           String?
+  postalCode         String?
+  vatNumber          String?
+  crNumber           String?
+  nationalAddress    String?
+  notes              String?
+  creditLimit        Decimal    @default(0) @db.Decimal(12, 2)
+  paymentTermsDays   Int        @default(0)
+  openingBalance     Decimal    @default(0) @db.Decimal(12, 2)
+  balance            Decimal    @default(0) @db.Decimal(12, 2) // positive = customer owes us
+  rewardPoints       Int        @default(0) // loyalty points balance - see LoyaltyTransaction for the earn/redeem ledger
+  cashBack           Decimal    @default(0) @db.Decimal(12, 2) // separate from rewardPoints (P8-2) - see CashbackTransaction for the grant/redeem ledger
+  approvalStatus     CustomerApprovalStatus @default(APPROVED) // P8-3 - only ever starts PENDING when Organization.customerApprovalRequired is on
+  status             UserStatus @default(ACTIVE)
+  createdBy          String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerGroup    CustomerGroup?    @relation(fields: [customerGroupId], references: [id])
+  businessLocation BusinessLocation? @relation(fields: [businessLocationId], references: [id])
+  priceList        PriceList?        @relation(fields: [priceListId], references: [id])
+  sales              Sale[]
+  payments           Payment[]
+  heldSales          HeldSale[]
+  compensations      Compensation[]
+  loyaltyTransactions LoyaltyTransaction[]
+  cashbackTransactions CashbackTransaction[]
+  bookings            Booking[]
+  sellReturns         SellReturn[]
+  coupons             Coupon[]
+  userRestrictions    UserCustomer[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([phone])
+  @@index([nameEn])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Product master data
+// ---------------------------------------------------------------------------
+
+model Category {
+  id             String     @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  code           String?
+  descriptionEn  String?
+  descriptionAr  String?
+  parentId       String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Category?    @relation("CategoryToParent", fields: [parentId], references: [id])
+  children     Category[]   @relation("CategoryToParent")
+  products     Product[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Brand {
+  id             String     @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  description    String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
+
+  @@index([organizationId])
+}
+
+model Unit {
+  id              String     @id @default(uuid())
+  organizationId  String
+  nameEn          String
+  nameAr          String
+  shortName       String
+  baseUnitId      String?
+  conversionRatio Decimal    @default(1) @db.Decimal(12, 4)
+  status          UserStatus @default(ACTIVE)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  baseUnit     Unit?        @relation("UnitToBase", fields: [baseUnitId], references: [id])
+  subUnits     Unit[]       @relation("UnitToBase")
+  products     Product[]
+  services     Service[]
+
+  @@index([organizationId])
+}
+
+model Tax {
+  id             String          @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  percentage     Decimal         @db.Decimal(5, 2)
+  taxType        String          @default("VAT")
+  categoryCode   TaxCategoryCode @default(S) // ZATCA UBL tax category code
+  isActive       Boolean         @default(true)
+  effectiveDate  DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
+  services     Service[]
+
+  @@index([organizationId])
+}
+
+model Product {
+  id                  String      @id @default(uuid())
+  organizationId      String
+  nameEn              String
+  nameAr              String
+  sku                 String
+  barcodeType         String      @default("CODE128")
+  barcode             String?
+  brandId             String?
+  unitId              String
+  categoryId          String?
+  descriptionEn       String?
+  descriptionAr       String?
+  image               String?
+  productType         ProductType @default(STANDARD)
+  manageStock         Boolean     @default(true)
+  alertQuantity       Decimal?    @db.Decimal(12, 3)
+  taxId               String?
+  sellingPriceTaxType TaxType     @default(EXCLUSIVE)
+  purchasePrice       Decimal     @default(0) @db.Decimal(12, 2)
+  sellingPrice        Decimal     @db.Decimal(12, 2)
+  status              UserStatus  @default(ACTIVE)
+  createdBy           String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  deletedAt           DateTime?
+
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand             Brand?                    @relation(fields: [brandId], references: [id])
+  unit              Unit                      @relation(fields: [unitId], references: [id])
+  category          Category?                 @relation(fields: [categoryId], references: [id])
+  tax               Tax?                      @relation(fields: [taxId], references: [id])
+  businessLocations ProductBusinessLocation[]
+  stocks            ProductStock[]
+  saleItems         SaleItem[]
+  inventoryTxns     InventoryTransaction[]
+  heldSaleItems     HeldSaleItem[]
+  priceListItems    PriceListItem[]
+  purchaseItems     PurchaseItem[]
+  stockTransfers    StockTransfer[]
+  stockAdjustmentItems StockAdjustmentItem[]
+
+  @@unique([organizationId, sku])
+  @@unique([organizationId, barcode])
+  @@index([organizationId])
+  @@index([nameEn])
+  @@index([status])
+}
+
+model ProductBusinessLocation {
+  productId          String
+  businessLocationId String
+  product            Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  businessLocation   BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@id([productId, businessLocationId])
+}
+
+model ProductStock {
+  id                 String   @id @default(uuid())
+  productId          String
+  businessLocationId String
+  quantity           Decimal  @default(0) @db.Decimal(12, 3)
+  updatedAt          DateTime @updatedAt
+
+  product          Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, businessLocationId])
+}
+
+model InventoryTransaction {
+  id                 String                   @id @default(uuid())
+  productId          String
+  businessLocationId String
+  type               InventoryTransactionType
+  quantity           Decimal                  @db.Decimal(12, 3) // signed: + increases stock, - decreases
+  balanceAfter       Decimal                  @db.Decimal(12, 3)
+  referenceType      String? // e.g. "SALE", "ADJUSTMENT"
+  referenceId        String?
+  note               String?
+  createdBy          String?
+  createdAt          DateTime                 @default(now())
+
+  product          Product          @relation(fields: [productId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User?            @relation(fields: [createdBy], references: [id])
+
+  @@index([productId])
+  @@index([businessLocationId])
+  @@index([createdAt])
+}
+
+enum StockTransferStatus {
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+// Two-step transfer (P6-5): shipping decrements the source immediately and creates this row as
+// IN_TRANSIT; destination stock is untouched until a separate receive step confirms the actual
+// quantity received (which may differ from what was sent) and moves the row to RECEIVED.
+model StockTransfer {
+  id                     String              @id @default(uuid())
+  organizationId         String
+  productId              String
+  fromBusinessLocationId String
+  toBusinessLocationId   String
+  quantitySent           Decimal             @db.Decimal(12, 3)
+  quantityReceived       Decimal?            @db.Decimal(12, 3)
+  status                 StockTransferStatus @default(IN_TRANSIT)
+  driverName             String?
+  vehicleNumber          String?
+  shipNote               String?
+  receiveNote            String?
+  createdBy              String
+  shippedAt              DateTime            @default(now())
+  receivedAt             DateTime?
+  receivedBy             String?
+
+  organization         Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product               Product          @relation(fields: [productId], references: [id])
+  fromBusinessLocation  BusinessLocation @relation("StockTransferFrom", fields: [fromBusinessLocationId], references: [id])
+  toBusinessLocation    BusinessLocation @relation("StockTransferTo", fields: [toBusinessLocationId], references: [id])
+  createdByUser         User             @relation("StockTransferCreatedBy", fields: [createdBy], references: [id])
+  receivedByUser        User?            @relation("StockTransferReceivedBy", fields: [receivedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([toBusinessLocationId])
+}
+
+enum StockAdjustmentLossType {
+  NORMAL
+  ABNORMAL
+}
+
+enum StockAdjustmentStatus {
+  CONFIRMED
+  REVERSED
+}
+
+// Grouped, multi-line stock adjustment (P8-4) - distinct from the single-product adjustStock()
+// above, which stays available for quick one-off corrections. This is for a batch count/write-off
+// covering several products at once, with loss classification and an optional cost-recovery
+// amount (e.g. insurance or a supplier credit for ABNORMAL/non-routine loss), and a reversal path
+// that writes a compensating InventoryTransaction rather than deleting anything - same "never
+// delete, only compensate" discipline as StockTransfer's cancelTransfer().
+model StockAdjustment {
+  id                   String                   @id @default(uuid())
+  organizationId       String
+  businessLocationId   String
+  adjustmentNumber     String? // human-readable, e.g. ADJ-000001 - claimed from BusinessLocation.lastAdjustmentSeq
+  adjustmentDate       DateTime                 @default(now())
+  lossType             StockAdjustmentLossType  @default(NORMAL)
+  totalAmountRecovered Decimal                  @default(0) @db.Decimal(12, 2) // meaningful only when lossType is ABNORMAL
+  status               StockAdjustmentStatus    @default(CONFIRMED)
+  notes                String?
+  createdBy            String
+  createdAt            DateTime                 @default(now())
+  reversedAt           DateTime?
+
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation      @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User                  @relation(fields: [createdBy], references: [id])
+  items            StockAdjustmentItem[]
+
+  @@unique([businessLocationId, adjustmentNumber])
+  @@index([organizationId])
+  @@index([businessLocationId])
+}
+
+model StockAdjustmentItem {
+  id                String  @id @default(uuid())
+  stockAdjustmentId String
+  productId         String
+  quantityChange    Decimal @db.Decimal(12, 3) // signed: + increases stock, - decreases
+  note              String?
+
+  stockAdjustment StockAdjustment @relation(fields: [stockAdjustmentId], references: [id], onDelete: Cascade)
+  product         Product         @relation(fields: [productId], references: [id])
+
+  @@index([stockAdjustmentId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Services (core laundry offering)
+// ---------------------------------------------------------------------------
+
+model ServiceCategory {
+  id             String     @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  description    String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  services     Service[]
+
+  @@index([organizationId])
+}
+
+model Service {
+  id                       String     @id @default(uuid())
+  organizationId           String
+  nameEn                   String
+  nameAr                   String
+  code                     String
+  categoryId               String?
+  unitId                   String
+  price                    Decimal    @db.Decimal(12, 2)
+  taxId                    String?
+  estimatedProcessingHours Int        @default(24)
+  descriptionEn            String?
+  descriptionAr            String?
+  status                   UserStatus @default(ACTIVE)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category          ServiceCategory?          @relation(fields: [categoryId], references: [id])
+  unit              Unit                      @relation(fields: [unitId], references: [id])
+  tax               Tax?                      @relation(fields: [taxId], references: [id])
+  businessLocations ServiceBusinessLocation[]
+  saleItems         SaleItem[]
+  heldSaleItems     HeldSaleItem[]
+  priceListItems    PriceListItem[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([nameEn])
+  @@index([status])
+}
+
+model ServiceBusinessLocation {
+  serviceId          String
+  businessLocationId String
+  service            Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  businessLocation   BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, businessLocationId])
+}
+
+// ---------------------------------------------------------------------------
+// Sales / POS
+// ---------------------------------------------------------------------------
+
+model PaymentMethod {
+  id             String  @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  code           String // CASH, CARD, ONLINE
+  isActive       Boolean @default(true)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Sale {
+  id                 String        @id @default(uuid()) // also serves as the ZATCA invoice UUID (cbc:UUID)
+  organizationId     String
+  invoiceNumber      String? // human-readable, e.g. INV-000001 - NOT the ZATCA ICV. Null on a DRAFT quote until confirmQuote() assigns it.
+  quoteNumber        String? // e.g. QT-000001 - set only on a DRAFT quote (or a sale later confirmed from one); separate sequence from invoiceNumber
+  businessLocationId String
+  customerId         String
+  saleDate           DateTime      @default(now())
+  estimatedReadyAt   DateTime? // max(estimatedProcessingHours) across service lines, from saleDate - null if no service line has one
+  status             SaleStatus    @default(FINAL)
+  paymentStatus      PaymentStatus @default(DUE)
+  subtotal           Decimal       @db.Decimal(12, 2)
+  discountAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount          Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount        Decimal       @db.Decimal(12, 2)
+  paidAmount         Decimal       @default(0) @db.Decimal(12, 2)
+  dueAmount          Decimal       @default(0) @db.Decimal(12, 2)
+  lastReminderSentAt DateTime? // last time paymentReminder.job.ts sent a PAYMENT_REMINDER SMS for this invoice
+  notes              String?
+  createdBy          String
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  cancelledAt        DateTime?
+
+  registerSessionId   String? // which cashier session this sale was rung up under, if one was open
+  couponId            String?
+  couponDiscountAmount Decimal    @default(0) @db.Decimal(12, 2) // server-computed - never trust a client-sent discount
+  invoiceDiscountAmount Decimal  @default(0) @db.Decimal(12, 2) // server-computed manual cashier discount (fixed or %), separate from couponDiscountAmount
+  shippingAmount        Decimal  @default(0) @db.Decimal(12, 2) // flat delivery/handling charge, taxed at the invoice's effective VAT rate like the rest of subtotal
+
+  // --- ZATCA (Fatoora) e-invoicing fields - see docs/POS-ZATCA-PLAN.md Phase A/B/C ---
+  // All null on a DRAFT quote - the whole ZATCA pipeline (ICV claim, hash chain, signing) only
+  // runs once confirmQuote() promotes the quote to a real FINAL invoice.
+  icv                 Int? // sequential Invoice Counter Value, unique per business location
+  previousInvoiceHash String? // PIH - hash of the prior invoice in this location's chain ("MA==" / base64("0") for the first)
+  invoiceHash         String? // hash of this invoice's canonical content (XML-based once a signing key exists, else Phase A's JSON fallback)
+  invoiceTypeCode     ZatcaInvoiceType     @default(SIMPLIFIED) // STANDARD (B2B, needs Clearance) vs SIMPLIFIED (B2C, needs Reporting)
+  transactionTypeCode ZatcaTransactionType @default(INVOICE)
+  qrCodeBase64        String? // TLV Base64 QR payload - 5 or 8 fields depending on whether this invoice was signed
+  clearanceStatus     ZatcaClearanceStatus @default(NOT_SUBMITTED)
+  xmlContent          String?              @db.Text // canonical UBL 2.1 XML, only set once a signing key exists (Phase C)
+  digitalSignature    String?              @db.Text // ECDSA signature over the invoice hash, base64
+  publicKeyPem        String?              @db.Text // signer's public key at time of signing (for QR field 8 / later verification)
+  zatcaSubmittedAt    DateTime? // when we last called Clearance/Reporting for this invoice (Phase D)
+  zatcaResponseRaw    Json? // full raw response from ZATCA's Clearance/Reporting API, for audit
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation  @relation(fields: [businessLocationId], references: [id])
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  createdByUser    User              @relation(fields: [createdBy], references: [id])
+  registerSession  RegisterSession?  @relation(fields: [registerSessionId], references: [id])
+  coupon           Coupon?           @relation(fields: [couponId], references: [id])
+  items               SaleItem[]
+  payments            Payment[]
+  compensations       Compensation[]
+  loyaltyTransactions LoyaltyTransaction[]
+  cashbackTransactions CashbackTransaction[]
+  sellReturns         SellReturn[]
+
+  // Scoped to the branch, not the org - invoiceNumber/quoteNumber are now claimed from a
+  // per-BusinessLocation counter (P7-5), so two different branches can legitimately produce the
+  // same number (e.g. both branches' first invoice is "INV-000001").
+  @@unique([businessLocationId, invoiceNumber])
+  @@unique([businessLocationId, quoteNumber])
+  @@unique([businessLocationId, icv])
+  @@index([organizationId])
+  @@index([businessLocationId])
+  @@index([customerId])
+  @@index([saleDate])
+  @@index([status])
+  @@index([paymentStatus])
+}
+
+model SaleItem {
+  id                String                @id @default(uuid())
+  saleId            String
+  productId         String?
+  serviceId         String?
+  descriptionEn     String
+  descriptionAr     String?
+  quantity          Decimal               @db.Decimal(12, 3)
+  unitPrice         Decimal               @db.Decimal(12, 2)
+  taxPercent        Decimal               @default(0) @db.Decimal(5, 2)
+  taxAmount         Decimal               @default(0) @db.Decimal(12, 2)
+  discountAmount    Decimal               @default(0) @db.Decimal(12, 2)
+  subtotal          Decimal               @db.Decimal(12, 2) // (qty * unitPrice) - discount, excl. tax
+  total             Decimal               @db.Decimal(12, 2) // subtotal + tax
+  taxCategoryCode   String                @default("S") // ZATCA UBL tax category (S/Z/E/...) - persisted so confirmQuote() can rebuild the XML without re-deriving it from the product/service's current tax rate
+  fulfillmentStatus ItemFulfillmentStatus @default(PENDING) // per-garment tracking, independent of the invoice's own SaleStatus
+  statusUpdatedAt   DateTime?
+
+  sale             Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product          Product?                @relation(fields: [productId], references: [id])
+  service          Service?                @relation(fields: [serviceId], references: [id])
+  statusHistory    SaleItemStatusHistory[]
+  compensationItems CompensationItem[]
+  sellReturnItems  SellReturnItem[]
+
+  @@index([saleId])
+  @@index([fulfillmentStatus])
+}
+
+// A customer returning goods/services for a refund or credit - distinct from Compensation
+// (the shop paying out for its own mistake). Deliberately does NOT mutate the parent Sale: that
+// invoice's hash/signature were computed at checkout and must stay exactly as issued, so a
+// return lives as its own record referencing the original, the same way a real credit note
+// would. `refundedAmount` may be less than `totalAmount` (e.g. store credit instead of cash) -
+// the customer balance adjustment nets the two (see sellReturn.service.ts).
+model SellReturn {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  saleId             String
+  customerId         String
+  businessLocationId String
+  creditNoteNumber   String? // human-readable, e.g. CN-000001 - claimed from BusinessLocation.lastReturnSeq (P7-5)
+  returnDate         DateTime @default(now())
+  subtotal           Decimal  @db.Decimal(12, 2)
+  taxAmount          Decimal  @db.Decimal(12, 2)
+  totalAmount        Decimal  @db.Decimal(12, 2)
+  refundedAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  notes              String?
+  createdBy          String
+  createdAt          DateTime @default(now())
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale             Sale             @relation(fields: [saleId], references: [id])
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  items            SellReturnItem[]
+
+  @@unique([businessLocationId, creditNoteNumber])
+  @@index([organizationId])
+  @@index([saleId])
+  @@index([customerId])
+}
+
+model SellReturnItem {
+  id           String           @id @default(uuid())
+  sellReturnId String
+  saleItemId   String
+  quantity     Decimal          @db.Decimal(12, 3)
+  unitPrice    Decimal          @db.Decimal(12, 2)
+  taxPercent   Decimal          @db.Decimal(5, 2)
+  taxAmount    Decimal          @db.Decimal(12, 2)
+  subtotal     Decimal          @db.Decimal(12, 2)
+  total        Decimal          @db.Decimal(12, 2)
+  reason       SellReturnReason
+  note         String?
+
+  sellReturn SellReturn @relation(fields: [sellReturnId], references: [id], onDelete: Cascade)
+  saleItem   SaleItem   @relation(fields: [saleItemId], references: [id])
+
+  @@index([sellReturnId])
+  @@index([saleItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers / Purchasing - the reference site tracks suppliers as a Business Partner type
+// (Purchase Due / Purchase Return / Advance / Opening Balance columns) and tracks product cost
+// at the product level (Product.purchasePrice) rather than through a dedicated purchase-order
+// screen - no such screen exists in its nav and the /purchases route 403s even to an admin
+// login. A Purchase record here is what actually produces a non-zero "Purchase Due": it receives
+// stock from a supplier and increases what the business owes them, mirroring the SellReturn
+// pattern used for sales (a PurchaseReturn is the reverse, sending stock back and reducing the
+// balance owed).
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  code               String
+  nameEn             String
+  nameAr             String?
+  phone              String
+  altPhone           String?
+  email              String?
+  businessLocationId String?
+  address            String?
+  city               String?
+  district           String?
+  postalCode         String?
+  vatNumber          String?
+  crNumber           String?
+  nationalAddress    String?
+  notes              String?
+  creditLimit        Decimal    @default(0) @db.Decimal(12, 2)
+  paymentTermsDays   Int        @default(0)
+  openingBalance     Decimal    @default(0) @db.Decimal(12, 2)
+  balance            Decimal    @default(0) @db.Decimal(12, 2) // positive = we owe the supplier (Purchase Due)
+  status             UserStatus @default(ACTIVE)
+  createdBy          String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation? @relation(fields: [businessLocationId], references: [id])
+  purchases        Purchase[]
+  purchaseReturns  PurchaseReturn[]
+  expenses         Expense[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([phone])
+  @@index([nameEn])
+  @@index([status])
+}
+
+model Purchase {
+  id                 String         @id @default(uuid())
+  organizationId     String
+  referenceNumber    String // human-readable, e.g. PUR-000001
+  supplierId         String
+  businessLocationId String
+  purchaseDate       DateTime       @default(now())
+  status             PurchaseStatus @default(RECEIVED)
+  subtotal           Decimal        @db.Decimal(12, 2)
+  taxAmount          Decimal        @default(0) @db.Decimal(12, 2)
+  totalAmount        Decimal        @db.Decimal(12, 2)
+  paidAmount         Decimal        @default(0) @db.Decimal(12, 2)
+  notes              String?
+  createdBy          String
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier         Supplier         @relation(fields: [supplierId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  items            PurchaseItem[]
+  purchaseReturns  PurchaseReturn[]
+
+  @@unique([organizationId, referenceNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+  @@index([businessLocationId])
+}
+
+model PurchaseItem {
+  id         String  @id @default(uuid())
+  purchaseId String
+  productId  String
+  quantity   Decimal @db.Decimal(12, 3)
+  unitCost   Decimal @db.Decimal(12, 2)
+  taxPercent Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount  Decimal @default(0) @db.Decimal(12, 2)
+  subtotal   Decimal @db.Decimal(12, 2)
+  total      Decimal @db.Decimal(12, 2)
+
+  purchase            Purchase             @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product             Product              @relation(fields: [productId], references: [id])
+  purchaseReturnItems PurchaseReturnItem[]
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model PurchaseReturn {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  purchaseId         String
+  supplierId         String
+  businessLocationId String
+  returnDate         DateTime @default(now())
+  subtotal           Decimal  @db.Decimal(12, 2)
+  taxAmount          Decimal  @db.Decimal(12, 2)
+  totalAmount        Decimal  @db.Decimal(12, 2)
+  refundedAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  notes              String?
+  createdBy          String
+  createdAt          DateTime @default(now())
+
+  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchase         Purchase             @relation(fields: [purchaseId], references: [id])
+  supplier         Supplier             @relation(fields: [supplierId], references: [id])
+  businessLocation BusinessLocation     @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User                 @relation(fields: [createdBy], references: [id])
+  items            PurchaseReturnItem[]
+
+  @@index([organizationId])
+  @@index([purchaseId])
+  @@index([supplierId])
+}
+
+model PurchaseReturnItem {
+  id               String               @id @default(uuid())
+  purchaseReturnId String
+  purchaseItemId   String
+  quantity         Decimal              @db.Decimal(12, 3)
+  unitCost         Decimal              @db.Decimal(12, 2)
+  taxPercent       Decimal              @db.Decimal(5, 2)
+  taxAmount        Decimal              @db.Decimal(12, 2)
+  subtotal         Decimal              @db.Decimal(12, 2)
+  total            Decimal              @db.Decimal(12, 2)
+  reason           PurchaseReturnReason
+  note             String?
+
+  purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  purchaseItem   PurchaseItem   @relation(fields: [purchaseItemId], references: [id])
+
+  @@index([purchaseReturnId])
+  @@index([purchaseItemId])
+}
+
+// Flat taxonomy for Expense (P8-1) - mirrors ServiceCategory's shape exactly (bilingual name,
+// optional description, org-scoped, no budget/target fields or hierarchy).
+model ExpenseCategory {
+  id             String     @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  code           String?
+  description    String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenses     Expense[]
+
+  @@index([organizationId])
+}
+
+// A categorized, taxed, optionally-recurring outflow (P8-1) - modeled on Purchase's shape
+// (single supplier, flat paidAmount, no Payment sub-table) but using Sale's due/partial/paid
+// PaymentStatus lifecycle, since Purchase itself has no paymentStatus field.
+model Expense {
+  id                    String        @id @default(uuid())
+  organizationId        String
+  expenseNumber         String? // human-readable, e.g. EXP-000001 - claimed from BusinessLocation.lastExpenseSeq
+  categoryId            String
+  businessLocationId    String
+  supplierId            String?
+  expenseDate           DateTime      @default(now())
+  subtotal              Decimal       @db.Decimal(12, 2)
+  taxPercent             Decimal      @default(0) @db.Decimal(5, 2) // single flat rate, no line items
+  taxAmount              Decimal      @default(0) @db.Decimal(12, 2)
+  totalAmount            Decimal      @db.Decimal(12, 2)
+  paidAmount              Decimal     @default(0) @db.Decimal(12, 2)
+  dueAmount               Decimal     @default(0) @db.Decimal(12, 2)
+  paymentStatus           PaymentStatus @default(DUE)
+  isRecurring             Boolean     @default(false)
+  recurringIntervalDays   Int?
+  nextRecurrenceAt        DateTime?
+  receiptUrl              String?
+  notes                   String?
+  createdBy               String
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category         ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  supplier         Supplier?        @relation(fields: [supplierId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+
+  @@unique([businessLocationId, expenseNumber])
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([businessLocationId])
+}
+
+// A periodic branch reconciliation snapshot - counts/totals are computed server-side at save
+// time from live Sale/SaleItem state (see inventoryPosting.service.ts), not entered by hand, so
+// the record is a trustworthy audit trail rather than something a cashier could fudge.
+model InventoryPosting {
+  id                 String                  @id @default(uuid())
+  organizationId     String
+  businessLocationId String
+  postingDate        DateTime                @default(now())
+  status             InventoryPostingStatus  @default(PENDING)
+  cashInDrawer       Decimal                 @default(0) @db.Decimal(12, 2)
+  inStockCount       Int                     @default(0)
+  inStockTotal       Decimal                 @default(0) @db.Decimal(12, 2)
+  inWarehouseCount   Int                     @default(0)
+  inWarehouseTotal   Decimal                 @default(0) @db.Decimal(12, 2)
+  outStockCount      Int                     @default(0)
+  outStockTotal      Decimal                 @default(0) @db.Decimal(12, 2)
+  notes              String?
+  createdBy          String
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([businessLocationId])
+}
+
+model Message {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  fromBusinessLocationId String
+  toBusinessLocationId String
+  subject              String
+  content              String   @db.Text
+  parentMessageId      String?
+  createdBy            String
+  createdAt            DateTime @default(now())
+
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fromBusinessLocation BusinessLocation @relation("MessageFromLocation", fields: [fromBusinessLocationId], references: [id])
+  toBusinessLocation   BusinessLocation @relation("MessageToLocation", fields: [toBusinessLocationId], references: [id])
+  createdByUser        User             @relation(fields: [createdBy], references: [id])
+  parentMessage        Message?         @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  replies              Message[]        @relation("MessageReplies")
+
+  reads MessageRead[]
+
+  @@index([organizationId])
+  @@index([fromBusinessLocationId])
+  @@index([toBusinessLocationId])
+}
+
+// Per-user read state for a Message - a message is "unread" for a user until they open it, mirroring
+// the reference site's user_messages pivot (this is what backs its dashboard unread-count badge).
+model MessageRead {
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+}
+
+// Audit trail of every fulfillment-status change on a line item - who changed it, when, from/to.
+model SaleItemStatusHistory {
+  id         String                 @id @default(uuid())
+  saleItemId String
+  fromStatus ItemFulfillmentStatus?
+  toStatus   ItemFulfillmentStatus
+  changedBy  String
+  changedAt  DateTime               @default(now())
+  note       String?
+
+  saleItem      SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+  changedByUser User     @relation(fields: [changedBy], references: [id])
+
+  @@index([saleItemId])
+}
+
+// A claim for a lost, damaged, or badly delayed garment - initiated against a specific sale
+// item where possible (a whole sale if the item can't be pinned down), tracked through to a
+// paid/rejected resolution. Distinct from a coupon/discount: this is the shop compensating the
+// customer for its own mistake, not a promotional price break.
+enum CompensationResolutionType {
+  CASH
+  POINTS
+  COUPON
+  CASHBACK
+}
+
+model Compensation {
+  id                 String                      @id @default(uuid())
+  organizationId     String
+  saleId             String
+  customerId         String
+  businessLocationId String
+  description        String?
+  // Sum of CompensationItem.claimedAmount/approvedAmount (P8-6) - denormalized like
+  // SellReturn.totalAmount, computed in create()/resolve(), not independently editable.
+  claimedAmount      Decimal                     @db.Decimal(12, 2)
+  approvedAmount     Decimal?                    @db.Decimal(12, 2)
+  status             CompensationStatus          @default(PENDING)
+  // How a PAID claim was actually settled - drives the auto-trigger in compensation.service.ts's
+  // resolve(): POINTS credits loyalty points, COUPON auto-generates a single-use coupon,
+  // CASHBACK grants a cashback balance (P8-2). CASH stays a plain status flip (no Expense
+  // posting wired here yet, even though an Expense model now exists - see Tier 3 of the audit).
+  resolutionType     CompensationResolutionType?
+  resolutionValue    Decimal?                    @db.Decimal(12, 2)
+  resolutionCouponId String?
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  createdBy          String
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale             Sale             @relation(fields: [saleId], references: [id])
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User             @relation("CompensationCreatedBy", fields: [createdBy], references: [id])
+  resolvedByUser   User?            @relation("CompensationResolvedBy", fields: [resolvedBy], references: [id])
+  resolutionCoupon Coupon?          @relation(fields: [resolutionCouponId], references: [id])
+  cashbackTransactions CashbackTransaction[]
+  items            CompensationItem[]
+
+  @@index([organizationId])
+  @@index([saleId])
+  @@index([customerId])
+  @@index([status])
+}
+
+// Line-item claim within a Compensation (P8-6) - mirrors SellReturnItem's shape exactly.
+// Reason lives here (per-item), not on the header, since different items in the same claim can
+// have different reasons (one lost, one damaged). Header claimedAmount/approvedAmount are the
+// sum of these rows.
+model CompensationItem {
+  id             String              @id @default(uuid())
+  compensationId String
+  saleItemId     String
+  quantity       Decimal             @db.Decimal(12, 3)
+  reason         CompensationReason
+  claimedAmount  Decimal             @db.Decimal(12, 2)
+  approvedAmount Decimal?            @db.Decimal(12, 2)
+
+  compensation Compensation @relation(fields: [compensationId], references: [id], onDelete: Cascade)
+  saleItem     SaleItem     @relation(fields: [saleItemId], references: [id])
+
+  @@index([compensationId])
+  @@index([saleItemId])
+}
+
+// Earn/redeem/adjustment ledger backing Customer.rewardPoints - the balance column is a
+// denormalized cache updated alongside each row so reads don't need to sum the whole history.
+model LoyaltyTransaction {
+  id             String                 @id @default(uuid())
+  organizationId String
+  customerId     String
+  saleId         String?
+  type           LoyaltyTransactionType
+  points         Int // signed: + earned/adjusted up, - redeemed/adjusted down
+  balanceAfter   Int
+  note           String?
+  createdBy      String?
+  createdAt      DateTime               @default(now())
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  sale          Sale?        @relation(fields: [saleId], references: [id])
+  createdByUser User?        @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([customerId])
+}
+
+enum CashbackTransactionType {
+  GRANT // manual staff grant or compensation-settlement grant
+  REDEEM // spent as a POS payment tender
+  ADJUSTMENT // manual balance correction
+}
+
+enum CustomerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Earn/redeem/adjustment ledger backing Customer.cashBack (P8-2) - same denormalized-balance
+// shape as LoyaltyTransaction, but explicitly a separate feature/balance from reward points.
+model CashbackTransaction {
+  id             String                  @id @default(uuid())
+  organizationId String
+  customerId     String
+  saleId         String? // set when REDEEM happened at POS checkout
+  compensationId String? // set when GRANT came from a compensation settlement
+  type           CashbackTransactionType
+  amount         Decimal                 @db.Decimal(12, 2) // signed: + granted/adjusted up, - redeemed/adjusted down
+  balanceAfter   Decimal                 @db.Decimal(12, 2)
+  expiresAt      DateTime?
+  note           String?
+  createdBy      String?
+  createdAt      DateTime                @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  sale          Sale?         @relation(fields: [saleId], references: [id])
+  compensation  Compensation? @relation(fields: [compensationId], references: [id])
+  createdByUser User?         @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([customerId])
+}
+
+// A scheduled home pickup or delivery appointment. `saleId` links it to the invoice once the
+// order it represents has actually been rung up - a booking on its own carries no charge.
+model Booking {
+  id                 String        @id @default(uuid())
+  organizationId     String
+  businessLocationId String
+  customerId         String
+  type               BookingType
+  scheduledAt        DateTime
+  address            String?
+  status             BookingStatus @default(REQUESTED)
+  saleId             String?
+  notes              String?
+  createdBy          String
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([businessLocationId])
+  @@index([customerId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+// One SMS provider configuration per tenant - each laundry business has its own Unifonic
+// account (unlike Moyasar billing, which is the platform's own collection infrastructure).
+// Starts disabled/unconfigured, so every send falls into NotificationLog's TEST mode until the
+// tenant enters real credentials here - never blocks or breaks the feature it's attached to.
+enum NotificationTrigger {
+  ORDER_READY
+  ORDER_DELIVERED
+  NEW_SALE
+  PAYMENT_RECEIVED
+  PAYMENT_REMINDER
+  COMPENSATION_RESOLVED
+}
+
+// Admin-editable, bilingual, per-trigger SMS text with {placeholder} substitution - replaces the
+// two hardcoded English-only strings that used to live inline in sale.service.ts. See
+// notifications.service.ts's sendTemplatedSms().
+model NotificationTemplate {
+  id             String              @id @default(uuid())
+  organizationId String
+  trigger        NotificationTrigger
+  messageEn      String              @db.Text
+  messageAr      String              @db.Text
+  isEnabled      Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, trigger])
+}
+
+model NotificationSettings {
+  id              String               @id @default(uuid())
+  organizationId  String               @unique
+  provider        NotificationProvider @default(UNIFONIC)
+  appSidEncrypted String? // Unifonic AppSid, encrypted at rest (secretBox, same key as ZATCA signing keys)
+  senderId        String?
+  enabled         Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model NotificationLog {
+  id             String               @id @default(uuid())
+  organizationId String
+  toPhone        String
+  message        String                @db.Text
+  status         NotificationStatus
+  provider       NotificationProvider
+  referenceType  String? // e.g. "SALE"
+  referenceId    String?
+  errorMessage   String?
+  createdAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+model Payment {
+  id                 String      @id @default(uuid())
+  saleId             String?
+  customerId         String
+  businessLocationId String
+  amount             Decimal     @db.Decimal(12, 2)
+  paymentMethodId    String
+  type               PaymentType @default(SALE_PAYMENT)
+  referenceNumber    String?
+  paymentDate        DateTime    @default(now())
+  notes              String?
+  createdBy          String
+  createdAt          DateTime    @default(now())
+
+  sale             Sale?            @relation(fields: [saleId], references: [id])
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  paymentMethod    PaymentMethod    @relation(fields: [paymentMethodId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+
+  @@index([saleId])
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// Register sessions - cashier opens a drawer with a starting float, closes it at end of shift
+// with an expected-vs-counted cash reconciliation. Attaching a sale to a session is optional -
+// checkout still works with no register open, so this never blocks existing POS usage.
+// ---------------------------------------------------------------------------
+
+model RegisterSession {
+  id                  String                 @id @default(uuid())
+  organizationId      String
+  businessLocationId  String
+  openedBy            String
+  openedAt            DateTime               @default(now())
+  openingCashAmount   Decimal                @default(0) @db.Decimal(12, 2)
+  closedBy            String?
+  closedAt            DateTime?
+  expectedCashAmount  Decimal?               @db.Decimal(12, 2) // derived from the RegisterTransaction ledger: sum(CREDIT) - sum(DEBIT)
+  countedCashAmount   Decimal?               @db.Decimal(12, 2) // what the cashier actually counted at close
+  cashDifference      Decimal?               @db.Decimal(12, 2) // countedCashAmount - expectedCashAmount
+  denominations       Json?                  // optional bill/coin counts captured at close, e.g. {"500": 1, "100": 3, ...}
+  notes               String?
+  status              RegisterSessionStatus  @default(OPEN)
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  openedByUser     User             @relation("RegisterSessionOpenedBy", fields: [openedBy], references: [id])
+  closedByUser     User?            @relation("RegisterSessionClosedBy", fields: [closedBy], references: [id])
+  sales            Sale[]
+  transactions     RegisterTransaction[]
+
+  @@index([organizationId])
+  @@index([businessLocationId])
+  @@index([status])
+}
+
+enum RegisterTransactionType {
+  CREDIT
+  DEBIT
+}
+
+// Every cash movement through an open drawer - the opening float, cash sale payments, cash
+// refunds - is a ledger row here. expectedCashAmount at close is derived by summing these rather
+// than reconstructed from Payment rows, so refunds (type DEBIT) are never silently missed.
+model RegisterTransaction {
+  id                String                   @id @default(uuid())
+  registerSessionId String
+  type              RegisterTransactionType
+  amount            Decimal                  @db.Decimal(12, 2) // always positive; type carries the sign
+  paymentMethod     String
+  referenceType     String?
+  referenceId       String?
+  note              String?
+  createdAt         DateTime                 @default(now())
+
+  registerSession RegisterSession @relation(fields: [registerSessionId], references: [id], onDelete: Cascade)
+
+  @@index([registerSessionId])
+}
+
+// ---------------------------------------------------------------------------
+// Held ("suspended") sales - a cart parked mid-build so the cashier can serve another customer
+// and resume later. Persisted server-side (not just browser memory) so it survives a refresh,
+// a different terminal, or the cashier logging out and back in.
+// ---------------------------------------------------------------------------
+
+model HeldSale {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  businessLocationId String
+  customerId         String?
+  label              String
+  note               String?
+  createdBy          String
+  createdAt          DateTime @default(now())
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  customer         Customer?        @relation(fields: [customerId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  items            HeldSaleItem[]
+
+  @@index([organizationId])
+  @@index([businessLocationId])
+}
+
+model HeldSaleItem {
+  id             String  @id @default(uuid())
+  heldSaleId     String
+  productId      String?
+  serviceId      String?
+  descriptionEn  String
+  descriptionAr  String?
+  quantity       Decimal @db.Decimal(12, 3)
+  unitPrice      Decimal @db.Decimal(12, 2)
+  taxPercent     Decimal @default(0) @db.Decimal(5, 2)
+  taxType        TaxType @default(EXCLUSIVE)
+  discountAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  heldSale HeldSale @relation(fields: [heldSaleId], references: [id], onDelete: Cascade)
+  product  Product? @relation(fields: [productId], references: [id])
+  service  Service? @relation(fields: [serviceId], references: [id])
+
+  @@index([heldSaleId])
+}
+
+// ---------------------------------------------------------------------------
+// Coupons - redeemable discount codes. Validity and the discount amount are always recomputed
+// and applied server-side at checkout; the client only ever sends the code, never the amount.
+// ---------------------------------------------------------------------------
+
+model Coupon {
+  id                String             @id @default(uuid())
+  organizationId    String
+  code              String
+  discountMode      CouponDiscountMode
+  discountValue     Decimal            @db.Decimal(12, 2)
+  minPurchaseAmount Decimal            @default(0) @db.Decimal(12, 2)
+  maxUses           Int? // null = unlimited (org-wide total)
+  usedCount         Int                @default(0)
+  validFrom         DateTime?
+  validUntil        DateTime?
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Targeting - all null = unrestricted (matches the existing org-wide default). Deliberately no
+  // category/product targeting here - that requires restructuring discount math from cart-level to
+  // per-line, the same undertaking as the Promotion engine (Tier 3/4), not a small addition.
+  businessLocationId  String?
+  customerId          String?
+  customerGroupId     String?
+  maxUsesPerCustomer  Int? // null = unlimited (per-customer)
+  maxDiscountAmount   Decimal? @db.Decimal(12, 2) // ceiling on the computed discount - only meaningful for PERCENT mode
+
+  organization            Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation        BusinessLocation? @relation(fields: [businessLocationId], references: [id])
+  customer                Customer?         @relation(fields: [customerId], references: [id])
+  customerGroup           CustomerGroup?    @relation(fields: [customerGroupId], references: [id])
+  sales                   Sale[]
+  compensationResolutions Compensation[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([businessLocationId])
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// Price lists - a customer (or their customer group) can be pinned to negotiated pricing
+// instead of the shared catalog price. A customer's own list wins over their group's; no list
+// on either falls back to the product/service's normal price - see pos.service.ts priceLine().
+// ---------------------------------------------------------------------------
+
+model PriceList {
+  id             String   @id @default(uuid())
+  organizationId String
+  nameEn         String
+  nameAr         String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items          PriceListItem[]
+  customers      Customer[]
+  customerGroups CustomerGroup[]
+  defaultForLocations BusinessLocation[]
+
+  @@unique([organizationId, nameEn])
+  @@index([organizationId])
+}
+
+model PriceListItem {
+  id          String  @id @default(uuid())
+  priceListId String
+  productId   String?
+  serviceId   String?
+  price       Decimal @db.Decimal(12, 2)
+
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  product   Product?  @relation(fields: [productId], references: [id])
+  service   Service?  @relation(fields: [serviceId], references: [id])
+
+  @@unique([priceListId, productId])
+  @@unique([priceListId, serviceId])
+  @@index([priceListId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String // e.g. "CREATE", "UPDATE", "DELETE", "LOGIN"
+  module         String // e.g. "products", "sales"
+  entityId       String?
+  oldValues      Json?
+  newValues      Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([module])
+  @@index([entityId])
+  @@index([createdAt])
+}
