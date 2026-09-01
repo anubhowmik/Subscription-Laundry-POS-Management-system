@@ -1,71 +1,98 @@
 # Saudi Laundry Management System
 
-Multi-branch laundry ERP for Saudi Arabia: POS, laundry orders, inventory, customers,
-Arabic/English + RTL/LTR, VAT-aware invoicing. Built per `Saudi Laundry Management System -
-Specification.pdf`.
+A multi-tenant SaaS platform for running a laundry business in Saudi Arabia — point of
+sale, orders, inventory, customers, staff & permissions, and ZATCA (Fatoora) e-invoicing.
+Fully bilingual (Arabic/English, RTL/LTR) and VAT-aware throughout.
 
-## Status
+The product is organized as three applications, launched from a public Home page:
 
-**Phases 1–6 of the spec's own roadmap are done**: project setup, auth/RBAC, business
-locations, master data (customers, products, services, categories, brands, units, taxes),
-inventory (stock tracking + movement history), and Sales/POS. Everything below that
-(laundry order workflow, delivery, quotations, promotions, accounting, CRM, SAP B1) is not
-built yet — those are separate phases we build next.
+- **POS Laundry** — point of sale, orders, customers, inventory, purchases, expenses,
+  bookings, reports
+- **Users & Rules** — staff accounts, roles & permissions, per-app access control,
+  subscription & per-seat licensing
+- **ZATCA KSA** — Saudi e-invoicing compliance certificates per branch
 
-**POS is also ZATCA (Fatoora) e-invoicing ready through Phase D**: hash-chained invoices, QR
-codes, EC key generation, CSR generation, real ECDSA digital signatures, and a Compliance/
-Production CSID + Clearance/Reporting API client that's confirmed reachable against ZATCA's
-real sandbox host — see [`docs/POS-ZATCA-PLAN.md`](docs/POS-ZATCA-PLAN.md) for exactly what's
-verified vs. what's still blocked on a real Fatoora portal registration (needed to get a real
-OTP and go further).
+New organizations get a 7-day free trial (unlimited seats during the trial) that starts
+once the signup email is verified. After the trial, the org subscribes to a single base
+plan (monthly/annual); additional user seats beyond the plan's included seat are a
+one-time purchase, not a recurring charge.
 
-- `backend/` — Node.js + Express + TypeScript + Prisma + PostgreSQL
-- `frontend/` — React + Vite + TypeScript + Tailwind + i18next (Arabic/English, RTL/LTR)
+## Tech stack
 
-## Prerequisites
+- **Backend**: Node.js, Express, TypeScript, Prisma, PostgreSQL
+- **Frontend**: React, Vite, TypeScript, Tailwind CSS, i18next (Arabic/English, RTL/LTR)
 
-- Node.js 18+ (you have v24 installed)
-- PostgreSQL running locally (already configured against your instance)
+## Getting started
 
-## Running in VS Code
+### Prerequisites
 
-1. **Open the project**: `File > Open Folder…` → select `D:\Claude\laundry-management-system`.
-2. Install the recommended extensions when prompted, or manually: **Prisma** (Prisma.prisma),
-   **Tailwind CSS IntelliSense**, **ESLint**.
-3. Open **two terminals** (`` Ctrl+` ``, then click the `+` to split) — one for the backend,
-   one for the frontend. Both `npm install`s are already done, so:
+- Node.js 18+
+- PostgreSQL, running locally (or reachable) on port 5432
 
-   **Terminal 1 — backend**
-   ```bash
-   cd backend
-   npm run dev
-   ```
-   Runs on http://localhost:4000. Swagger docs at http://localhost:4000/api/docs.
+### 1. Clone and install
 
-   **Terminal 2 — frontend**
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-   Runs on http://localhost:5173 — open this in your browser.
+```bash
+git clone <this-repo-url>
+cd laundry-management-system
+npm install --prefix backend
+npm install --prefix frontend
+```
 
-4. **Login**: username `admin`, password `ChangeMe123!` (from `backend/.env`,
-   `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` — change this before going anywhere near
-   production).
+### 2. Configure environment variables
 
-`backend/.env` also needs `ZATCA_ENCRYPTION_KEY` (a base64 32-byte key used to encrypt EC
-private keys at rest) — already set for this environment; regenerate with
-`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` if you ever
-rotate it.
+```bash
+cp backend/.env.example backend/.env
+```
 
-### If you ever need to reset the database
+Edit `backend/.env` and set:
+- `DATABASE_URL` — your local Postgres connection string
+- `JWT_SECRET` / `JWT_REFRESH_SECRET` — any long random strings for local dev
+- `ZATCA_ENCRYPTION_KEY` — a base64 32-byte key used to encrypt EC private keys at rest;
+  generate one with:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+  ```
+
+Create `frontend/.env`:
+
+```
+VITE_API_URL=http://localhost:4000/api
+```
+
+### 3. Set up the database
+
+```bash
+cd backend
+npx prisma migrate dev
+npx tsx prisma/seed.ts
+```
+
+This creates the schema and seeds a starter organization with a default admin account
+(`SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` in `backend/.env` — change these before
+using this anywhere near production).
+
+### 4. Run the dev servers
+
+Two terminals:
+
+```bash
+# Terminal 1 — backend (http://localhost:4000, Swagger at /api/docs)
+npm run dev --prefix backend
+
+# Terminal 2 — frontend (http://localhost:5173)
+npm run dev --prefix frontend
+```
+
+Open **http://localhost:5173** in your browser.
+
+### Resetting the database
 
 ```bash
 cd backend
 npx prisma migrate reset   # drops, recreates, re-runs migrations + seed
 ```
 
-Or just re-seed without wiping data: `npx tsx prisma/seed.ts` (seed is idempotent).
+Or re-seed without wiping data: `npx tsx prisma/seed.ts` (idempotent).
 
 ### Useful commands
 
@@ -87,26 +114,26 @@ Or just re-seed without wiping data: `npx tsx prisma/seed.ts` (seed is idempoten
 - **All totals are server-computed.** The frontend shows a live preview, but the backend
   independently recalculates subtotal/tax/total from the database on every checkout — the
   client can't send a fake price.
-- **One sale = one Postgres transaction**: sale + items + stock deduction + inventory ledger
-  entry + payment + customer balance update all commit atomically or not at all.
+- **One sale = one Postgres transaction**: sale + items + stock deduction + inventory
+  ledger entry + payment + customer balance update all commit atomically or not at all.
 - **RBAC**: permissions are granular (`products.view`, `sales.create`, …), not just role
-  names. Seeded roles cover the spec's full list (System Admin, Admin, Store Manager,
-  Cashier, Accountant, Inventory Keeper, etc.).
-- **Business-location scoping** is enforced server-side (not just hidden in the UI) — a
-  Cashier assigned only to "Main Branch" cannot query another branch's data via the API.
-- **Tax is configurable**, not hard-coded — see the `Tax` table / `/api/taxes`.
-- i18n: UI strings live in `frontend/src/i18n/locales/{en,ar}.json`; DB records use
+  names, plus a separate `app.*` permission layer gating each of the three applications —
+  enforced server-side on every route, not just hidden in the UI.
+- **Business-location scoping** is enforced server-side — a Cashier assigned only to one
+  branch cannot query another branch's data via the API, even by calling the API directly.
+- **Email verification gates the trial**: the trial clock and subscription record don't
+  start until the signup email is verified, not at registration time.
+- **Billing and seat licensing are decoupled**: the subscription gate (`Organization`
+  status + `Subscription` dates) is untouched by seat purchases, which only ever touch a
+  purchased-seat counter — so a duplicated payment webhook can't double-grant seats or
+  silently break access.
+- i18n: UI strings live in `frontend/src/i18n/locales/{en,ar}.json`; database records use
   `nameEn`/`nameAr` pairs. Switching language flips `<html dir>` automatically.
 
-## What's next
+## ZATCA e-invoicing
 
-Pick whichever phase matters most to you next — natural order per the spec:
-
-1. **Laundry order workflow** (Received → Washing → Ready → Delivered, item tracking with
-   photos) — this is the spec's own "most important module" and is not built yet; current
-   POS records a sale but not a garment-tracking order.
-2. Pickup & delivery (drivers, delivery status)
-3. Quotations, returns UI, promotions/coupons
-4. Accounting module, reports
-5. Notifications (SMS/email — needs a provider decision from you)
-6. SAP B1 integration scaffolding
+POS sales are ZATCA (Fatoora) compliance-ready: hash-chained invoices, QR codes, EC key
+generation, CSR generation, real ECDSA digital signatures, and a Compliance/Production
+CSID + Clearance/Reporting API client confirmed reachable against ZATCA's real sandbox
+host. See [`docs/POS-ZATCA-PLAN.md`](docs/POS-ZATCA-PLAN.md) for exactly what's verified
+versus what's still blocked on a real Fatoora portal registration.
