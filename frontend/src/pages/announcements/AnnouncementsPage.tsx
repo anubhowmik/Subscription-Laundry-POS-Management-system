@@ -5,6 +5,15 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { Megaphone } from "lucide-react";
 
 interface AnnouncementRow {
   id: string;
@@ -38,46 +47,58 @@ export default function AnnouncementsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "الإعلانات" : "Announcements"}</h1>
-        <button onClick={() => setFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {isAr ? "إضافة إعلان" : "Add"}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "الإعلانات" : "Announcements"}
+        actions={<Button onClick={() => setFormOpen(true)}>+ {isAr ? "إضافة إعلان" : "Add"}</Button>}
+      />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Megaphone}
+            cardBg="bg-sky-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "الإعلانات" : "Announcements"}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "من تاريخ" : "From Date"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "إلى تاريخ" : "To Date"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الفرع" : "Branch"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الإعلان" : "Announcement"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "إجراءات" : "Action"}</th>
+              <Th>{isAr ? "من تاريخ" : "From Date"}</Th>
+              <Th>{isAr ? "إلى تاريخ" : "To Date"}</Th>
+              <Th>{isAr ? "الفرع" : "Branch"}</Th>
+              <Th>{isAr ? "الإعلان" : "Announcement"}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{isAr ? "إجراءات" : "Action"}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((a) => (
-              <tr key={a.id} className="border-b border-slate-100">
-                <td className="px-4 py-2"><span className="ltr-nums">{new Date(a.fromDate).toLocaleDateString(locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{new Date(a.toDate).toLocaleDateString(locale)}</span></td>
-                <td className="px-4 py-2">
+              <tr key={a.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{new Date(a.fromDate).toLocaleDateString(locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{new Date(a.toDate).toLocaleDateString(locale)}</span></td>
+                <td className="px-4 py-3">
                   {a.locations.length === 0
                     ? isAr
                       ? "كل الفروع"
                       : "All locations"
                     : a.locations.map((l) => l.businessLocation.branchName).join(", ")}
                 </td>
-                <td className="max-w-xs truncate px-4 py-2">{a.content}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${a.isPublished ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                <td className="max-w-xs truncate px-4 py-3">{a.content}</td>
+                <td className="px-4 py-3">
+                  <Badge variant={a.isPublished ? "success" : "neutral"}>
                     {a.isPublished ? (isAr ? "منشور" : "Published") : (isAr ? "مسودة" : "Draft")}
-                  </span>
+                  </Badge>
                 </td>
-                <td className="px-4 py-2">
-                  <button onClick={() => deleteMutation.mutate(a.id)} className="text-xs text-red-600 hover:underline">
+                <td className="px-4 py-3">
+                  <button onClick={() => deleteMutation.mutate(a.id)} className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100">
                     {isAr ? "حذف" : "Delete"}
                   </button>
                 </td>
@@ -91,8 +112,8 @@ export default function AnnouncementsPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {formOpen && (
         <AnnouncementFormModal
@@ -139,61 +160,54 @@ function AnnouncementFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onCl
   const canSubmit = Boolean(fromDate) && Boolean(toDate) && toDate >= fromDate && content.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "إضافة إعلان" : "Add Announcement"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+    <Modal title={isAr ? "إضافة إعلان" : "Add Announcement"} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>{isAr ? "من تاريخ" : "From Date"}</label>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "إلى تاريخ" : "To Date"}</label>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inputClass} />
+          </div>
         </div>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من تاريخ" : "From Date"}</label>
-              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={inp} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى تاريخ" : "To Date"}</label>
-              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inp} />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              {isAr ? "الفروع" : "Business Locations"} <span className="text-slate-400">({isAr ? "اتركه فارغًا لكل الفروع" : "leave empty for all locations"})</span>
-            </label>
-            <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-300 p-2">
-              {locations.map((l) => (
-                <label key={l.id} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input type="checkbox" checked={businessLocationIds.includes(l.id)} onChange={() => toggleLocation(l.id)} />
-                  {l.branchName}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الإعلان" : "Announcement"}</label>
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} className={inp} />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={isPublished} onChange={(e) => setIsPublished(e.target.checked)} />
-            {isAr ? "منشور" : "Published"}
+        <div>
+          <label className={labelClass}>
+            {isAr ? "الفروع" : "Business Locations"} <span className="text-slate-400">({isAr ? "اتركه فارغًا لكل الفروع" : "leave empty for all locations"})</span>
           </label>
+          <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-300 p-2">
+            {locations.map((l) => (
+              <label key={l.id} className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={businessLocationIds.includes(l.id)} onChange={() => toggleLocation(l.id)} />
+                {l.branchName}
+              </label>
+            ))}
+          </div>
         </div>
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <button
-          onClick={() => {
-            setError(null);
-            mutation.mutate();
-          }}
-          disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
+        <div>
+          <label className={labelClass}>{isAr ? "الإعلان" : "Announcement"}</label>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} className={inputClass} />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={isPublished} onChange={(e) => setIsPublished(e.target.checked)} />
+          {isAr ? "منشور" : "Published"}
+        </label>
       </div>
-    </div>
+
+      {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+
+      <Button
+        fullWidth
+        className="mt-4"
+        onClick={() => {
+          setError(null);
+          mutation.mutate();
+        }}
+        disabled={!canSubmit || mutation.isPending}
+      >
+        {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
+      </Button>
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

@@ -164,6 +164,7 @@ export interface CheckoutItemInput {
 export interface CheckoutPaymentInput {
   paymentMethodId: string;
   amount: number;
+  referenceNumber?: string; // carries a captured BnplSession's id through to the Payment row
 }
 export interface CheckoutInput {
   businessLocationId: string;

@@ -24,13 +24,19 @@ export async function resolve(req: Request, res: Response) {
   const compensation = await service.resolve(getParam(req, "id"), req.body, req.user!.organizationId, req.user!.id, {
     isSystemAdmin: req.user!.isSystemAdmin,
     permissions: req.user!.permissions,
+    allowedLocationIds: req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds,
   });
   await writeAuditLog({ req, action: "UPDATE", module: "compensations", entityId: compensation.id, newValues: compensation });
   return sendSuccess(res, compensation, "Compensation updated");
 }
 
 export async function remove(req: Request, res: Response) {
-  await service.remove(getParam(req, "id"), req.user!.organizationId);
+  await service.remove(getParam(req, "id"), req.user!.organizationId, {
+    isSystemAdmin: req.user!.isSystemAdmin,
+    permissions: req.user!.permissions,
+    allowedLocationIds: req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds,
+    userId: req.user!.id,
+  });
   await writeAuditLog({ req, action: "DELETE", module: "compensations", entityId: getParam(req, "id") });
   return sendSuccess(res, null, "Compensation deleted");
 }

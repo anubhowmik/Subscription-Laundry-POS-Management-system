@@ -6,6 +6,12 @@ import type { ApiSuccess } from "../../types/api";
 import type { RegisterLedgerRow, RegisterSessionRow } from "../../api/posApi";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
+import { cn } from "../../lib/cn";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Badge } from "../../components/ui/Badge";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { Archive } from "lucide-react";
 
 export default function RegisterSessionsPage() {
   const { t, i18n } = useTranslation();
@@ -24,56 +30,68 @@ export default function RegisterSessionsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-800">{isAr ? "جلسات الصندوق" : "Register Sessions"}</h1>
+    <div className="space-y-6">
+      <PageHeader title={isAr ? "جلسات الصندوق" : "Register Sessions"} />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+        <StatCard
+          icon={Archive}
+          cardBg="bg-app-pos-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "جلسات الصندوق" : "Register Sessions"}
+          value={String(data?.length ?? 0)}
+        />
+      </div>
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "الفتح" : "Opened"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الإغلاق" : "Closed"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الافتتاحي" : "Opening"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المتوقع" : "Expected"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المعدود" : "Counted"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الفرق" : "Difference"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start"></th>
+              <Th>{isAr ? "الفتح" : "Opened"}</Th>
+              <Th>{isAr ? "الإغلاق" : "Closed"}</Th>
+              <Th>{isAr ? "الافتتاحي" : "Opening"}</Th>
+              <Th>{isAr ? "المتوقع" : "Expected"}</Th>
+              <Th>{isAr ? "المعدود" : "Counted"}</Th>
+              <Th>{isAr ? "الفرق" : "Difference"}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th></Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.map((s) => {
               const diff = s.cashDifference !== null ? Number(s.cashDifference) : null;
               return (
                 <Fragment key={s.id}>
                   <tr
-                    className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                    className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
                     onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
                   >
-                    <td className="px-4 py-2 text-xs text-slate-500">
+                    <td className="px-4 py-3 text-xs text-slate-500">
                       <span className="ltr-nums">{new Date(s.openedAt).toLocaleString(locale)}</span>
                     </td>
-                    <td className="px-4 py-2 text-xs text-slate-500">
+                    <td className="px-4 py-3 text-xs text-slate-500">
                       <span className="ltr-nums">{s.closedAt ? new Date(s.closedAt).toLocaleString(locale) : "-"}</span>
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-3">
                       <span className="ltr-nums">{formatMoney(s.openingCashAmount, currency, locale)}</span>
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-3">
                       <span className="ltr-nums">{s.expectedCashAmount !== null ? formatMoney(s.expectedCashAmount, currency, locale) : "-"}</span>
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-3">
                       <span className="ltr-nums">{s.countedCashAmount !== null ? formatMoney(s.countedCashAmount, currency, locale) : "-"}</span>
                     </td>
-                    <td className={`px-4 py-2 font-medium ${diff === null ? "" : diff === 0 ? "text-green-600" : diff > 0 ? "text-sky-600" : "text-red-600"}`}>
+                    <td className={cn("px-4 py-3 font-medium", diff === null ? "" : diff === 0 ? "text-green-600" : diff > 0 ? "text-sky-600" : "text-red-600")}>
                       <span className="ltr-nums">{diff !== null ? formatMoney(diff, currency, locale) : "-"}</span>
                     </td>
-                    <td className="px-4 py-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${s.status === "OPEN" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
+                    <td className="px-4 py-3">
+                      <Badge variant={s.status === "OPEN" ? "success" : "neutral"}>
                         {s.status === "OPEN" ? (isAr ? "مفتوح" : "Open") : isAr ? "مغلق" : "Closed"}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-2 text-xs text-sky-600">{expandedId === s.id ? (isAr ? "إخفاء" : "Hide") : isAr ? "التفاصيل" : "Details"}</td>
+                    <td className="px-4 py-3 text-xs text-sky-600">{expandedId === s.id ? (isAr ? "إخفاء" : "Hide") : isAr ? "التفاصيل" : "Details"}</td>
                   </tr>
                   {expandedId === s.id && (
                     <tr className="border-b border-slate-100 bg-slate-50/60">
@@ -93,8 +111,8 @@ export default function RegisterSessionsPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
     </div>
   );
 }
@@ -116,13 +134,13 @@ function LedgerDrilldown({ sessionId, currency, locale, isAr }: { sessionId: str
 
   return (
     <table className="w-full text-xs">
-      <thead className="text-slate-500">
+      <thead className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         <tr>
-          <th className="px-2 py-1 text-start">{isAr ? "الوقت" : "Time"}</th>
-          <th className="px-2 py-1 text-start">{isAr ? "النوع" : "Type"}</th>
-          <th className="px-2 py-1 text-start">{isAr ? "المرجع" : "Reference"}</th>
-          <th className="px-2 py-1 text-start">{isAr ? "طريقة الدفع" : "Method"}</th>
-          <th className="px-2 py-1 text-start">{isAr ? "المبلغ" : "Amount"}</th>
+          <th className="px-2 py-1.5 text-start">{isAr ? "الوقت" : "Time"}</th>
+          <th className="px-2 py-1.5 text-start">{isAr ? "النوع" : "Type"}</th>
+          <th className="px-2 py-1.5 text-start">{isAr ? "المرجع" : "Reference"}</th>
+          <th className="px-2 py-1.5 text-start">{isAr ? "طريقة الدفع" : "Method"}</th>
+          <th className="px-2 py-1.5 text-start">{isAr ? "المبلغ" : "Amount"}</th>
         </tr>
       </thead>
       <tbody>
@@ -130,17 +148,17 @@ function LedgerDrilldown({ sessionId, currency, locale, isAr }: { sessionId: str
           const label = tx.referenceType ? REFERENCE_LABELS[tx.referenceType] : undefined;
           return (
             <tr key={tx.id} className="border-t border-slate-100">
-              <td className="px-2 py-1 text-slate-500">
+              <td className="px-2 py-1.5 text-slate-500">
                 <span className="ltr-nums">{new Date(tx.createdAt).toLocaleTimeString(locale)}</span>
               </td>
-              <td className="px-2 py-1">
+              <td className="px-2 py-1.5">
                 <span className={tx.type === "CREDIT" ? "text-green-600" : "text-red-600"}>
                   {tx.type === "CREDIT" ? (isAr ? "دائن" : "Credit") : isAr ? "مدين" : "Debit"}
                 </span>
               </td>
-              <td className="px-2 py-1 text-slate-600">{label ? (isAr ? label.ar : label.en) : (tx.referenceType ?? "-")}</td>
-              <td className="px-2 py-1 text-slate-500">{tx.paymentMethod}</td>
-              <td className={`px-2 py-1 font-medium ${tx.type === "CREDIT" ? "text-green-700" : "text-red-700"}`}>
+              <td className="px-2 py-1.5 text-slate-600">{label ? (isAr ? label.ar : label.en) : (tx.referenceType ?? "-")}</td>
+              <td className="px-2 py-1.5 text-slate-500">{tx.paymentMethod}</td>
+              <td className={cn("px-2 py-1.5 font-medium", tx.type === "CREDIT" ? "text-green-700" : "text-red-700")}>
                 <span className="ltr-nums">
                   {tx.type === "DEBIT" ? "-" : ""}
                   {formatMoney(tx.amount, currency, locale)}

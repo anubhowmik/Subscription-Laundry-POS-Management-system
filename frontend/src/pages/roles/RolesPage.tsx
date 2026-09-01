@@ -3,7 +3,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess } from "../../types/api";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { LoadingState } from "../../components/ui/Spinner";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { ShieldCheck } from "lucide-react";
 
 interface Permission {
   id: string;
@@ -49,59 +60,72 @@ export default function RolesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "الأدوار" : "Roles"}</h1>
-        <button
-          onClick={() => {
-            setEditingId(null);
-            setFormOpen(true);
-          }}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-        >
-          + {isAr ? "دور جديد" : "Add Role"}
-        </button>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "الأدوار" : "Roles"}
+        actions={
+          <Button
+            onClick={() => {
+              setEditingId(null);
+              setFormOpen(true);
+            }}
+          >
+            + {isAr ? "دور جديد" : "Add Role"}
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+        <StatCard
+          icon={ShieldCheck}
+          cardBg="bg-app-users-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "الأدوار" : "Roles"}
+          value={String(roles?.length ?? 0)}
+        />
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "الاسم" : "Name"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الوصف" : "Description"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المستخدمون" : "Users"}</th>
-              <th className="px-4 py-2 text-start"></th>
-              <th className="px-4 py-2 text-end">{isAr ? "إجراءات" : "Actions"}</th>
+              <Th>{isAr ? "الاسم" : "Name"}</Th>
+              <Th>{isAr ? "الوصف" : "Description"}</Th>
+              <Th>{isAr ? "المستخدمون" : "Users"}</Th>
+              <Th></Th>
+              <th className="px-4 py-3 text-end text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {isAr ? "إجراءات" : "Actions"}
+              </th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {roles?.map((r) => (
-              <tr key={r.id} className="border-b border-slate-100">
-                <td className="px-4 py-2 font-medium">{isAr ? r.nameAr : r.nameEn}</td>
-                <td className="px-4 py-2 text-slate-500">{r.description ?? "-"}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{r._count.users}</span></td>
-                <td className="px-4 py-2">
-                  {r.isSystem && (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{isAr ? "نظام" : "System"}</span>
-                  )}
+              <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3 font-medium">{isAr ? r.nameAr : r.nameEn}</td>
+                <td className="px-4 py-3 text-slate-500">{r.description ?? "-"}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{r._count.users}</span></td>
+                <td className="px-4 py-3">
+                  {r.isSystem && <Badge variant="neutral">{isAr ? "نظام" : "System"}</Badge>}
                 </td>
-                <td className="px-4 py-2 text-end">
+                <td className="px-4 py-3 text-end">
                   <div className="flex justify-end gap-3">
                     <button
                       onClick={() => {
                         setEditingId(r.id);
                         setFormOpen(true);
                       }}
-                      className="text-xs font-medium text-sky-700 hover:underline"
+                      className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100"
                     >
                       {isAr ? "تعديل" : "Edit"}
                     </button>
                     {!r.isSystem && (
                       <button
-                        onClick={() => {
-                          if (window.confirm(isAr ? "حذف هذا الدور؟" : "Delete this role?")) deleteMutation.mutate(r.id);
+                        onClick={async () => {
+                          if (await confirmAction({ message: isAr ? "حذف هذا الدور؟" : "Delete this role?", danger: true })) deleteMutation.mutate(r.id);
                         }}
-                        className="text-xs font-medium text-red-600 hover:underline"
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
                       >
                         {isAr ? "حذف" : "Delete"}
                       </button>
@@ -118,8 +142,8 @@ export default function RolesPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {formOpen && (
         <RoleFormModal
@@ -208,96 +232,91 @@ function RoleFormModal({
   const canSubmit = nameEn.trim().length > 0 && nameAr.trim().length > 0 && !isSystem;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">
-            {roleId ? (isAr ? "تعديل الدور" : "Edit Role") : isAr ? "دور جديد" : "New Role"}
-          </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-
-        {isFetching ? (
-          <p className="text-sm text-slate-400">{isAr ? "جارٍ التحميل..." : "Loading..."}</p>
-        ) : (
-          <>
-            {isSystem && (
-              <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                {isAr ? "لا يمكن تعديل الأدوار الأساسية في النظام." : "System roles cannot be modified."}
-              </p>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
-                <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} disabled={isSystem} className={inp} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
-                <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" disabled={isSystem} className={inp} />
-              </div>
+    <Modal
+      title={roleId ? (isAr ? "تعديل الدور" : "Edit Role") : isAr ? "دور جديد" : "New Role"}
+      onClose={onClose}
+      size="xl"
+    >
+      {isFetching ? (
+        <LoadingState label={isAr ? "جارٍ التحميل..." : "Loading..."} />
+      ) : (
+        <>
+          {isSystem && (
+            <Alert variant="warning" className="mb-3">
+              {isAr ? "لا يمكن تعديل الأدوار الأساسية في النظام." : "System roles cannot be modified."}
+            </Alert>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
+              <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} disabled={isSystem} className={inputClass} />
             </div>
-            <div className="mt-3">
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الوصف" : "Description"}</label>
-              <input value={description} onChange={(e) => setDescription(e.target.value)} disabled={isSystem} className={inp} />
+            <div>
+              <label className={labelClass}>{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
+              <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" disabled={isSystem} className={inputClass} />
             </div>
+          </div>
+          <div className="mt-3">
+            <label className={labelClass}>{isAr ? "الوصف" : "Description"}</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)} disabled={isSystem} className={inputClass} />
+          </div>
 
-            <div className="mt-4">
-              <label className="mb-2 block text-xs font-medium text-slate-600">{isAr ? "الصلاحيات" : "Permissions"}</label>
-              <div className="space-y-3">
-                {Object.entries(grouped).map(([module, perms]) => {
-                  const codes = perms.map((p) => p.code);
-                  const allSelected = codes.every((c) => selectedCodes.has(c));
-                  return (
-                    <div key={module} className="rounded-lg border border-slate-200 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-xs font-semibold uppercase text-slate-500">{module}</span>
-                        <button
-                          type="button"
-                          disabled={isSystem}
-                          onClick={() => toggleGroup(codes, !allSelected)}
-                          className="text-xs text-sky-600 hover:underline disabled:opacity-40"
-                        >
-                          {allSelected ? (isAr ? "إلغاء تحديد الكل" : "Unselect all") : isAr ? "تحديد الكل" : "Select all"}
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
-                        {perms.map((p) => (
-                          <label key={p.id} className="flex items-center gap-1.5 text-xs text-slate-700">
-                            <input
-                              type="checkbox"
-                              disabled={isSystem}
-                              checked={selectedCodes.has(p.code)}
-                              onChange={() => toggle(p.code)}
-                            />
-                            <span title={p.description ?? undefined}>{p.code}</span>
-                          </label>
-                        ))}
-                      </div>
+          <div className="mt-4">
+            <label className={labelClass}>{isAr ? "الصلاحيات" : "Permissions"}</label>
+            <div className="space-y-3">
+              {Object.entries(grouped).map(([module, perms]) => {
+                const codes = perms.map((p) => p.code);
+                const allSelected = codes.every((c) => selectedCodes.has(c));
+                return (
+                  <div key={module} className="rounded-lg border border-slate-200 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase text-slate-500">{module}</span>
+                      <button
+                        type="button"
+                        disabled={isSystem}
+                        onClick={() => toggleGroup(codes, !allSelected)}
+                        className="text-xs text-sky-600 hover:underline disabled:opacity-40"
+                      >
+                        {allSelected ? (isAr ? "إلغاء تحديد الكل" : "Unselect all") : isAr ? "تحديد الكل" : "Select all"}
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
+                      {perms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            disabled={isSystem}
+                            checked={selectedCodes.has(p.code)}
+                            onChange={() => toggle(p.code)}
+                          />
+                          <span title={p.description ?? undefined}>{p.code}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          </div>
 
-            {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
 
-            {!isSystem && (
-              <button
-                onClick={() => {
-                  setError(null);
-                  mutation.mutate();
-                }}
-                disabled={!canSubmit || mutation.isPending}
-                className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-              >
-                {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-              </button>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+          {!isSystem && (
+            <Button
+              fullWidth
+              className="mt-4"
+              onClick={() => {
+                setError(null);
+                mutation.mutate();
+              }}
+              disabled={!canSubmit || mutation.isPending}
+            >
+              {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
+            </Button>
+          )}
+        </>
+      )}
+    </Modal>
   );
 }
 
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

@@ -1,10 +1,18 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { ConflictError, NotFoundError } from "../../utils/AppError";
+import { assertLocationAllowed } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
-export async function openSession(businessLocationId: string, openingCashAmount: number, organizationId: string, openedBy: string) {
+export async function openSession(
+  businessLocationId: string,
+  openingCashAmount: number,
+  organizationId: string,
+  openedBy: string,
+  allowedLocationIds: string[] | null,
+) {
+  assertLocationAllowed(businessLocationId, allowedLocationIds);
   const existing = await prisma.registerSession.findFirst({
     where: { businessLocationId, organizationId, status: "OPEN" },
   });
@@ -30,7 +38,8 @@ export async function openSession(businessLocationId: string, openingCashAmount:
   });
 }
 
-export async function getCurrentSession(businessLocationId: string, organizationId: string) {
+export async function getCurrentSession(businessLocationId: string, organizationId: string, allowedLocationIds: string[] | null) {
+  assertLocationAllowed(businessLocationId, allowedLocationIds);
   return prisma.registerSession.findFirst({
     where: { businessLocationId, organizationId, status: "OPEN" },
     include: { openedByUser: { select: { fullNameEn: true } } },
@@ -49,10 +58,12 @@ export async function closeSession(
   notes: string | undefined,
   organizationId: string,
   closedBy: string,
+  allowedLocationIds: string[] | null,
   denominations?: Record<string, number>,
 ) {
   const session = await prisma.registerSession.findFirst({ where: { id, organizationId, status: "OPEN" } });
   if (!session) throw new NotFoundError("Open register session not found");
+  assertLocationAllowed(session.businessLocationId, allowedLocationIds);
 
   const [credits, debits] = await Promise.all([
     prisma.registerTransaction.aggregate({
@@ -83,9 +94,10 @@ export async function closeSession(
   });
 }
 
-export async function getLedger(id: string, organizationId: string) {
+export async function getLedger(id: string, organizationId: string, allowedLocationIds: string[] | null) {
   const session = await prisma.registerSession.findFirst({ where: { id, organizationId } });
   if (!session) throw new NotFoundError("Register session not found");
+  assertLocationAllowed(session.businessLocationId, allowedLocationIds);
 
   return prisma.registerTransaction.findMany({
     where: { registerSessionId: id },
@@ -93,7 +105,14 @@ export async function getLedger(id: string, organizationId: string) {
   });
 }
 
-export async function listSessions(businessLocationId: string, organizationId: string, page: number, limit: number) {
+export async function listSessions(
+  businessLocationId: string,
+  organizationId: string,
+  page: number,
+  limit: number,
+  allowedLocationIds: string[] | null,
+) {
+  assertLocationAllowed(businessLocationId, allowedLocationIds);
   const skip = (page - 1) * limit;
   const [data, total] = await Promise.all([
     prisma.registerSession.findMany({

@@ -1,8 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
+import { KeyRound } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
+import { Button } from "../ui/Button";
+import { Badge } from "../ui/Badge";
+import { Modal } from "../ui/Modal";
+import { Alert } from "../ui/Alert";
+import { inputClass } from "../ui/formClasses";
 
 interface CertStatus {
   id: string;
@@ -71,27 +77,28 @@ export function ZatcaCertificateCell({ locationId, hasVatNumber }: { locationId:
 
   if (!cert) {
     return (
-      <button
+      <Button
+        variant="outline"
+        size="sm"
         onClick={() => generateMutation.mutate()}
         disabled={!hasVatNumber || generateMutation.isPending}
         title={hasVatNumber ? "" : "Set the VAT number first"}
-        className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
       >
         {generateMutation.isPending ? "Generating..." : "Generate CSR"}
-      </button>
+      </Button>
     );
   }
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
-          cert.status === "PRODUCTION_ISSUED" ? "bg-green-100 text-green-700" : cert.status === "FAILED" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
-        }`}
+      <Badge
+        variant={cert.status === "PRODUCTION_ISSUED" ? "success" : cert.status === "FAILED" ? "danger" : "info"}
         title={STATUS_LABEL[cert.status]}
+        className="gap-1"
       >
-        🔑 {cert.status}
-      </span>
+        <KeyRound className="h-3 w-3" strokeWidth={2} aria-hidden />
+        {cert.status}
+      </Badge>
       {cert.lastError && <span className="max-w-xs text-[10px] text-red-500">{cert.lastError}</span>}
 
       {cert.status === "KEY_GENERATED" && (
@@ -110,41 +117,48 @@ export function ZatcaCertificateCell({ locationId, hasVatNumber }: { locationId:
       )}
 
       {showOtpModal && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-1 text-lg font-semibold text-slate-800">Compliance CSID</h2>
-            <p className="mb-4 text-sm text-slate-500">
-              Enter the OTP from ZATCA's Fatoora portal for this business/unit. This call has not been tested against a
-              real ZATCA endpoint yet - if it fails, the error message below will show ZATCA's response (or a network
-              error) so we know what to fix.
-            </p>
-            <input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              placeholder="OTP"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums"
-            />
-            {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => {
-                  setShowOtpModal(false);
-                  setError(null);
-                }}
-                className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => complianceMutation.mutate()}
-                disabled={!otp || complianceMutation.isPending}
-                className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-              >
-                {complianceMutation.isPending ? "Submitting..." : "Submit"}
-              </button>
-            </div>
+        <Modal
+          title="Compliance CSID"
+          subtitle="Enter the OTP from ZATCA's Fatoora portal for this business/unit."
+          onClose={() => {
+            setShowOtpModal(false);
+            setError(null);
+          }}
+          size="sm"
+        >
+          <p className="mb-4 text-sm text-slate-500">
+            This call has not been tested against a real ZATCA endpoint yet - if it fails, the error message below will
+            show ZATCA's response (or a network error) so we know what to fix.
+          </p>
+          <input
+            value={otp}
+            onChange={(e) => setOtp(e.target.value)}
+            placeholder="OTP"
+            className={`${inputClass} ltr-nums`}
+          />
+          {error && <Alert variant="danger" className="mt-2">{error}</Alert>}
+          <div className="mt-4 flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              fullWidth
+              onClick={() => {
+                setShowOtpModal(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              fullWidth
+              onClick={() => complianceMutation.mutate()}
+              disabled={!otp || complianceMutation.isPending}
+            >
+              {complianceMutation.isPending ? "Submitting..." : "Submit"}
+            </Button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

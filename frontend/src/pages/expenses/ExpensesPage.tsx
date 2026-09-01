@@ -6,14 +6,23 @@ import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta, Supplier } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass, inputSmClass } from "../../components/ui/formClasses";
+import { Wallet } from "lucide-react";
 
 type PaymentStatus = "PAID" | "PARTIAL" | "DUE" | "OVERPAID";
 
-const STATUS_STYLES: Record<PaymentStatus, string> = {
-  PAID: "bg-green-100 text-green-700",
-  PARTIAL: "bg-amber-100 text-amber-700",
-  DUE: "bg-red-100 text-red-700",
-  OVERPAID: "bg-sky-100 text-sky-700",
+const STATUS_VARIANT: Record<PaymentStatus, "success" | "warning" | "danger" | "info"> = {
+  PAID: "success",
+  PARTIAL: "warning",
+  DUE: "danger",
+  OVERPAID: "info",
 };
 
 interface ExpenseCategoryRow {
@@ -59,46 +68,62 @@ export default function ExpensesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "المصروفات" : "Expenses"}</h1>
-        <button onClick={() => setFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {isAr ? "مصروف جديد" : "New Expense"}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "المصروفات" : "Expenses"}
+        actions={<Button onClick={() => setFormOpen(true)}>+ {isAr ? "مصروف جديد" : "New Expense"}</Button>}
+      />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {expenses?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Wallet}
+            cardBg="bg-rose-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "المصروفات" : "Expenses"}
+            value={String(expenses.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "التاريخ" : "Date"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الرقم" : "Number"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الفئة" : "Category"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المورد" : "Supplier"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المدفوع" : "Paid"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المستحق" : "Due"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
+              <Th>{isAr ? "التاريخ" : "Date"}</Th>
+              <Th>{isAr ? "الرقم" : "Number"}</Th>
+              <Th>{isAr ? "الفئة" : "Category"}</Th>
+              <Th>{isAr ? "المورد" : "Supplier"}</Th>
+              <Th>{isAr ? "الإجمالي" : "Total"}</Th>
+              <Th>{isAr ? "المدفوع" : "Paid"}</Th>
+              <Th>{isAr ? "المستحق" : "Due"}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{isAr ? "بواسطة" : "By"}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {expenses?.rows.map((e) => (
-              <tr key={e.id} className="border-b border-slate-100">
-                <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(e.expenseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-2 font-medium">
+              <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(e.expenseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                <td className="px-4 py-3 font-medium">
                   <span className="ltr-nums">{e.expenseNumber ?? "-"}</span>
-                  {e.isRecurring && <span className="ms-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{isAr ? "متكرر" : "recurring"}</span>}
+                  {e.isRecurring && (
+                    <Badge variant="neutral" className="ms-1.5">
+                      {isAr ? "متكرر" : "recurring"}
+                    </Badge>
+                  )}
                 </td>
-                <td className="px-4 py-2">{isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn}</td>
-                <td className="px-4 py-2 text-slate-500">{e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(e.totalAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(e.paidAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(e.dueAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLES[e.paymentStatus]}`}>{e.paymentStatus}</span>
+                <td className="px-4 py-3">{isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn}</td>
+                <td className="px-4 py-3 text-slate-500">{e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.totalAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.paidAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.dueAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3">
+                  <Badge variant={STATUS_VARIANT[e.paymentStatus]}>{e.paymentStatus}</Badge>
                 </td>
-                <td className="px-4 py-2 text-slate-500">{e.createdByUser.fullNameEn}</td>
+                <td className="px-4 py-3 text-slate-500">{e.createdByUser.fullNameEn}</td>
               </tr>
             ))}
             {expenses?.rows.length === 0 && (
@@ -109,8 +134,8 @@ export default function ExpensesPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {formOpen && (
         <ExpenseFormModal
@@ -185,140 +210,142 @@ function ExpenseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose: 
   const canSubmit = Boolean(categoryId) && Boolean(businessLocationId) && Number(subtotal) > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "مصروف جديد" : "New Expense"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
-            <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inp}>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفئة" : "Category"}</label>
-            <div className="flex gap-1">
-              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inp}>
-                <option value="">{isAr ? "اختر فئة" : "Select a category"}</option>
-                {categories?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {isAr ? c.nameAr || c.nameEn : c.nameEn}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="mt-1 flex gap-1">
-              <input
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder={isAr ? "فئة جديدة" : "New category name"}
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs"
-              />
-              <button
-                type="button"
-                disabled={!newCategoryName.trim() || createCategoryMutation.isPending}
-                onClick={() => createCategoryMutation.mutate(newCategoryName.trim())}
-                className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
-              >
-                + {isAr ? "إضافة" : "Add"}
-              </button>
-            </div>
-          </div>
-
-          <div className="relative">
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المورد (اختياري)" : "Supplier (optional)"}</label>
-            <input
-              value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
-              onChange={(e) => {
-                setSupplier(null);
-                runSupplierSearch(e.target.value);
-              }}
-              placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
-              className={inp}
-            />
-            {supplierResults.length > 0 && !supplier && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                {supplierResults.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setSupplier(s);
-                      setSupplierResults([]);
-                    }}
-                    className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
-                  >
-                    {isAr ? s.nameAr || s.nameEn : s.nameEn}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ" : "Amount"}</label>
-              <input type="number" min={0} step="0.01" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} placeholder="0.00" className={inp} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "نسبة الضريبة %" : "Tax %"}</label>
-              <input type="number" min={0} max={100} step="0.01" value={taxPercent} onChange={(e) => setTaxPercent(e.target.value)} placeholder="0" className={inp} />
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
-            <input type="number" min={0} step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={inp} />
-          </div>
-
-          <div className="rounded-lg border border-slate-200 p-2.5">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} />
-              {isAr ? "مصروف متكرر" : "Recurring expense"}
-            </label>
-            {isRecurring && (
-              <div className="mt-2">
-                <label className="mb-1 block text-[11px] text-slate-500">{isAr ? "كل كم يوم" : "Every N days"}</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={recurringIntervalDays}
-                  onChange={(e) => setRecurringIntervalDays(e.target.value)}
-                  className={inp}
-                />
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظات" : "Notes"}</label>
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
-          </div>
-        </div>
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <button
+    <Modal
+      title={isAr ? "مصروف جديد" : "New Expense"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <Button
+          fullWidth
           onClick={() => {
             setError(null);
             mutation.mutate();
           }}
           disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {mutation.isPending ? "…" : isAr ? "حفظ المصروف" : "Save Expense"}
-        </button>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
+          <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inputClass}>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.branchName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelClass}>{isAr ? "الفئة" : "Category"}</label>
+          <div className="flex gap-1">
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inputClass}>
+              <option value="">{isAr ? "اختر فئة" : "Select a category"}</option>
+              {categories?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {isAr ? c.nameAr || c.nameEn : c.nameEn}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-1.5 flex gap-1.5">
+            <input
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder={isAr ? "فئة جديدة" : "New category name"}
+              className={inputSmClass + " w-full"}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={!newCategoryName.trim() || createCategoryMutation.isPending}
+              onClick={() => createCategoryMutation.mutate(newCategoryName.trim())}
+              className="shrink-0"
+            >
+              + {isAr ? "إضافة" : "Add"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="relative">
+          <label className={labelClass}>{isAr ? "المورد (اختياري)" : "Supplier (optional)"}</label>
+          <input
+            value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
+            onChange={(e) => {
+              setSupplier(null);
+              runSupplierSearch(e.target.value);
+            }}
+            placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
+            className={inputClass}
+          />
+          {supplierResults.length > 0 && !supplier && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+              {supplierResults.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSupplier(s);
+                    setSupplierResults([]);
+                  }}
+                  className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                >
+                  {isAr ? s.nameAr || s.nameEn : s.nameEn}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>{isAr ? "المبلغ" : "Amount"}</label>
+            <input type="number" min={0} step="0.01" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} placeholder="0.00" className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "نسبة الضريبة %" : "Tax %"}</label>
+            <input type="number" min={0} max={100} step="0.01" value={taxPercent} onChange={(e) => setTaxPercent(e.target.value)} placeholder="0" className={inputClass} />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
+          <input type="number" min={0} step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={inputClass} />
+        </div>
+
+        <div className="rounded-lg border border-slate-200 p-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} />
+            {isAr ? "مصروف متكرر" : "Recurring expense"}
+          </label>
+          {isRecurring && (
+            <div className="mt-2">
+              <label className="mb-1.5 block text-xs text-slate-500">{isAr ? "كل كم يوم" : "Every N days"}</label>
+              <input
+                type="number"
+                min={1}
+                value={recurringIntervalDays}
+                onChange={(e) => setRecurringIntervalDays(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+        </div>
       </div>
-    </div>
+
+      {error && (
+        <Alert variant="danger" className="mt-4">
+          {error}
+        </Alert>
+      )}
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

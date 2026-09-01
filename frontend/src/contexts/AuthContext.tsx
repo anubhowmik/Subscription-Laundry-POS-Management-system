@@ -20,6 +20,8 @@ interface AuthContextValue {
   loading: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
   registerOrganization: (input: RegisterOrganizationInput) => Promise<void>;
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   can: (...permissions: string[]) => boolean;
   refreshUser: () => Promise<void>;
@@ -63,10 +65,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetchMe();
   }
 
+  // Deliberately does NOT set a token or fetch the user - a fresh signup must never be left in
+  // an authenticated state before verifying their email. The backend has already emailed a
+  // verification code; RegisterOrganizationPage sends the user to /verify-email next.
   async function registerOrganization(input: RegisterOrganizationInput) {
-    const res = await api.post<ApiSuccess<{ accessToken: string; user: AuthUser }>>("/organizations/register", input);
-    setAccessToken(res.data.data.accessToken);
-    await fetchMe();
+    await api.post("/organizations/register", input);
+  }
+
+  async function verifyEmail(email: string, code: string) {
+    await api.post("/auth/verify-email", { email, code });
+  }
+
+  async function resendVerification(email: string) {
+    await api.post("/auth/resend-verification", { email });
   }
 
   async function logout() {
@@ -85,7 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, registerOrganization, logout, can, refreshUser: fetchMe }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, registerOrganization, verifyEmail, resendVerification, logout, can, refreshUser: fetchMe }}
+    >
       {children}
     </AuthContext.Provider>
   );

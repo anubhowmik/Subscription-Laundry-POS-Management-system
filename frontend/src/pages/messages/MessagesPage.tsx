@@ -5,6 +5,16 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { cn } from "../../lib/cn";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { Mail, MailOpen } from "lucide-react";
 
 interface MessageRow {
   id: string;
@@ -50,55 +60,79 @@ export default function MessagesPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["messages"] }),
   });
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "الرسائل" : "Messages"}</h1>
-        <button
-          onClick={() => {
-            setReplyTo(null);
-            setComposeOpen(true);
-          }}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-        >
-          + {isAr ? "رسالة جديدة" : "Compose"}
-        </button>
-      </div>
+  const { data: unreadCount } = useQuery({
+    queryKey: ["messages-unread-count"],
+    queryFn: async () => (await api.get<ApiSuccess<{ count: number }>>("/messages/unread-count")).data.data.count,
+  });
 
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={t("common.search")}
-        className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm"
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "الرسائل" : "Messages"}
+        actions={
+          <Button
+            onClick={() => {
+              setReplyTo(null);
+              setComposeOpen(true);
+            }}
+          >
+            + {isAr ? "رسالة جديدة" : "Compose"}
+          </Button>
+        }
       />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+        <StatCard
+          icon={Mail}
+          cardBg="bg-sky-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "الرسائل" : "Messages"}
+          value={String(data?.meta.total ?? 0)}
+        />
+        <StatCard
+          icon={MailOpen}
+          cardBg="bg-amber-50"
+          iconBg="bg-amber-500"
+          iconColor="text-white"
+          label={isAr ? "غير مقروءة" : "Unread"}
+          value={String(unreadCount ?? 0)}
+          warn={Boolean(unreadCount)}
+        />
+      </div>
+
+      <TableContainer>
+        <TableToolbar>
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("common.search")} className="max-w-xs" />
+        </TableToolbar>
+        <TableScroll>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "من" : "From"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "إلى" : "To"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الرسالة" : "Message"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "إجراءات" : "Action"}</th>
+              <Th>{isAr ? "من" : "From"}</Th>
+              <Th>{isAr ? "إلى" : "To"}</Th>
+              <Th>{isAr ? "الرسالة" : "Message"}</Th>
+              <Th>{isAr ? "بواسطة" : "By"}</Th>
+              <Th>{isAr ? "إجراءات" : "Action"}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((m) => (
-              <tr key={m.id} className={`border-b border-slate-100 ${!m.readByMe ? "bg-sky-50/60" : ""}`}>
-                <td className="px-4 py-2">
+              <tr key={m.id} className={cn("border-b border-slate-100 last:border-0 hover:bg-slate-50/60", !m.readByMe && "bg-sky-50/60")}>
+                <td className="px-4 py-3">
                   {!m.readByMe && <span className="me-1.5 inline-block h-2 w-2 rounded-full bg-sky-500" aria-hidden />}
                   {m.fromBusinessLocation.branchName}
                 </td>
-                <td className="px-4 py-2">{m.toBusinessLocation.branchName}</td>
-                <td className="px-4 py-2">
-                  <p className={`text-slate-800 ${!m.readByMe ? "font-semibold" : "font-medium"}`}>{m.subject}</p>
+                <td className="px-4 py-3">{m.toBusinessLocation.branchName}</td>
+                <td className="px-4 py-3">
+                  <p className={cn("text-slate-800", !m.readByMe ? "font-semibold" : "font-medium")}>{m.subject}</p>
                   <p className="line-clamp-1 text-xs text-slate-500">{m.content}</p>
                 </td>
-                <td className="px-4 py-2 text-slate-500">{m.createdByUser.fullNameEn}</td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3 text-slate-500">{m.createdByUser.fullNameEn}</td>
+                <td className="px-4 py-3">
                   <div className="flex gap-2 text-xs">
-                    <button onClick={() => viewMutation.mutate(m.id)} className="text-sky-600 hover:underline">
+                    <button onClick={() => viewMutation.mutate(m.id)} className="rounded-lg px-2 py-1 font-medium text-sky-600 transition-colors hover:bg-sky-100">
                       {isAr ? "عرض" : "Show"}
                     </button>
                     <button
@@ -106,11 +140,11 @@ export default function MessagesPage() {
                         setReplyTo(m);
                         setComposeOpen(true);
                       }}
-                      className="text-sky-600 hover:underline"
+                      className="rounded-lg px-2 py-1 font-medium text-sky-600 transition-colors hover:bg-sky-100"
                     >
                       {isAr ? "رد" : "Reply"}
                     </button>
-                    <button onClick={() => deleteMutation.mutate(m.id)} className="text-red-600 hover:underline">
+                    <button onClick={() => deleteMutation.mutate(m.id)} className="rounded-lg px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-100">
                       {isAr ? "حذف" : "Delete"}
                     </button>
                   </div>
@@ -125,8 +159,9 @@ export default function MessagesPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+        </TableScroll>
+      </TableContainer>
 
       {composeOpen && (
         <ComposeModal
@@ -141,18 +176,13 @@ export default function MessagesPage() {
       )}
 
       {viewing && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewing(null)}>
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-slate-800">{viewing.subject}</h3>
-              <button onClick={() => setViewing(null)} className="text-slate-400 hover:text-slate-600">✕</button>
-            </div>
-            <p className="mb-3 text-xs text-slate-500">
-              {viewing.fromBusinessLocation.branchName} → {viewing.toBusinessLocation.branchName} · {viewing.createdByUser.fullNameEn}
-            </p>
-            <p className="whitespace-pre-wrap text-sm text-slate-700">{viewing.content}</p>
-          </div>
-        </div>
+        <Modal
+          title={viewing.subject}
+          subtitle={`${viewing.fromBusinessLocation.branchName} → ${viewing.toBusinessLocation.branchName} · ${viewing.createdByUser.fullNameEn}`}
+          onClose={() => setViewing(null)}
+        >
+          <p className="whitespace-pre-wrap text-sm text-slate-700">{viewing.content}</p>
+        </Modal>
       )}
     </div>
   );
@@ -186,60 +216,53 @@ function ComposeModal({
   const canSubmit = Boolean(fromId) && Boolean(toId) && fromId !== toId && subject.trim().length > 0 && content.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "رسالة جديدة" : "Compose"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+    <Modal title={isAr ? "رسالة جديدة" : "Compose"} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "من" : "From"}</label>
+          <select value={fromId} onChange={(e) => setFromId(e.target.value)} className={inputClass}>
+            <option value="">{isAr ? "اختر" : "Select"}</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.branchName}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من" : "From"}</label>
-            <select value={fromId} onChange={(e) => setFromId(e.target.value)} className={inp}>
-              <option value="">{isAr ? "اختر" : "Select"}</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى" : "To"}</label>
-            <select value={toId} onChange={(e) => setToId(e.target.value)} className={inp}>
-              <option value="">{isAr ? "اختر" : "Select"}</option>
-              {locations.filter((l) => l.id !== fromId).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الموضوع" : "Subject"}</label>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inp} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المحتوى" : "Content"}</label>
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={5} className={inp} />
-          </div>
+        <div>
+          <label className={labelClass}>{isAr ? "إلى" : "To"}</label>
+          <select value={toId} onChange={(e) => setToId(e.target.value)} className={inputClass}>
+            <option value="">{isAr ? "اختر" : "Select"}</option>
+            {locations.filter((l) => l.id !== fromId).map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.branchName}
+              </option>
+            ))}
+          </select>
         </div>
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <button
-          onClick={() => {
-            setError(null);
-            mutation.mutate();
-          }}
-          disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          {mutation.isPending ? "…" : isAr ? "إرسال" : "Submit"}
-        </button>
+        <div>
+          <label className={labelClass}>{isAr ? "الموضوع" : "Subject"}</label>
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>{isAr ? "المحتوى" : "Content"}</label>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={5} className={inputClass} />
+        </div>
       </div>
-    </div>
+
+      {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+
+      <Button
+        fullWidth
+        className="mt-4"
+        onClick={() => {
+          setError(null);
+          mutation.mutate();
+        }}
+        disabled={!canSubmit || mutation.isPending}
+      >
+        {mutation.isPending ? "…" : isAr ? "إرسال" : "Submit"}
+      </Button>
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

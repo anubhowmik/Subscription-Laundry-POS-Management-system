@@ -3,10 +3,11 @@ import * as controller from "./user.controller";
 import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/permission";
 import { validate } from "../../middleware/validate";
-import { createUserSchema, listUserQuerySchema, resetPasswordSchema, updateUserSchema } from "./user.validators";
+import { createUserSchema, listUserQuerySchema, resetPasswordSchema, setAppAccessSchema, updateUserSchema } from "./user.validators";
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.users_rules"));
 
 router.get("/", requirePermission("users.view"), validate(listUserQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("users.view"), controller.getById);
@@ -20,5 +21,8 @@ router.post(
   validate(resetPasswordSchema),
   controller.resetPassword,
 );
+// Route-level gate is users.update (consistent with the rest of this file); setAppAccess()
+// itself additionally requires isSystemAdmin - see its comment in user.service.ts for why.
+router.put("/:id/app-access", requirePermission("users.update"), validate(setAppAccessSchema), controller.setAppAccess);
 
 export default router;

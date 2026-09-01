@@ -18,6 +18,17 @@ export async function checkout(req: Request, res: Response) {
   return sendSuccess(res, result, "Checkout created");
 }
 
+export async function checkoutSeats(req: Request, res: Response) {
+  const { quantity } = req.body as { quantity: number };
+  const result = await service.createSeatCheckout(req.user!.organizationId, quantity);
+  await writeAuditLog({ req, action: "CREATE", module: "licenses", entityId: result.billingPaymentId, newValues: { quantity } });
+  return sendSuccess(res, result, "Seat checkout created");
+}
+
+export async function getSeats(req: Request, res: Response) {
+  return sendSuccess(res, await service.getSeatSummary(req.user!.organizationId));
+}
+
 export async function verify(req: Request, res: Response) {
   const { billingPaymentId } = req.body as { billingPaymentId: string };
   const result = await service.verifyPayment(billingPaymentId, req.user!.organizationId);

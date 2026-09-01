@@ -8,10 +8,22 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, Customer, PaginationMeta } from "../../types/api";
 import { formatMoney } from "../../lib/format";
+import { cn } from "../../lib/cn";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { usePriceLists } from "../../api/posApi";
 import { roundMoney } from "../../stores/posStore";
 import { useAuth } from "../../contexts/AuthContext";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { labelClass, inputClass, inputSmClass, errorTextClass } from "../../components/ui/formClasses";
+import { Users } from "lucide-react";
 
 const schema = z.object({
   nameEn: z.string().min(1, "Required"),
@@ -49,7 +61,7 @@ export default function CustomersPage() {
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<z.input<typeof schema>, unknown, FormValues>({ resolver: zodResolver(schema) });
 
   const createMutation = useMutation({
     mutationFn: async (values: FormValues) => {
@@ -66,6 +78,12 @@ export default function CustomersPage() {
       setServerError(isAxiosError(err) ? err.response?.data?.message ?? t("common.somethingWentWrong") : t("common.somethingWentWrong"));
     },
   });
+
+  function closeForm() {
+    setShowForm(false);
+    reset();
+    setServerError(null);
+  }
 
   const { data: priceLists } = usePriceLists();
   const assignPriceListMutation = useMutation({
@@ -85,55 +103,66 @@ export default function CustomersPage() {
   const [applyCreditCustomer, setApplyCreditCustomer] = useState<Customer | null>(null);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{t("customers.title")}</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-        >
-          + {t("customers.addCustomer")}
-        </button>
-      </div>
-
-      <input
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPage(1);
-        }}
-        placeholder={t("common.search")}
-        className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm"
+    <div className="space-y-6">
+      <PageHeader
+        title={t("customers.title")}
+        actions={<Button onClick={() => setShowForm(true)}>+ {t("customers.addCustomer")}</Button>}
       />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-start text-xs uppercase text-slate-500">
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Users}
+            cardBg="bg-app-users-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={t("customers.title")}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <TableToolbar>
+          <SearchInput
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder={t("common.search")}
+            className="max-w-xs"
+          />
+        </TableToolbar>
+        <TableScroll>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{t("customers.code")}</th>
-              <th className="px-4 py-2 text-start">{t("common.name")}</th>
-              <th className="px-4 py-2 text-start">{t("common.phone")}</th>
-              <th className="px-4 py-2 text-start">{t("customers.group")}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "قائمة الأسعار" : "Price List"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "النقاط" : "Points"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الكاش باك" : "Cashback"}</th>
-              <th className="px-4 py-2 text-start">{t("customers.balance")}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start">{t("common.actions")}</th>
+              <Th>{t("customers.code")}</Th>
+              <Th>{t("common.name")}</Th>
+              <Th>{t("common.phone")}</Th>
+              <Th>{t("customers.group")}</Th>
+              <Th>{isAr ? "قائمة الأسعار" : "Price List"}</Th>
+              <Th>{isAr ? "النقاط" : "Points"}</Th>
+              <Th>{isAr ? "الكاش باك" : "Cashback"}</Th>
+              <Th>{t("customers.balance")}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100">
-                <td className="px-4 py-2"><span className="ltr-nums">{c.code}</span></td>
-                <td className="px-4 py-2">{isAr ? c.nameAr || c.nameEn : c.nameEn}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{c.phone}</span></td>
-                <td className="px-4 py-2">{c.customerGroup ? (isAr ? c.customerGroup.nameAr : c.customerGroup.nameEn) : "-"}</td>
-                <td className="px-4 py-2">
+              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{c.code}</span></td>
+                <td className="px-4 py-3">{isAr ? c.nameAr || c.nameEn : c.nameEn}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{c.phone}</span></td>
+                <td className="px-4 py-3">{c.customerGroup ? (isAr ? c.customerGroup.nameAr : c.customerGroup.nameEn) : "-"}</td>
+                <td className="px-4 py-3">
                   <select
                     value={c.priceListId ?? ""}
                     onChange={(e) => assignPriceListMutation.mutate({ id: c.id, priceListId: e.target.value || null })}
-                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs focus:border-sky-400 focus:outline-none"
+                    className={inputSmClass}
                   >
                     <option value="">{isAr ? "بلا" : "None"}</option>
                     {priceLists?.map((pl) => (
@@ -143,57 +172,54 @@ export default function CustomersPage() {
                     ))}
                   </select>
                 </td>
-                <td className="px-4 py-2">
-                  <button onClick={() => setAdjustingCustomer(c)} className="ltr-nums rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  <button onClick={() => setAdjustingCustomer(c)} className="ltr-nums rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-200">
                     {c.rewardPoints}
                   </button>
                 </td>
-                <td className="px-4 py-2">
-                  <button onClick={() => setAdjustingCashbackCustomer(c)} className="ltr-nums rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  <button onClick={() => setAdjustingCashbackCustomer(c)} className="ltr-nums rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-200">
                     {formatMoney(c.cashBack, currency, locale)}
                   </button>
                 </td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(c.balance, currency, locale)}</span></td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(c.balance, currency, locale)}</span></td>
+                <td className="px-4 py-3">
                   <div className="flex flex-col items-start gap-1">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${c.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                    <Badge variant={c.status === "ACTIVE" ? "success" : "neutral"}>
                       {c.status === "ACTIVE" ? t("common.active") : t("common.inactive")}
-                    </span>
+                    </Badge>
                     {c.approvalStatus !== "APPROVED" && (
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          c.approvalStatus === "PENDING" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
-                        }`}
-                      >
+                      <Badge variant={c.approvalStatus === "PENDING" ? "warning" : "danger"}>
                         {c.approvalStatus === "PENDING" ? (isAr ? "بانتظار الموافقة" : "Pending approval") : isAr ? "مرفوض" : "Rejected"}
-                      </span>
+                      </Badge>
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1.5">
                     {Number(c.balance) < 0 && (
-                      <button
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-emerald-200 bg-emerald-50 text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-200"
                         onClick={() => setApplyCreditCustomer(c)}
-                        className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
                       >
                         {isAr ? "تطبيق الرصيد" : "Apply Credit"}
-                      </button>
+                      </Button>
                     )}
                     {c.approvalStatus === "PENDING" && can("customers.approve") && (
                       <>
-                        <button
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-emerald-200 bg-emerald-50 text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-200"
                           onClick={() => approvalMutation.mutate({ id: c.id, status: "APPROVED" })}
-                          className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
                         >
                           {isAr ? "موافقة" : "Approve"}
-                        </button>
-                        <button
-                          onClick={() => approvalMutation.mutate({ id: c.id, status: "REJECTED" })}
-                          className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
-                        >
+                        </Button>
+                        <Button size="sm" variant="danger" onClick={() => approvalMutation.mutate({ id: c.id, status: "REJECTED" })}>
                           {isAr ? "رفض" : "Reject"}
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -208,80 +234,58 @@ export default function CustomersPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+        </TableScroll>
+      </TableContainer>
 
-      {data?.meta && data.meta.totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40">
-            ‹
-          </button>
-          <span>
-            {t("common.page")} {page} {t("common.of")} {data.meta.totalPages}
-          </span>
-          <button
-            disabled={page >= data.meta.totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
-          >
-            ›
-          </button>
-        </div>
+      {data?.meta && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
       )}
 
       {showForm && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800">{t("customers.addCustomer")}</h2>
-            <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("customers.nameEn")}</label>
-                <input {...register("nameEn")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                {errors.nameEn && <p className="mt-1 text-xs text-red-600">{errors.nameEn.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("customers.nameAr")}</label>
-                <input {...register("nameAr")} dir="rtl" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.phone")}</label>
-                <input {...register("phone")} placeholder="05XXXXXXXX" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.email")}</label>
-                <input {...register("email")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "الرصيد الافتتاحي" : "Opening Balance"}</label>
-                <input type="number" step="0.01" {...register("openingBalance")} placeholder="0.00" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-              </div>
+        <Modal title={t("customers.addCustomer")} onClose={closeForm} size="md">
+          <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-4">
+            <div>
+              <label className={labelClass}>{t("customers.nameEn")}</label>
+              <input {...register("nameEn")} className={inputClass} />
+              {errors.nameEn && <p className={errorTextClass}>{errors.nameEn.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>{t("customers.nameAr")}</label>
+              <input {...register("nameAr")} dir="rtl" className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{t("common.phone")}</label>
+              <input {...register("phone")} placeholder="05XXXXXXXX" className={cn(inputClass, "ltr-nums")} />
+              {errors.phone && <p className={errorTextClass}>{errors.phone.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>{t("common.email")}</label>
+              <input {...register("email")} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "الرصيد الافتتاحي" : "Opening Balance"}</label>
+              <input type="number" step="0.01" {...register("openingBalance")} placeholder="0.00" className={cn(inputClass, "ltr-nums")} />
+            </div>
 
-              {serverError && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{serverError}</p>}
+            {serverError && <Alert variant="danger">{serverError}</Alert>}
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    reset();
-                    setServerError(null);
-                  }}
-                  className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                >
-                  {t("common.save")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="flex gap-2 pt-2">
+              <Button type="button" variant="outline" fullWidth onClick={closeForm}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" fullWidth disabled={isSubmitting}>
+                {t("common.save")}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {adjustingCustomer && (
@@ -399,68 +403,68 @@ function ApplyCreditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{isAr ? "تطبيق الرصيد" : "Apply Store Credit"}</h3>
-            <p className="text-xs text-slate-400">
-              {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد المتاح" : "Available"}:{" "}
-              <span className="ltr-nums">{formatMoney(availableCredit, currency, locale)}</span>
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
+    <Modal
+      title={isAr ? "تطبيق الرصيد" : "Apply Store Credit"}
+      subtitle={
+        <>
+          {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد المتاح" : "Available"}:{" "}
+          <span className="ltr-nums">{formatMoney(availableCredit, currency, locale)}</span>
+        </>
+      }
+      onClose={onClose}
+      size="lg"
+    >
+      <Button
+        size="sm"
+        variant="outline"
+        className="mb-3 border-emerald-200 bg-emerald-50 text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-200"
+        onClick={autoApplyOldestFirst}
+        disabled={dueSales.length === 0}
+      >
+        {isAr ? "تطبيق تلقائي (الأقدم أولاً)" : "Auto-apply oldest first"}
+      </Button>
 
-        <button
-          onClick={autoApplyOldestFirst}
-          disabled={dueSales.length === 0}
-          className="mb-3 rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
-        >
-          {isAr ? "تطبيق تلقائي (الأقدم أولاً)" : "Auto-apply oldest first"}
-        </button>
-
-        <div className="max-h-72 space-y-2 overflow-y-auto">
-          {dueSales.map((sale) => (
-            <div key={sale.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
-              <div className="min-w-0">
-                <p className="ltr-nums truncate text-sm font-medium text-slate-700">{sale.invoiceNumber}</p>
-                <p className="text-xs text-slate-400">
-                  {isAr ? "المستحق" : "Due"}: <span className="ltr-nums">{formatMoney(sale.dueAmount, currency, locale)}</span>
-                </p>
-              </div>
-              <input
-                type="number"
-                min={0}
-                max={Number(sale.dueAmount)}
-                value={amounts[sale.id] ?? ""}
-                onChange={(e) => setAmounts((prev) => ({ ...prev, [sale.id]: e.target.value }))}
-                placeholder="0.00"
-                className="ltr-nums w-28 rounded-md border border-slate-300 px-2 py-1 text-sm"
-              />
+      <div className="max-h-72 space-y-2 overflow-y-auto">
+        {dueSales.map((sale) => (
+          <div key={sale.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+            <div className="min-w-0">
+              <p className="ltr-nums truncate text-sm font-medium text-slate-700">{sale.invoiceNumber}</p>
+              <p className="text-xs text-slate-400">
+                {isAr ? "المستحق" : "Due"}: <span className="ltr-nums">{formatMoney(sale.dueAmount, currency, locale)}</span>
+              </p>
             </div>
-          ))}
-          {dueSales.length === 0 && <p className="py-6 text-center text-sm text-slate-400">{isAr ? "لا توجد فواتير مستحقة" : "No outstanding invoices"}</p>}
-        </div>
-
-        <div className="mt-3 flex justify-between text-sm">
-          <span className="text-slate-500">{isAr ? "الإجمالي المطبق" : "Total to apply"}</span>
-          <span className={`ltr-nums font-semibold ${totalEntered > availableCredit ? "text-red-600" : "text-slate-800"}`}>
-            {formatMoney(totalEntered, currency, locale)}
-          </span>
-        </div>
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <button
-          onClick={submit}
-          disabled={submitting || totalEntered <= 0 || totalEntered > availableCredit}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          {submitting ? "…" : isAr ? "تطبيق" : "Apply"}
-        </button>
+            <input
+              type="number"
+              min={0}
+              max={Number(sale.dueAmount)}
+              value={amounts[sale.id] ?? ""}
+              onChange={(e) => setAmounts((prev) => ({ ...prev, [sale.id]: e.target.value }))}
+              placeholder="0.00"
+              className={cn(inputSmClass, "w-28 ltr-nums")}
+            />
+          </div>
+        ))}
+        {dueSales.length === 0 && <p className="py-6 text-center text-sm text-slate-400">{isAr ? "لا توجد فواتير مستحقة" : "No outstanding invoices"}</p>}
       </div>
-    </div>
+
+      <div className="mt-3 flex justify-between text-sm">
+        <span className="text-slate-500">{isAr ? "الإجمالي المطبق" : "Total to apply"}</span>
+        <span className={cn("ltr-nums font-semibold", totalEntered > availableCredit ? "text-red-600" : "text-slate-800")}>
+          {formatMoney(totalEntered, currency, locale)}
+        </span>
+      </div>
+
+      {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+
+      <Button
+        fullWidth
+        className="mt-4"
+        onClick={submit}
+        disabled={submitting || totalEntered <= 0 || totalEntered > availableCredit}
+      >
+        {submitting ? "…" : isAr ? "تطبيق" : "Apply"}
+      </Button>
+    </Modal>
   );
 }
 
@@ -488,40 +492,40 @@ function AdjustPointsModal({
   const canSubmit = Number(points) !== 0 && Number.isInteger(Number(points)) && note.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{isAr ? "تعديل النقاط" : "Adjust Points"}</h3>
-            <p className="text-xs text-slate-400">
-              {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد الحالي" : "Current balance"}: {customer.rewardPoints}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+    <Modal
+      title={isAr ? "تعديل النقاط" : "Adjust Points"}
+      subtitle={
+        <>
+          {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد الحالي" : "Current balance"}:{" "}
+          <span className="ltr-nums">{customer.rewardPoints}</span>
+        </>
+      }
+      onClose={onClose}
+      size="sm"
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
+          <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} placeholder="-50" className={inputClass} autoFocus />
         </div>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
-            <input type="number" value={points} onChange={(e) => setPoints(e.target.value)} placeholder="-50" className={inp} autoFocus />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "السبب" : "Reason"}</label>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isAr ? "تصحيح، مكافأة ولاء..." : "Correction, goodwill bonus..."} className={inp} />
-          </div>
+        <div>
+          <label className={labelClass}>{isAr ? "السبب" : "Reason"}</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isAr ? "تصحيح، مكافأة ولاء..." : "Correction, goodwill bonus..."} className={inputClass} />
         </div>
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
-          onClick={() => {
-            setError(null);
-            mutation.mutate();
-          }}
-          disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
       </div>
-    </div>
+      {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+      <Button
+        fullWidth
+        className="mt-4"
+        onClick={() => {
+          setError(null);
+          mutation.mutate();
+        }}
+        disabled={!canSubmit || mutation.isPending}
+      >
+        {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
+      </Button>
+    </Modal>
   );
 }
 
@@ -553,41 +557,39 @@ function AdjustCashbackModal({
   const canSubmit = Number(amount) !== 0 && note.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{isAr ? "تعديل الكاش باك" : "Adjust Cashback"}</h3>
-            <p className="text-xs text-slate-400">
-              {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد الحالي" : "Current balance"}: {formatMoney(customer.cashBack, currency, locale)}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+    <Modal
+      title={isAr ? "تعديل الكاش باك" : "Adjust Cashback"}
+      subtitle={
+        <>
+          {isAr ? customer.nameAr || customer.nameEn : customer.nameEn} · {isAr ? "الرصيد الحالي" : "Current balance"}:{" "}
+          <span className="ltr-nums">{formatMoney(customer.cashBack, currency, locale)}</span>
+        </>
+      }
+      onClose={onClose}
+      size="sm"
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
+          <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-25.00" className={inputClass} autoFocus />
         </div>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
-            <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-25.00" className={inp} autoFocus />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "السبب" : "Reason"}</label>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isAr ? "تصحيح، مكافأة..." : "Correction, goodwill grant..."} className={inp} />
-          </div>
+        <div>
+          <label className={labelClass}>{isAr ? "السبب" : "Reason"}</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={isAr ? "تصحيح، مكافأة..." : "Correction, goodwill grant..."} className={inputClass} />
         </div>
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
-          onClick={() => {
-            setError(null);
-            mutation.mutate();
-          }}
-          disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
       </div>
-    </div>
+      {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+      <Button
+        fullWidth
+        className="mt-4"
+        onClick={() => {
+          setError(null);
+          mutation.mutate();
+        }}
+        disabled={!canSubmit || mutation.isPending}
+      >
+        {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
+      </Button>
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

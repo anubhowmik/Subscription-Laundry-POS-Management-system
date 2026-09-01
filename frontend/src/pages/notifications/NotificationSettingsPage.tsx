@@ -4,6 +4,13 @@ import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Card } from "../../components/ui/Card";
+import { Alert } from "../../components/ui/Alert";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass, textareaClass } from "../../components/ui/formClasses";
 
 interface NotificationSettings {
   provider: "UNIFONIC";
@@ -40,10 +47,10 @@ interface NotificationLogRow {
   createdAt: string;
 }
 
-const STATUS_LABEL: Record<NotificationLogRow["status"], { en: string; ar: string; cls: string }> = {
-  SENT: { en: "Sent", ar: "أُرسل", cls: "bg-green-100 text-green-700" },
-  FAILED: { en: "Failed", ar: "فشل", cls: "bg-red-100 text-red-700" },
-  TEST: { en: "Test (not sent)", ar: "تجريبي (لم يُرسل)", cls: "bg-amber-100 text-amber-700" },
+const STATUS_LABEL: Record<NotificationLogRow["status"], { en: string; ar: string; variant: "success" | "danger" | "warning" }> = {
+  SENT: { en: "Sent", ar: "أُرسل", variant: "success" },
+  FAILED: { en: "Failed", ar: "فشل", variant: "danger" },
+  TEST: { en: "Test (not sent)", ar: "تجريبي (لم يُرسل)", variant: "warning" },
 };
 
 export default function NotificationSettingsPage() {
@@ -88,46 +95,42 @@ export default function NotificationSettingsPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-xl font-semibold text-slate-800">{isAr ? "إشعارات الرسائل النصية" : "SMS Notifications"}</h1>
+      <PageHeader title={isAr ? "إشعارات الرسائل النصية" : "SMS Notifications"} />
       <p className="text-sm text-slate-500">
         {isAr
           ? "يتم إرسال رسالة نصية تلقائيًا للعميل عند جهوز الطلب أو تسليمه. المزود الحالي: Unifonic. حتى تُفعّل الإعدادات، تُسجَّل الرسائل فقط دون إرسال فعلي."
           : "A text message is sent automatically when an order becomes ready or is delivered. Current provider: Unifonic. Until you enable this with real credentials, messages are only logged, never actually sent."}
       </p>
 
-      <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <Card className="space-y-4 p-5">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "Sender ID" : "Sender ID"}</label>
-          <input value={senderId} onChange={(e) => setSenderId(e.target.value)} placeholder="MyLaundry" className={inp} />
+          <label className={labelClass}>{isAr ? "Sender ID" : "Sender ID"}</label>
+          <input value={senderId} onChange={(e) => setSenderId(e.target.value)} placeholder="MyLaundry" className={inputClass} />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">
-            App Sid {settings?.hasAppSid && <span className="text-green-600">({isAr ? "مُعدّ" : "configured"})</span>}
+          <label className={labelClass}>
+            App Sid {settings?.hasAppSid && <span className="text-emerald-600">({isAr ? "مُعدّ" : "configured"})</span>}
           </label>
           <input
             type="password"
             value={appSid}
             onChange={(e) => setAppSid(e.target.value)}
             placeholder={settings?.hasAppSid ? (isAr ? "اتركه فارغًا للإبقاء على القيمة الحالية" : "Leave blank to keep current value") : "App Sid"}
-            className={inp}
+            className={inputClass}
           />
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           {isAr ? "تفعيل الإرسال الفعلي" : "Enable real sending"}
         </label>
-        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
-          onClick={() => mutation.mutate()}
-          disabled={mutation.isPending}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
+        {error && <Alert variant="danger">{error}</Alert>}
+        <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
           {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
-      </div>
+        </Button>
+      </Card>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">{isAr ? "قوالب الرسائل" : "Message Templates"}</h2>
+        <h2 className="mb-2 text-sm font-semibold text-slate-800">{isAr ? "قوالب الرسائل" : "Message Templates"}</h2>
         <p className="mb-3 text-xs text-slate-500">
           {isAr
             ? "المتغيرات المتاحة: {customerName} {invoiceNumber} {amount} {dueAmount}"
@@ -141,29 +144,29 @@ export default function NotificationSettingsPage() {
       </div>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">{isAr ? "آخر الرسائل" : "Recent Messages"}</h2>
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+        <h2 className="mb-2 text-sm font-semibold text-slate-800">{isAr ? "آخر الرسائل" : "Recent Messages"}</h2>
+        <TableContainer>
+          <Table>
+            <THead>
               <tr>
-                <th className="px-4 py-2 text-start">{isAr ? "الوقت" : "Time"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الهاتف" : "Phone"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الرسالة" : "Message"}</th>
-                <th className="px-4 py-2 text-start">{t("common.status")}</th>
+                <Th>{isAr ? "الوقت" : "Time"}</Th>
+                <Th>{isAr ? "الهاتف" : "Phone"}</Th>
+                <Th>{isAr ? "الرسالة" : "Message"}</Th>
+                <Th>{t("common.status")}</Th>
               </tr>
-            </thead>
+            </THead>
             <tbody>
               {logs?.map((l) => (
-                <tr key={l.id} className="border-b border-slate-100">
-                  <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(l.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{l.toPhone}</span></td>
-                  <td className="max-w-[280px] truncate px-4 py-2 text-slate-600" title={l.message}>
+                <tr key={l.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(l.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{l.toPhone}</span></td>
+                  <td className="max-w-[280px] truncate px-4 py-3 text-slate-600" title={l.message}>
                     {l.message}
                   </td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_LABEL[l.status].cls}`} title={l.errorMessage ?? undefined}>
+                  <td className="px-4 py-3">
+                    <Badge variant={STATUS_LABEL[l.status].variant} title={l.errorMessage ?? undefined}>
                       {isAr ? STATUS_LABEL[l.status].ar : STATUS_LABEL[l.status].en}
-                    </span>
+                    </Badge>
                   </td>
                 </tr>
               ))}
@@ -175,8 +178,8 @@ export default function NotificationSettingsPage() {
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableContainer>
       </div>
     </div>
   );
@@ -196,9 +199,9 @@ function TemplateCard({ isAr, template }: { isAr: boolean; template: Notificatio
   const dirty = messageEn !== template.messageEn || messageAr !== template.messageAr || isEnabled !== template.isEnabled;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <Card className="p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">{isAr ? TRIGGER_LABEL[template.trigger].ar : TRIGGER_LABEL[template.trigger].en}</h3>
+        <h3 className="text-sm font-semibold text-slate-800">{isAr ? TRIGGER_LABEL[template.trigger].ar : TRIGGER_LABEL[template.trigger].en}</h3>
         <label className="flex items-center gap-1.5 text-xs text-slate-600">
           <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />
           {isAr ? "مفعّل" : "Enabled"}
@@ -206,25 +209,19 @@ function TemplateCard({ isAr, template }: { isAr: boolean; template: Notificatio
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">English</label>
-          <textarea value={messageEn} onChange={(e) => setMessageEn(e.target.value)} rows={2} className={inp} />
+          <label className={labelClass}>English</label>
+          <textarea value={messageEn} onChange={(e) => setMessageEn(e.target.value)} rows={2} className={textareaClass} />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">العربية</label>
-          <textarea value={messageAr} onChange={(e) => setMessageAr(e.target.value)} dir="rtl" rows={2} className={inp} />
+          <label className={labelClass}>العربية</label>
+          <textarea value={messageAr} onChange={(e) => setMessageAr(e.target.value)} dir="rtl" rows={2} className={textareaClass} />
         </div>
       </div>
       {dirty && (
-        <button
-          onClick={() => mutation.mutate()}
-          disabled={mutation.isPending}
-          className="mt-2 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
+        <Button size="sm" className="mt-2" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
           {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
+        </Button>
       )}
-    </div>
+    </Card>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

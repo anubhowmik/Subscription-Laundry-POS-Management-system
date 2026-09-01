@@ -7,6 +7,7 @@ import { updateItemStatusSchema, listBoardItemsQuerySchema } from "./sale.valida
 
 const router = Router();
 router.use(authenticate, requirePermission("sales.view"));
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/", controller.list);
 router.get("/board", validate(listBoardItemsQuerySchema, "query"), controller.listBoardItems);

@@ -7,6 +7,7 @@ import { complianceCsidSchema } from "./certificate.validators";
 
 const router = Router();
 router.use(authenticate, requirePermission("business_locations.update"));
+router.use(requirePermission("app.zatca"));
 
 router.post("/:locationId/generate", controller.generate);
 router.get("/:locationId/status", controller.getStatus);

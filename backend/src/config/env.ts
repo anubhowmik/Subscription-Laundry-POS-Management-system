@@ -37,6 +37,22 @@ export const env = {
       webhookSecret: process.env.MOYASAR_WEBHOOK_SECRET ?? "",
     },
   },
+  email: {
+    // "mock" logs the email server-side and (non-production only) echoes the code back in the
+    // API response, so the verification flow is fully testable with no real inbox. Switch to
+    // "real" (and fill in provider credentials below) with ONE env change once a provider is
+    // chosen - no code change. See modules/notifications/emailSender.ts.
+    provider: (process.env.EMAIL_PROVIDER ?? "mock") as "mock" | "real",
+    from: process.env.EMAIL_FROM ?? "noreply@laundry.example.com",
+    // Generic SMTP credentials - populate whichever fields your chosen provider needs (e.g.
+    // SendGrid/Postmark/Resend can often be used via their own SMTP relay too).
+    smtp: {
+      host: process.env.SMTP_HOST ?? "",
+      port: Number(process.env.SMTP_PORT ?? 587),
+      user: process.env.SMTP_USER ?? "",
+      pass: process.env.SMTP_PASS ?? "",
+    },
+  },
   zatca: {
     // Base64-encoded 32-byte key for AES-256-GCM encryption of EC private keys / ZATCA
     // secrets at rest. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"

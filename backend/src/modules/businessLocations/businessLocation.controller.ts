@@ -15,7 +15,7 @@ export async function getById(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const location = await service.create(req.body, req.user!.organizationId);
+  const location = await service.create(req.body, req.user!.organizationId, req.user!.id, req.user!.isSystemAdmin);
   await writeAuditLog({ req, action: "CREATE", module: "business_locations", entityId: location.id, newValues: location });
   return sendSuccess(res, location, "Business location created", 201);
 }
@@ -28,9 +28,15 @@ export async function update(req: Request, res: Response) {
 }
 
 export async function deactivate(req: Request, res: Response) {
-  const location = await service.deactivate(getParam(req, "id"), req.user!.organizationId);
+  const location = await service.deactivate(getParam(req, "id"), req.user!.organizationId, req.user!.isSystemAdmin);
   await writeAuditLog({ req, action: "DEACTIVATE", module: "business_locations", entityId: location.id });
   return sendSuccess(res, location, "Business location deactivated");
+}
+
+export async function reactivate(req: Request, res: Response) {
+  const location = await service.reactivate(getParam(req, "id"), req.user!.organizationId, req.user!.isSystemAdmin);
+  await writeAuditLog({ req, action: "ACTIVATE", module: "business_locations", entityId: location.id });
+  return sendSuccess(res, location, "Business location reactivated");
 }
 
 export async function getInvoiceLayout(req: Request, res: Response) {

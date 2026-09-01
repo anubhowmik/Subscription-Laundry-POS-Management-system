@@ -36,8 +36,13 @@ async function refreshAccessToken(): Promise<string | null> {
         setAccessToken(token);
         return token;
       })
-      .catch(() => {
-        setAccessToken(null);
+      .catch((err) => {
+        // Only a definitive "the refresh token itself is invalid/expired/revoked" (401) means the
+        // session is actually over - wipe it. Any other failure (429 rate limit, network error,
+        // 5xx) is transient: leave the stored access token alone so the next request can retry,
+        // instead of force-logging the user out over a blip that has nothing to do with their
+        // session's validity.
+        if (err.response?.status === 401) setAccessToken(null);
         return null;
       })
       .finally(() => {
@@ -49,6 +54,19 @@ async function refreshAccessToken(): Promise<string | null> {
 
 interface RetryableConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
+}
+
+// Pages that work perfectly well logged-out - a failed silent auth check here (e.g. a stale
+// token left over from a previous session/browser tab) must NEVER hard-redirect the visitor
+// away from what they actually opened. AuthContext's own bootstrap effect already handles a
+// failed /auth/me call correctly on its own (clears the token, renders the logged-out view) -
+// the only thing that needs guarding against is THIS interceptor separately force-navigating
+// on top of that. Redirecting to /login is only appropriate once a genuinely protected page
+// (dashboard, users, pos, ...) can no longer reach the API - i.e. someone actively using the
+// app who just got logged out mid-session.
+const PUBLIC_PATHS = ["/", "/login", "/register", "/verify-email"];
+function isOnPublicPage() {
+  return PUBLIC_PATHS.includes(window.location.pathname);
 }
 
 api.interceptors.response.use(
@@ -64,7 +82,10 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${token}`;
         return api(originalRequest);
       }
-      if (!window.location.pathname.startsWith("/login")) {
+      // getAccessToken() is only cleared inside refreshAccessToken() when the refresh call itself
+      // came back 401 (session genuinely over). A transient refresh failure (429/network/5xx)
+      // leaves it set, so the user stays on the current page and can just retry - no hard redirect.
+      if (!getAccessToken() && !isOnPublicPage()) {
         window.location.href = "/login";
       }
     }

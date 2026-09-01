@@ -9,6 +9,18 @@ import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta, Supplier } from "../../types/api";
 import { formatMoney } from "../../lib/format";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { cn } from "../../lib/cn";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Alert } from "../../components/ui/Alert";
+import { Modal } from "../../components/ui/Modal";
+import { Pagination } from "../../components/ui/Pagination";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { labelClass, inputClass, errorTextClass } from "../../components/ui/formClasses";
+import { Truck } from "lucide-react";
 
 const schema = z.object({
   nameEn: z.string().min(1, "Required"),
@@ -50,7 +62,7 @@ export default function SuppliersPage() {
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<z.input<typeof schema>, unknown, FormValues>({ resolver: zodResolver(schema) });
 
   const createMutation = useMutation({
     mutationFn: async (values: FormValues) => {
@@ -69,55 +81,70 @@ export default function SuppliersPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "الموردون" : "Suppliers"}</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-        >
-          + {isAr ? "إضافة مورد" : "Add Supplier"}
-        </button>
-      </div>
-
-      <input
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPage(1);
-        }}
-        placeholder={t("common.search")}
-        className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm"
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "الموردون" : "Suppliers"}
+        actions={
+          <Button onClick={() => setShowForm(true)}>
+            + {isAr ? "إضافة مورد" : "Add Supplier"}
+          </Button>
+        }
       />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-start text-xs uppercase text-slate-500">
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Truck}
+            cardBg="bg-sky-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "الموردون" : "Suppliers"}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <TableToolbar>
+          <SearchInput
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder={t("common.search")}
+            className="max-w-xs"
+          />
+        </TableToolbar>
+        <TableScroll>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "الرمز" : "Code"}</th>
-              <th className="px-4 py-2 text-start">{t("common.name")}</th>
-              <th className="px-4 py-2 text-start">{t("common.phone")}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الرقم الضريبي" : "VAT Number"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "شرط الدفع (يوم)" : "Pay Term (days)"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "حد الائتمان" : "Credit Limit"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "مستحق الشراء" : "Purchase Due"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
+              <Th>{isAr ? "الرمز" : "Code"}</Th>
+              <Th>{t("common.name")}</Th>
+              <Th>{t("common.phone")}</Th>
+              <Th>{isAr ? "الرقم الضريبي" : "VAT Number"}</Th>
+              <Th>{isAr ? "شرط الدفع (يوم)" : "Pay Term (days)"}</Th>
+              <Th>{isAr ? "حد الائتمان" : "Credit Limit"}</Th>
+              <Th>{isAr ? "مستحق الشراء" : "Purchase Due"}</Th>
+              <Th>{t("common.status")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((s) => (
-              <tr key={s.id} className="border-b border-slate-100">
-                <td className="px-4 py-2"><span className="ltr-nums">{s.code}</span></td>
-                <td className="px-4 py-2">{isAr ? s.nameAr || s.nameEn : s.nameEn}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{s.phone}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{s.vatNumber ?? "-"}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{s.paymentTermsDays}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(s.creditLimit, currency, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(s.balance, currency, locale)}</span></td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${s.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+              <tr key={s.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{s.code}</span></td>
+                <td className="px-4 py-3">{isAr ? s.nameAr || s.nameEn : s.nameEn}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{s.phone}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{s.vatNumber ?? "-"}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{s.paymentTermsDays}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.creditLimit, currency, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.balance, currency, locale)}</span></td>
+                <td className="px-4 py-3">
+                  <Badge variant={s.status === "ACTIVE" ? "success" : "neutral"}>
                     {s.status === "ACTIVE" ? t("common.active") : t("common.inactive")}
-                  </span>
+                  </Badge>
                 </td>
               </tr>
             ))}
@@ -129,100 +156,94 @@ export default function SuppliersPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+        </TableScroll>
+      </TableContainer>
 
       {data?.meta && data.meta.totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40">
-            ‹
-          </button>
-          <span>
-            {t("common.page")} {page} {t("common.of")} {data.meta.totalPages}
-          </span>
-          <button
-            disabled={page >= data.meta.totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
-          >
-            ›
-          </button>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
       )}
 
       {showForm && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800">{isAr ? "إضافة مورد" : "Add Supplier"}</h2>
-            <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-3">
+        <Modal
+          title={isAr ? "إضافة مورد" : "Add Supplier"}
+          onClose={() => {
+            setShowForm(false);
+            reset();
+            setServerError(null);
+          }}
+        >
+          <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-4">
+            <div>
+              <label className={labelClass}>{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
+              <input {...register("nameEn")} className={inputClass} />
+              {errors.nameEn && <p className={errorTextClass}>{errors.nameEn.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
+              <input {...register("nameAr")} dir="rtl" className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{t("common.phone")}</label>
+              <input {...register("phone")} className={cn(inputClass, "ltr-nums")} />
+              {errors.phone && <p className={errorTextClass}>{errors.phone.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>{t("common.email")}</label>
+              <input {...register("email")} className={inputClass} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
-                <input {...register("nameEn")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                {errors.nameEn && <p className="mt-1 text-xs text-red-600">{errors.nameEn.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
-                <input {...register("nameAr")} dir="rtl" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.phone")}</label>
-                <input {...register("phone")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.email")}</label>
-                <input {...register("email")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "الرقم الضريبي" : "VAT Number"}</label>
-                  <input {...register("vatNumber")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "شرط الدفع (يوم)" : "Pay Term (days)"}</label>
-                  <input type="number" {...register("paymentTermsDays")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "الرصيد الافتتاحي" : "Opening Balance"}</label>
-                  <input type="number" step="0.01" {...register("openingBalance")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "حد الائتمان" : "Credit Limit"}</label>
-                  <input type="number" step="0.01" {...register("creditLimit")} placeholder="0.00" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm ltr-nums" />
-                </div>
+                <label className={labelClass}>{isAr ? "الرقم الضريبي" : "VAT Number"}</label>
+                <input {...register("vatNumber")} className={cn(inputClass, "ltr-nums")} />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{isAr ? "العنوان" : "Address"}</label>
-                <input {...register("address")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                <label className={labelClass}>{isAr ? "شرط الدفع (يوم)" : "Pay Term (days)"}</label>
+                <input type="number" {...register("paymentTermsDays")} className={cn(inputClass, "ltr-nums")} />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>{isAr ? "الرصيد الافتتاحي" : "Opening Balance"}</label>
+                <input type="number" step="0.01" {...register("openingBalance")} className={cn(inputClass, "ltr-nums")} />
+              </div>
+              <div>
+                <label className={labelClass}>{isAr ? "حد الائتمان" : "Credit Limit"}</label>
+                <input type="number" step="0.01" {...register("creditLimit")} placeholder="0.00" className={cn(inputClass, "ltr-nums")} />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "العنوان" : "Address"}</label>
+              <input {...register("address")} className={inputClass} />
+            </div>
 
-              {serverError && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{serverError}</p>}
+            {serverError && <Alert variant="danger">{serverError}</Alert>}
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    reset();
-                    setServerError(null);
-                  }}
-                  className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                >
-                  {t("common.save")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                onClick={() => {
+                  setShowForm(false);
+                  reset();
+                  setServerError(null);
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" fullWidth disabled={isSubmitting}>
+                {t("common.save")}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );

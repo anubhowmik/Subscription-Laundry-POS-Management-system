@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
+import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 interface CreateBookingInput {
   businessLocationId: string;
@@ -36,8 +37,7 @@ export async function create(input: CreateBookingInput, organizationId: string, 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const where: Prisma.BookingWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.status ? { status: query.status as "REQUESTED" | "CONFIRMED" | "COMPLETED" | "CANCELLED" } : {}),
     ...(query.type ? { type: query.type as "PICKUP" | "DELIVERY" } : {}),
     ...(query.from || query.to

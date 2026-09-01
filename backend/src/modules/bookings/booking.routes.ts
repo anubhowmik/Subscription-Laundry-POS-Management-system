@@ -7,6 +7,7 @@ import { createBookingSchema, updateBookingStatusSchema, listBookingsQuerySchema
 
 const router = Router();
 router.use(authenticate, requirePermission("bookings.manage"));
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/", validate(listBookingsQuerySchema, "query"), controller.list);
 router.post("/", validate(createBookingSchema), controller.create);

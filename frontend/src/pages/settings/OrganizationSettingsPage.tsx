@@ -4,6 +4,11 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { useTranslation } from "react-i18next";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Card, CardHeader, CardTitle, CardBody } from "../../components/ui/Card";
+import { Alert } from "../../components/ui/Alert";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
 
 interface OrgSettings {
   fiscalYearStartMonth: number;
@@ -66,125 +71,135 @@ export default function OrganizationSettingsPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-xl font-semibold text-slate-800">{isAr ? "إعدادات المنشأة" : "Organization Settings"}</h1>
+      <PageHeader title={isAr ? "إعدادات المنشأة" : "Organization Settings"} />
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">{isAr ? "السنة المالية والتنسيق" : "Fiscal & Format"}</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "بداية السنة المالية (شهر)" : "Fiscal Year Start Month"}</label>
-            <input
-              type="number"
-              min={1}
-              max={12}
-              value={form.fiscalYearStartMonth ?? 1}
-              onChange={(e) => set("fiscalYearStartMonth", Number(e.target.value))}
-              className={inp}
-            />
+      <Card>
+        <CardHeader>
+          <CardTitle>{isAr ? "السنة المالية والتنسيق" : "Fiscal & Format"}</CardTitle>
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "بداية السنة المالية (شهر)" : "Fiscal Year Start Month"}</label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={form.fiscalYearStartMonth ?? 1}
+                onChange={(e) => set("fiscalYearStartMonth", Number(e.target.value))}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "تنسيق التاريخ" : "Date Format"}</label>
+              <input value={form.dateFormat ?? ""} onChange={(e) => set("dateFormat", e.target.value)} className={inputClass} />
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "تنسيق التاريخ" : "Date Format"}</label>
-            <input value={form.dateFormat ?? ""} onChange={(e) => set("dateFormat", e.target.value)} className={inp} />
-          </div>
-        </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={form.timeFormat24h ?? false} onChange={(e) => set("timeFormat24h", e.target.checked)} />
-          {isAr ? "نظام 24 ساعة" : "24-hour time format"}
-        </label>
-      </section>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={form.timeFormat24h ?? false} onChange={(e) => set("timeFormat24h", e.target.checked)} />
+            {isAr ? "نظام 24 ساعة" : "24-hour time format"}
+          </label>
+        </CardBody>
+      </Card>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">{isAr ? "علامة التقارير" : "Report Branding"}</h2>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "نص أعلى التقرير" : "Report Header Text"}</label>
-          <input value={form.reportHeaderText ?? ""} onChange={(e) => set("reportHeaderText", e.target.value)} className={inp} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "نص أسفل التقرير" : "Report Footer Text"}</label>
-          <input value={form.reportFooterText ?? ""} onChange={(e) => set("reportFooterText", e.target.value)} className={inp} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
+      <Card>
+        <CardHeader>
+          <CardTitle>{isAr ? "علامة التقارير" : "Report Branding"}</CardTitle>
+        </CardHeader>
+        <CardBody className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "رابط الشعار" : "Logo URL"}</label>
-            <input value={form.logoUrl ?? ""} onChange={(e) => set("logoUrl", e.target.value)} className={inp} />
+            <label className={labelClass}>{isAr ? "نص أعلى التقرير" : "Report Header Text"}</label>
+            <input value={form.reportHeaderText ?? ""} onChange={(e) => set("reportHeaderText", e.target.value)} className={inputClass} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "اللون الرئيسي" : "Theme Color"}</label>
-            <input type="color" value={form.themeColor ?? "#0284c7"} onChange={(e) => set("themeColor", e.target.value)} className="h-9 w-full rounded-md border border-slate-300" />
+            <label className={labelClass}>{isAr ? "نص أسفل التقرير" : "Report Footer Text"}</label>
+            <input value={form.reportFooterText ?? ""} onChange={(e) => set("reportFooterText", e.target.value)} className={inputClass} />
           </div>
-        </div>
-      </section>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "رابط الشعار" : "Logo URL"}</label>
+              <input value={form.logoUrl ?? ""} onChange={(e) => set("logoUrl", e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "اللون الرئيسي" : "Theme Color"}</label>
+              <input type="color" value={form.themeColor ?? "#0284c7"} onChange={(e) => set("themeColor", e.target.value)} className="h-9 w-full rounded-lg border border-slate-300" />
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">{isAr ? "برنامج نقاط الولاء" : "Reward Points Program"}</h2>
+      <Card>
+        <CardHeader className="flex items-center justify-between">
+          <CardTitle>{isAr ? "برنامج نقاط الولاء" : "Reward Points Program"}</CardTitle>
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             <input type="checkbox" checked={form.rewardPointsEnabled ?? true} onChange={(e) => set("rewardPointsEnabled", e.target.checked)} />
             {isAr ? "مفعّل" : "Enabled"}
           </label>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "اسم النقاط" : "Points Name"}</label>
-            <input value={form.rewardPointsName ?? ""} onChange={(e) => set("rewardPointsName", e.target.value)} className={inp} />
+        </CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "اسم النقاط" : "Points Name"}</label>
+              <input value={form.rewardPointsName ?? ""} onChange={(e) => set("rewardPointsName", e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "قيمة النقطة (ريال)" : "Point Value (SAR)"}</label>
+              <input type="number" step="0.01" value={form.pointValueSar ?? ""} onChange={(e) => set("pointValueSar", e.target.value)} className={`${inputClass} ltr-nums`} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "ريال لكل نقطة مكتسبة" : "SAR per Point Earned"}</label>
+              <input type="number" step="0.01" value={form.pointsEarnDivisor ?? ""} onChange={(e) => set("pointsEarnDivisor", e.target.value)} className={`${inputClass} ltr-nums`} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "الحد الأدنى للطلب لكسب النقاط" : "Min Order for Points"}</label>
+              <input type="number" step="0.01" value={form.minOrderForPoints ?? ""} onChange={(e) => set("minOrderForPoints", e.target.value)} className={`${inputClass} ltr-nums`} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "أقصى نقاط لكل طلب" : "Max Points per Order"}</label>
+              <input
+                type="number"
+                value={form.maxPointsPerOrder ?? ""}
+                onChange={(e) => set("maxPointsPerOrder", e.target.value ? Number(e.target.value) : null)}
+                placeholder={isAr ? "بلا حد" : "No limit"}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "أدنى نقاط للاسترداد" : "Min Points to Redeem"}</label>
+              <input
+                type="number"
+                value={form.minRedeemPoints ?? 0}
+                onChange={(e) => set("minRedeemPoints", Number(e.target.value))}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "أقصى نقاط للاسترداد" : "Max Points to Redeem"}</label>
+              <input
+                type="number"
+                value={form.maxRedeemPoints ?? ""}
+                onChange={(e) => set("maxRedeemPoints", e.target.value ? Number(e.target.value) : null)}
+                placeholder={isAr ? "بلا حد" : "No limit"}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "انتهاء النقاط (أيام)" : "Points Expiry (days)"}</label>
+              <input
+                type="number"
+                value={form.pointsExpiryDays ?? ""}
+                onChange={(e) => set("pointsExpiryDays", e.target.value ? Number(e.target.value) : null)}
+                placeholder={isAr ? "لا تنتهي" : "Never expires"}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "قيمة النقطة (ريال)" : "Point Value (SAR)"}</label>
-            <input type="number" step="0.01" value={form.pointValueSar ?? ""} onChange={(e) => set("pointValueSar", e.target.value)} className={`${inp} ltr-nums`} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ريال لكل نقطة مكتسبة" : "SAR per Point Earned"}</label>
-            <input type="number" step="0.01" value={form.pointsEarnDivisor ?? ""} onChange={(e) => set("pointsEarnDivisor", e.target.value)} className={`${inp} ltr-nums`} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الحد الأدنى للطلب لكسب النقاط" : "Min Order for Points"}</label>
-            <input type="number" step="0.01" value={form.minOrderForPoints ?? ""} onChange={(e) => set("minOrderForPoints", e.target.value)} className={`${inp} ltr-nums`} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أقصى نقاط لكل طلب" : "Max Points per Order"}</label>
-            <input
-              type="number"
-              value={form.maxPointsPerOrder ?? ""}
-              onChange={(e) => set("maxPointsPerOrder", e.target.value ? Number(e.target.value) : null)}
-              placeholder={isAr ? "بلا حد" : "No limit"}
-              className={`${inp} ltr-nums`}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أدنى نقاط للاسترداد" : "Min Points to Redeem"}</label>
-            <input
-              type="number"
-              value={form.minRedeemPoints ?? 0}
-              onChange={(e) => set("minRedeemPoints", Number(e.target.value))}
-              className={`${inp} ltr-nums`}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أقصى نقاط للاسترداد" : "Max Points to Redeem"}</label>
-            <input
-              type="number"
-              value={form.maxRedeemPoints ?? ""}
-              onChange={(e) => set("maxRedeemPoints", e.target.value ? Number(e.target.value) : null)}
-              placeholder={isAr ? "بلا حد" : "No limit"}
-              className={`${inp} ltr-nums`}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "انتهاء النقاط (أيام)" : "Points Expiry (days)"}</label>
-            <input
-              type="number"
-              value={form.pointsExpiryDays ?? ""}
-              onChange={(e) => set("pointsExpiryDays", e.target.value ? Number(e.target.value) : null)}
-              placeholder={isAr ? "لا تنتهي" : "Never expires"}
-              className={`${inp} ltr-nums`}
-            />
-          </div>
-        </div>
-      </section>
+        </CardBody>
+      </Card>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">{isAr ? "تذكيرات الدفع" : "Payment Reminders"}</h2>
+      <Card>
+        <CardHeader className="flex items-center justify-between">
+          <CardTitle>{isAr ? "تذكيرات الدفع" : "Payment Reminders"}</CardTitle>
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             <input
               type="checkbox"
@@ -193,39 +208,41 @@ export default function OrganizationSettingsPage() {
             />
             {isAr ? "مفعّل" : "Enabled"}
           </label>
-        </div>
-        <p className="text-[11px] text-slate-400">
-          {isAr
-            ? "يتم إرسال رسالة تذكير تلقائيًا للفواتير المتأخرة عبر مهمة مجدولة تعمل كل ساعة."
-            : "Overdue invoices get an automatic reminder text via an hourly background job."}
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "التذكير الأول بعد (أيام)" : "First Reminder After (days)"}</label>
-            <input
-              type="number"
-              min={1}
-              value={form.paymentReminderAfterDays ?? 7}
-              onChange={(e) => set("paymentReminderAfterDays", Number(e.target.value))}
-              className={`${inp} ltr-nums`}
-            />
+        </CardHeader>
+        <CardBody className="space-y-4">
+          <p className="text-xs text-slate-400">
+            {isAr
+              ? "يتم إرسال رسالة تذكير تلقائيًا للفواتير المتأخرة عبر مهمة مجدولة تعمل كل ساعة."
+              : "Overdue invoices get an automatic reminder text via an hourly background job."}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "التذكير الأول بعد (أيام)" : "First Reminder After (days)"}</label>
+              <input
+                type="number"
+                min={1}
+                value={form.paymentReminderAfterDays ?? 7}
+                onChange={(e) => set("paymentReminderAfterDays", Number(e.target.value))}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "الفاصل بين التذكيرات (أيام)" : "Repeat Interval (days)"}</label>
+              <input
+                type="number"
+                min={1}
+                value={form.paymentReminderIntervalDays ?? 7}
+                onChange={(e) => set("paymentReminderIntervalDays", Number(e.target.value))}
+                className={`${inputClass} ltr-nums`}
+              />
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفاصل بين التذكيرات (أيام)" : "Repeat Interval (days)"}</label>
-            <input
-              type="number"
-              min={1}
-              value={form.paymentReminderIntervalDays ?? 7}
-              onChange={(e) => set("paymentReminderIntervalDays", Number(e.target.value))}
-              className={`${inp} ltr-nums`}
-            />
-          </div>
-        </div>
-      </section>
+        </CardBody>
+      </Card>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">{isAr ? "موافقة العملاء" : "Customer Approval"}</h2>
+      <Card>
+        <CardHeader className="flex items-center justify-between">
+          <CardTitle>{isAr ? "موافقة العملاء" : "Customer Approval"}</CardTitle>
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             <input
               type="checkbox"
@@ -234,24 +251,20 @@ export default function OrganizationSettingsPage() {
             />
             {isAr ? "مفعّل" : "Enabled"}
           </label>
-        </div>
-        <p className="text-[11px] text-slate-400">
-          {isAr
-            ? "عند التفعيل، يبدأ العملاء الجدد بحالة معلّقة ولا يمكنهم الشراء حتى تتم الموافقة عليهم."
-            : "When enabled, new customers start pending approval and can't check out until approved."}
-        </p>
-      </section>
+        </CardHeader>
+        <CardBody>
+          <p className="text-xs text-slate-400">
+            {isAr
+              ? "عند التفعيل، يبدأ العملاء الجدد بحالة معلّقة ولا يمكنهم الشراء حتى تتم الموافقة عليهم."
+              : "When enabled, new customers start pending approval and can't check out until approved."}
+          </p>
+        </CardBody>
+      </Card>
 
-      {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button
-        onClick={() => mutation.mutate()}
-        disabled={mutation.isPending}
-        className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-      >
+      {error && <Alert variant="danger">{error}</Alert>}
+      <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
         {mutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-      </button>
+      </Button>
     </div>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

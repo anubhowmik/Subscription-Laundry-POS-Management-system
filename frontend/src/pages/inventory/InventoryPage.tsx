@@ -2,10 +2,23 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
+import { X } from "lucide-react";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { useAuth } from "../../contexts/AuthContext";
+import { cn } from "../../lib/cn";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Card, CardHeader, CardTitle } from "../../components/ui/Card";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass, selectClass, inputSmClass } from "../../components/ui/formClasses";
+import { ClipboardList } from "lucide-react";
 
 interface ProductPick {
   id: string;
@@ -55,16 +68,33 @@ export default function InventoryPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-800">{isAr ? "المخزون" : "Inventory"}</h1>
+    <div className="space-y-6">
+      <PageHeader title={isAr ? "المخزون" : "Inventory"} />
+
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={ClipboardList}
+            cardBg="bg-app-pos-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "حركات المخزون" : "Inventory Transactions"}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
 
       {(can("inventory.adjust") || can("inventory.transfer")) && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 flex gap-6 border-b border-slate-100 pb-2">
+        <Card className="p-5">
+          <div className="mb-4 flex gap-6 border-b border-slate-100">
             {can("inventory.adjust") && (
               <button
                 onClick={() => setTab("ADJUST")}
-                className={`text-sm font-semibold transition ${tab === "ADJUST" ? "border-b-2 border-sky-500 pb-2 text-sky-600" : "pb-2 text-slate-400 hover:text-slate-600"}`}
+                className={cn(
+                  "pb-2.5 text-sm font-semibold transition-colors",
+                  tab === "ADJUST" ? "border-b-2 border-sky-600 text-sky-600" : "border-b-2 border-transparent text-slate-500 hover:text-slate-700",
+                )}
               >
                 {isAr ? "تعديل المخزون" : "Adjust Stock"}
               </button>
@@ -72,7 +102,10 @@ export default function InventoryPage() {
             {can("inventory.transfer") && (
               <button
                 onClick={() => setTab("TRANSFER")}
-                className={`text-sm font-semibold transition ${tab === "TRANSFER" ? "border-b-2 border-sky-500 pb-2 text-sky-600" : "pb-2 text-slate-400 hover:text-slate-600"}`}
+                className={cn(
+                  "pb-2.5 text-sm font-semibold transition-colors",
+                  tab === "TRANSFER" ? "border-b-2 border-sky-600 text-sky-600" : "border-b-2 border-transparent text-slate-500 hover:text-slate-700",
+                )}
               >
                 {isAr ? "تحويل مخزون" : "Transfer Stock"}
               </button>
@@ -80,7 +113,10 @@ export default function InventoryPage() {
             {can("inventory.adjust") && (
               <button
                 onClick={() => setTab("GROUP_ADJUST")}
-                className={`text-sm font-semibold transition ${tab === "GROUP_ADJUST" ? "border-b-2 border-sky-500 pb-2 text-sky-600" : "pb-2 text-slate-400 hover:text-slate-600"}`}
+                className={cn(
+                  "pb-2.5 text-sm font-semibold transition-colors",
+                  tab === "GROUP_ADJUST" ? "border-b-2 border-sky-600 text-sky-600" : "border-b-2 border-transparent text-slate-500 hover:text-slate-700",
+                )}
               >
                 {isAr ? "تعديل مجمّع" : "Group Adjustment"}
               </button>
@@ -99,7 +135,7 @@ export default function InventoryPage() {
               }}
             />
           )}
-          {tab === "GROUP_ADJUST" && can("inventory.adjust") && (
+          {tab === "GROUP_ADJUST" && (
             <GroupAdjustForm
               isAr={isAr}
               onDone={() => {
@@ -108,7 +144,7 @@ export default function InventoryPage() {
               }}
             />
           )}
-        </div>
+        </Card>
       )}
 
       {tab === "TRANSFER" && can("inventory.transfer") && (
@@ -128,42 +164,42 @@ export default function InventoryPage() {
         />
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "التاريخ" : "Date"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "النوع" : "Type"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المنتج" : "Product"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الفرع" : "Branch"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الكمية" : "Qty"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الرصيد بعد" : "Balance After"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "ملاحظة" : "Note"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
+              <Th>{isAr ? "التاريخ" : "Date"}</Th>
+              <Th>{isAr ? "النوع" : "Type"}</Th>
+              <Th>{isAr ? "المنتج" : "Product"}</Th>
+              <Th>{isAr ? "الفرع" : "Branch"}</Th>
+              <Th>{isAr ? "الكمية" : "Qty"}</Th>
+              <Th>{isAr ? "الرصيد بعد" : "Balance After"}</Th>
+              <Th>{isAr ? "ملاحظة" : "Note"}</Th>
+              <Th>{isAr ? "بواسطة" : "By"}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((r) => (
-              <tr key={r.id} className="border-b border-slate-100">
-                <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_LABEL[r.type]?.cls ?? "bg-slate-100 text-slate-600"}`}>
+              <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                <td className="px-4 py-3">
+                  <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", TYPE_LABEL[r.type]?.cls ?? "bg-slate-100 text-slate-600")}>
                     {isAr ? TYPE_LABEL[r.type]?.ar ?? r.type : TYPE_LABEL[r.type]?.en ?? r.type}
                   </span>
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3">
                   {isAr ? r.product.nameAr || r.product.nameEn : r.product.nameEn} <span className="ltr-nums text-xs text-slate-400">({r.product.sku})</span>
                 </td>
-                <td className="px-4 py-2">{r.businessLocation.branchName}</td>
-                <td className={`px-4 py-2 font-medium ${Number(r.quantity) < 0 ? "text-red-600" : "text-green-600"}`}>
+                <td className="px-4 py-3">{r.businessLocation.branchName}</td>
+                <td className={cn("px-4 py-3 font-medium", Number(r.quantity) < 0 ? "text-red-600" : "text-green-600")}>
                   <span className="ltr-nums">
                     {Number(r.quantity) > 0 ? "+" : ""}
                     {r.quantity}
                   </span>
                 </td>
-                <td className="px-4 py-2"><span className="ltr-nums">{r.balanceAfter}</span></td>
-                <td className="px-4 py-2 text-slate-500">{r.note ?? "—"}</td>
-                <td className="px-4 py-2 text-slate-500">{r.createdByUser?.fullNameEn ?? "—"}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{r.balanceAfter}</span></td>
+                <td className="px-4 py-3 text-slate-500">{r.note ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-500">{r.createdByUser?.fullNameEn ?? "—"}</td>
               </tr>
             ))}
             {data?.rows.length === 0 && (
@@ -174,21 +210,17 @@ export default function InventoryPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {data?.meta && data.meta.totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40">
-            ‹
-          </button>
-          <span>
-            {t("common.page")} {page} {t("common.of")} {data.meta.totalPages}
-          </span>
-          <button disabled={page >= data.meta.totalPages} onClick={() => setPage((p) => p + 1)} className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40">
-            ›
-          </button>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
       )}
     </div>
   );
@@ -223,15 +255,15 @@ function ProductSearchField({ isAr, picker }: { isAr: boolean; picker: ReturnTyp
         value={picker.picked ? (isAr ? picker.picked.nameAr || picker.picked.nameEn : picker.picked.nameEn) : picker.search}
         onChange={(e) => picker.runSearch(e.target.value)}
         placeholder={isAr ? "ابحث عن منتج..." : "Search for a product..."}
-        className={inp}
+        className={inputClass}
       />
       {picker.results.length > 0 && !picker.picked && (
-        <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-sm">
           {picker.results.map((p) => (
             <button
               key={p.id}
               onClick={() => picker.select(p)}
-              className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
+              className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
             >
               {isAr ? p.nameAr || p.nameEn : p.nameEn} <span className="ltr-nums text-xs text-slate-400">({p.sku})</span>
             </button>
@@ -266,14 +298,14 @@ function AdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }) {
   const canSubmit = Boolean(picker.picked) && businessLocationId && Number(quantityChange) !== 0 && reason.trim().length > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
       <div className="sm:col-span-2">
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المنتج" : "Product"}</label>
+        <label className={labelClass}>{isAr ? "المنتج" : "Product"}</label>
         <ProductSearchField isAr={isAr} picker={picker} />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
-        <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inp}>
+        <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
+        <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={selectClass}>
           {locations.map((l) => (
             <option key={l.id} value={l.id}>
               {l.branchName}
@@ -282,26 +314,30 @@ function AdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }) {
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
-        <input type="number" value={quantityChange} onChange={(e) => setQuantityChange(e.target.value)} placeholder="-5" className={inp} />
+        <label className={labelClass}>{isAr ? "التغيير (+/-)" : "Change (+/-)"}</label>
+        <input type="number" value={quantityChange} onChange={(e) => setQuantityChange(e.target.value)} placeholder="-5" className={cn(inputClass, "ltr-nums")} />
       </div>
       <div className="sm:col-span-3">
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "السبب" : "Reason"}</label>
-        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={isAr ? "جرد، تلف، ..." : "Stock count, damage, ..."} className={inp} />
+        <label className={labelClass}>{isAr ? "السبب" : "Reason"}</label>
+        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={isAr ? "جرد، تلف، ..." : "Stock count, damage, ..."} className={inputClass} />
       </div>
       <div className="flex items-end">
-        <button
+        <Button
           onClick={() => {
             setError(null);
             mutation.mutate();
           }}
           disabled={!canSubmit || mutation.isPending}
-          className="w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+          fullWidth
         >
           {mutation.isPending ? "…" : isAr ? "تطبيق" : "Apply"}
-        </button>
+        </Button>
       </div>
-      {error && <p className="sm:col-span-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && (
+        <Alert variant="danger" className="sm:col-span-4">
+          {error}
+        </Alert>
+      )}
     </div>
   );
 }
@@ -343,14 +379,14 @@ function ShipTransferForm({ isAr, onDone }: { isAr: boolean; onDone: () => void 
   const canSubmit = Boolean(picker.picked) && fromId && toId && fromId !== toId && Number(quantity) > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
       <div className="sm:col-span-2">
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المنتج" : "Product"}</label>
+        <label className={labelClass}>{isAr ? "المنتج" : "Product"}</label>
         <ProductSearchField isAr={isAr} picker={picker} />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من فرع" : "From"}</label>
-        <select value={fromId} onChange={(e) => setFromId(e.target.value)} className={inp}>
+        <label className={labelClass}>{isAr ? "من فرع" : "From"}</label>
+        <select value={fromId} onChange={(e) => setFromId(e.target.value)} className={selectClass}>
           {locations.map((l) => (
             <option key={l.id} value={l.id}>
               {l.branchName}
@@ -359,8 +395,8 @@ function ShipTransferForm({ isAr, onDone }: { isAr: boolean; onDone: () => void 
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى فرع" : "To"}</label>
-        <select value={toId} onChange={(e) => setToId(e.target.value)} className={inp}>
+        <label className={labelClass}>{isAr ? "إلى فرع" : "To"}</label>
+        <select value={toId} onChange={(e) => setToId(e.target.value)} className={selectClass}>
           <option value="">{isAr ? "اختر" : "Select"}</option>
           {locations.filter((l) => l.id !== fromId).map((l) => (
             <option key={l.id} value={l.id}>
@@ -370,34 +406,38 @@ function ShipTransferForm({ isAr, onDone }: { isAr: boolean; onDone: () => void 
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الكمية" : "Quantity"}</label>
-        <input type="number" min={0} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inp} />
+        <label className={labelClass}>{isAr ? "الكمية" : "Quantity"}</label>
+        <input type="number" min={0} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={cn(inputClass, "ltr-nums")} />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "اسم السائق" : "Driver Name"}</label>
-        <input value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inp} />
+        <label className={labelClass}>{isAr ? "اسم السائق" : "Driver Name"}</label>
+        <input value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "رقم المركبة" : "Vehicle Number"}</label>
-        <input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={inp} />
+        <label className={labelClass}>{isAr ? "رقم المركبة" : "Vehicle Number"}</label>
+        <input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} className={cn(inputClass, "ltr-nums")} />
       </div>
       <div className="sm:col-span-2">
-        <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظة الشحن" : "Ship Note"}</label>
-        <input value={shipNote} onChange={(e) => setShipNote(e.target.value)} className={inp} />
+        <label className={labelClass}>{isAr ? "ملاحظة الشحن" : "Ship Note"}</label>
+        <input value={shipNote} onChange={(e) => setShipNote(e.target.value)} className={inputClass} />
       </div>
       <div className="flex items-end">
-        <button
+        <Button
           onClick={() => {
             setError(null);
             mutation.mutate();
           }}
           disabled={!canSubmit || mutation.isPending}
-          className="w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+          fullWidth
         >
           {mutation.isPending ? "…" : isAr ? "شحن التحويل" : "Ship Transfer"}
-        </button>
+        </Button>
       </div>
-      {error && <p className="sm:col-span-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && (
+        <Alert variant="danger" className="sm:col-span-4">
+          {error}
+        </Alert>
+      )}
     </div>
   );
 }
@@ -434,48 +474,50 @@ function PendingTransfers({ isAr, onDone }: { isAr: boolean; onDone: () => void 
   const locationIds = new Set(locations.map((l) => l.id));
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-700">{isAr ? "التحويلات المعلقة" : "Pending Transfers"}</h2>
-      </div>
-      <table className="w-full text-sm">
-        <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
-          <tr>
-            <th className="px-4 py-2 text-start">{isAr ? "المنتج" : "Product"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "من" : "From"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "إلى" : "To"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "الكمية المرسلة" : "Qty Sent"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "السائق" : "Driver"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "تاريخ الشحن" : "Shipped"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "إجراءات" : "Actions"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.map((tr) => (
-            <TransferRow
-              key={tr.id}
-              transfer={tr}
-              isAr={isAr}
-              canReceive={locationIds.has(tr.toBusinessLocationId)}
-              canCancel={locationIds.has(tr.fromBusinessLocationId)}
-              expanded={expandedId === tr.id}
-              onToggle={() => setExpandedId(expandedId === tr.id ? null : tr.id)}
-              onDone={() => {
-                setExpandedId(null);
-                onDone();
-              }}
-            />
-          ))}
-          {data?.length === 0 && (
+    <Card>
+      <CardHeader>
+        <CardTitle>{isAr ? "التحويلات المعلقة" : "Pending Transfers"}</CardTitle>
+      </CardHeader>
+      <div className="overflow-x-auto">
+        <Table>
+          <THead>
             <tr>
-              <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                {isAr ? "لا توجد تحويلات معلقة" : "No pending transfers"}
-              </td>
+              <Th>{isAr ? "المنتج" : "Product"}</Th>
+              <Th>{isAr ? "من" : "From"}</Th>
+              <Th>{isAr ? "إلى" : "To"}</Th>
+              <Th>{isAr ? "الكمية المرسلة" : "Qty Sent"}</Th>
+              <Th>{isAr ? "السائق" : "Driver"}</Th>
+              <Th>{isAr ? "تاريخ الشحن" : "Shipped"}</Th>
+              <Th>{isAr ? "إجراءات" : "Actions"}</Th>
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </THead>
+          <tbody>
+            {data?.map((tr) => (
+              <TransferRow
+                key={tr.id}
+                transfer={tr}
+                isAr={isAr}
+                canReceive={locationIds.has(tr.toBusinessLocationId)}
+                canCancel={locationIds.has(tr.fromBusinessLocationId)}
+                expanded={expandedId === tr.id}
+                onToggle={() => setExpandedId(expandedId === tr.id ? null : tr.id)}
+                onDone={() => {
+                  setExpandedId(null);
+                  onDone();
+                }}
+              />
+            ))}
+            {data?.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  {isAr ? "لا توجد تحويلات معلقة" : "No pending transfers"}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </Table>
+      </div>
+    </Card>
   );
 }
 
@@ -518,33 +560,34 @@ function TransferRow({
 
   return (
     <>
-      <tr className="border-b border-slate-100">
-        <td className="px-4 py-2">
+      <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+        <td className="px-4 py-3">
           {isAr ? transfer.product.nameAr || transfer.product.nameEn : transfer.product.nameEn}{" "}
           <span className="ltr-nums text-xs text-slate-400">({transfer.product.sku})</span>
         </td>
-        <td className="px-4 py-2">{transfer.fromBusinessLocation.branchName}</td>
-        <td className="px-4 py-2">{transfer.toBusinessLocation.branchName}</td>
-        <td className="px-4 py-2"><span className="ltr-nums">{transfer.quantitySent}</span></td>
-        <td className="px-4 py-2 text-slate-500">{transfer.driverName ?? "—"}</td>
-        <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(transfer.shippedAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-        <td className="px-4 py-2">
+        <td className="px-4 py-3">{transfer.fromBusinessLocation.branchName}</td>
+        <td className="px-4 py-3">{transfer.toBusinessLocation.branchName}</td>
+        <td className="px-4 py-3"><span className="ltr-nums">{transfer.quantitySent}</span></td>
+        <td className="px-4 py-3 text-slate-500">{transfer.driverName ?? "—"}</td>
+        <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(transfer.shippedAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+        <td className="px-4 py-3">
           <div className="flex gap-2">
             {canReceive && (
-              <button onClick={onToggle} className="rounded-md bg-sky-600 px-2 py-1 text-xs font-semibold text-white hover:bg-sky-700">
+              <Button size="sm" onClick={onToggle}>
                 {isAr ? "استلام" : "Receive"}
-              </button>
+              </Button>
             )}
             {canCancel && (
-              <button
-                onClick={() => {
-                  if (window.confirm(isAr ? "إلغاء هذا التحويل؟" : "Cancel this transfer?")) cancelMutation.mutate();
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={async () => {
+                  if (await confirmAction({ message: isAr ? "إلغاء هذا التحويل؟" : "Cancel this transfer?", danger: true })) cancelMutation.mutate();
                 }}
                 disabled={cancelMutation.isPending}
-                className="rounded-md bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
               >
                 {isAr ? "إلغاء" : "Cancel"}
-              </button>
+              </Button>
             )}
           </div>
         </td>
@@ -552,28 +595,32 @@ function TransferRow({
       {expanded && (
         <tr className="border-b border-slate-100 bg-slate-50">
           <td colSpan={7} className="px-4 py-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الكمية المستلمة" : "Quantity Received"}</label>
-                <input type="number" min={0} value={quantityReceived} onChange={(e) => setQuantityReceived(e.target.value)} className={inp} />
+                <label className={labelClass}>{isAr ? "الكمية المستلمة" : "Quantity Received"}</label>
+                <input type="number" min={0} value={quantityReceived} onChange={(e) => setQuantityReceived(e.target.value)} className={cn(inputClass, "ltr-nums")} />
               </div>
               <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظة الاستلام" : "Receive Note"}</label>
-                <input value={receiveNote} onChange={(e) => setReceiveNote(e.target.value)} className={inp} />
+                <label className={labelClass}>{isAr ? "ملاحظة الاستلام" : "Receive Note"}</label>
+                <input value={receiveNote} onChange={(e) => setReceiveNote(e.target.value)} className={inputClass} />
               </div>
               <div className="flex items-end">
-                <button
+                <Button
                   onClick={() => {
                     setError(null);
                     receiveMutation.mutate();
                   }}
                   disabled={receiveMutation.isPending || Number(quantityReceived) < 0}
-                  className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  fullWidth
                 >
                   {receiveMutation.isPending ? "…" : isAr ? "تأكيد الاستلام" : "Confirm Receipt"}
-                </button>
+                </Button>
               </div>
-              {error && <p className="sm:col-span-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+              {error && (
+                <Alert variant="danger" className="sm:col-span-4">
+                  {error}
+                </Alert>
+              )}
             </div>
           </td>
         </tr>
@@ -634,11 +681,11 @@ function GroupAdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }
   const canSubmit = Boolean(businessLocationId) && lines.length > 0 && lines.every((l) => Number(l.quantityChange) !== 0);
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
-          <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inp}>
+          <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
+          <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={selectClass}>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.branchName}
@@ -647,21 +694,21 @@ function GroupAdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "نوع الفقد" : "Loss Type"}</label>
-          <select value={lossType} onChange={(e) => setLossType(e.target.value as "NORMAL" | "ABNORMAL")} className={inp}>
+          <label className={labelClass}>{isAr ? "نوع الفقد" : "Loss Type"}</label>
+          <select value={lossType} onChange={(e) => setLossType(e.target.value as "NORMAL" | "ABNORMAL")} className={selectClass}>
             <option value="NORMAL">{isAr ? "عادي" : "Normal"}</option>
             <option value="ABNORMAL">{isAr ? "غير عادي" : "Abnormal"}</option>
           </select>
         </div>
         {lossType === "ABNORMAL" && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ المسترد" : "Amount Recovered"}</label>
-            <input type="number" min={0} value={totalAmountRecovered} onChange={(e) => setTotalAmountRecovered(e.target.value)} className={`${inp} ltr-nums`} />
+            <label className={labelClass}>{isAr ? "المبلغ المسترد" : "Amount Recovered"}</label>
+            <input type="number" min={0} value={totalAmountRecovered} onChange={(e) => setTotalAmountRecovered(e.target.value)} className={cn(inputClass, "ltr-nums")} />
           </div>
         )}
         <div className={lossType === "ABNORMAL" ? "" : "sm:col-span-2"}>
-          <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظات" : "Notes"}</label>
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
+          <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
         </div>
       </div>
 
@@ -670,47 +717,43 @@ function GroupAdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }
           <div className="sm:col-span-3">
             <ProductSearchField isAr={isAr} picker={picker} />
           </div>
-          <button
-            onClick={addLine}
-            disabled={!picker.picked}
-            className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
-          >
+          <Button variant="secondary" onClick={addLine} disabled={!picker.picked}>
             + {isAr ? "إضافة سطر" : "Add Line"}
-          </button>
+          </Button>
         </div>
 
         {lines.length > 0 && (
           <table className="w-full text-sm">
-            <thead className="text-xs uppercase text-slate-500">
+            <thead className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-2 py-1 text-start">{isAr ? "المنتج" : "Product"}</th>
-                <th className="px-2 py-1 text-start">{isAr ? "التغيير" : "Change"}</th>
-                <th className="px-2 py-1 text-start">{isAr ? "ملاحظة" : "Note"}</th>
-                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1.5 text-start">{isAr ? "المنتج" : "Product"}</th>
+                <th className="px-2 py-1.5 text-start">{isAr ? "التغيير" : "Change"}</th>
+                <th className="px-2 py-1.5 text-start">{isAr ? "ملاحظة" : "Note"}</th>
+                <th className="px-2 py-1.5"></th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l) => (
                 <tr key={l.key} className="border-t border-slate-100">
-                  <td className="px-2 py-1">
+                  <td className="px-2 py-1.5">
                     {isAr ? l.product.nameAr || l.product.nameEn : l.product.nameEn}{" "}
                     <span className="ltr-nums text-xs text-slate-400">({l.product.sku})</span>
                   </td>
-                  <td className="px-2 py-1">
+                  <td className="px-2 py-1.5">
                     <input
                       type="number"
                       value={l.quantityChange}
                       onChange={(e) => updateLine(l.key, { quantityChange: e.target.value })}
                       placeholder="-2"
-                      className="ltr-nums w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                      className={cn(inputSmClass, "ltr-nums w-24")}
                     />
                   </td>
-                  <td className="px-2 py-1">
-                    <input value={l.note} onChange={(e) => updateLine(l.key, { note: e.target.value })} className="w-full rounded border border-slate-300 px-2 py-1 text-sm" />
+                  <td className="px-2 py-1.5">
+                    <input value={l.note} onChange={(e) => updateLine(l.key, { note: e.target.value })} className={cn(inputSmClass, "w-full")} />
                   </td>
-                  <td className="px-2 py-1 text-end">
+                  <td className="px-2 py-1.5 text-end">
                     <button onClick={() => removeLine(l.key)} className="text-slate-300 hover:text-red-500" aria-label="remove">
-                      ✕
+                      <X className="h-4 w-4" strokeWidth={2} aria-hidden />
                     </button>
                   </td>
                 </tr>
@@ -721,17 +764,16 @@ function GroupAdjustForm({ isAr, onDone }: { isAr: boolean; onDone: () => void }
         {lines.length === 0 && <p className="py-3 text-center text-xs text-slate-400">{isAr ? "أضف منتجات للتعديل" : "Add products to adjust"}</p>}
       </div>
 
-      {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button
+      {error && <Alert variant="danger">{error}</Alert>}
+      <Button
         onClick={() => {
           setError(null);
           mutation.mutate();
         }}
         disabled={!canSubmit || mutation.isPending}
-        className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
       >
         {mutation.isPending ? "…" : isAr ? "تأكيد التعديل" : "Confirm Adjustment"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -778,76 +820,81 @@ function StockAdjustmentsList({ isAr, onDone }: { isAr: boolean; onDone: () => v
   });
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-700">{isAr ? "التعديلات المجمّعة" : "Grouped Adjustments"}</h2>
-        {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      </div>
-      <table className="w-full text-sm">
-        <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
-          <tr>
-            <th className="px-4 py-2 text-start">{isAr ? "الرقم" : "Number"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "الفرع" : "Branch"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "نوع الفقد" : "Loss Type"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "الأصناف" : "Items"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "المسترد" : "Recovered"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "الحالة" : "Status"}</th>
-            <th className="px-4 py-2 text-start">{isAr ? "إجراءات" : "Actions"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.map((a) => (
-            <tr key={a.id} className="border-b border-slate-100 align-top">
-              <td className="px-4 py-2"><span className="ltr-nums">{a.adjustmentNumber}</span></td>
-              <td className="px-4 py-2">{a.businessLocation.branchName}</td>
-              <td className="px-4 py-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${a.lossType === "ABNORMAL" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
-                  {a.lossType === "ABNORMAL" ? (isAr ? "غير عادي" : "Abnormal") : isAr ? "عادي" : "Normal"}
-                </span>
-              </td>
-              <td className="px-4 py-2 text-xs text-slate-500">
-                {a.items.map((it) => (
-                  <div key={it.id}>
-                    {isAr ? it.product.nameAr || it.product.nameEn : it.product.nameEn}{" "}
-                    <span className={`ltr-nums font-medium ${Number(it.quantityChange) < 0 ? "text-red-600" : "text-green-600"}`}>
-                      {Number(it.quantityChange) > 0 ? "+" : ""}
-                      {it.quantityChange}
-                    </span>
-                  </div>
-                ))}
-              </td>
-              <td className="px-4 py-2"><span className="ltr-nums">{a.totalAmountRecovered}</span></td>
-              <td className="px-4 py-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs ${a.status === "CONFIRMED" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                  {a.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معكوس" : "Reversed"}
-                </span>
-              </td>
-              <td className="px-4 py-2">
-                {a.status === "CONFIRMED" && can("inventory.reverse_adjustment") && (
-                  <button
-                    onClick={() => {
-                      if (window.confirm(isAr ? "عكس هذا التعديل؟" : "Reverse this adjustment?")) reverseMutation.mutate(a.id);
-                    }}
-                    disabled={reverseMutation.isPending}
-                    className="rounded-md bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
-                  >
-                    {isAr ? "عكس" : "Reverse"}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {data?.length === 0 && (
+    <Card>
+      <CardHeader>
+        <CardTitle>{isAr ? "التعديلات المجمّعة" : "Grouped Adjustments"}</CardTitle>
+        {error && (
+          <Alert variant="danger" className="mt-2">
+            {error}
+          </Alert>
+        )}
+      </CardHeader>
+      <div className="overflow-x-auto">
+        <Table>
+          <THead>
             <tr>
-              <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                {isAr ? "لا توجد تعديلات" : "No adjustments"}
-              </td>
+              <Th>{isAr ? "الرقم" : "Number"}</Th>
+              <Th>{isAr ? "الفرع" : "Branch"}</Th>
+              <Th>{isAr ? "نوع الفقد" : "Loss Type"}</Th>
+              <Th>{isAr ? "الأصناف" : "Items"}</Th>
+              <Th>{isAr ? "المسترد" : "Recovered"}</Th>
+              <Th>{isAr ? "الحالة" : "Status"}</Th>
+              <Th>{isAr ? "إجراءات" : "Actions"}</Th>
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </THead>
+          <tbody>
+            {data?.map((a) => (
+              <tr key={a.id} className="border-b border-slate-100 last:border-0 align-top hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{a.adjustmentNumber}</span></td>
+                <td className="px-4 py-3">{a.businessLocation.branchName}</td>
+                <td className="px-4 py-3">
+                  <Badge variant={a.lossType === "ABNORMAL" ? "danger" : "neutral"}>
+                    {a.lossType === "ABNORMAL" ? (isAr ? "غير عادي" : "Abnormal") : isAr ? "عادي" : "Normal"}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-xs text-slate-500">
+                  {a.items.map((it) => (
+                    <div key={it.id}>
+                      {isAr ? it.product.nameAr || it.product.nameEn : it.product.nameEn}{" "}
+                      <span className={cn("ltr-nums font-medium", Number(it.quantityChange) < 0 ? "text-red-600" : "text-green-600")}>
+                        {Number(it.quantityChange) > 0 ? "+" : ""}
+                        {it.quantityChange}
+                      </span>
+                    </div>
+                  ))}
+                </td>
+                <td className="px-4 py-3"><span className="ltr-nums">{a.totalAmountRecovered}</span></td>
+                <td className="px-4 py-3">
+                  <Badge variant={a.status === "CONFIRMED" ? "success" : "neutral"}>
+                    {a.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معكوس" : "Reversed"}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3">
+                  {a.status === "CONFIRMED" && can("inventory.reverse_adjustment") && (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={async () => {
+                        if (await confirmAction({ message: isAr ? "عكس هذا التعديل؟" : "Reverse this adjustment?", danger: true })) reverseMutation.mutate(a.id);
+                      }}
+                      disabled={reverseMutation.isPending}
+                    >
+                      {isAr ? "عكس" : "Reverse"}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {data?.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  {isAr ? "لا توجد تعديلات" : "No adjustments"}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </Table>
+      </div>
+    </Card>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

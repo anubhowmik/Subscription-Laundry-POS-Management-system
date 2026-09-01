@@ -29,3 +29,34 @@ export async function listPayments(req: Request, res: Response) {
 export async function getStats(_req: Request, res: Response) {
   return sendSuccess(res, await service.getStats());
 }
+
+export async function listAdmins(_req: Request, res: Response) {
+  return sendSuccess(res, await service.listAdmins());
+}
+
+export async function createAdmin(req: Request, res: Response) {
+  const admin = await service.createAdmin(req.body);
+  logger.warn({ actingAdmin: req.platformAdmin?.username, newAdmin: admin.username }, "Platform operator created a new platform admin");
+  return sendSuccess(res, admin, "Platform admin created", 201);
+}
+
+export async function setAdminStatus(req: Request, res: Response) {
+  const id = getParam(req, "id");
+  const { status } = req.body as { status: "ACTIVE" | "INACTIVE" };
+  const updated = await service.setAdminStatus(id, status, req.platformAdmin!.id);
+
+  logger.warn(
+    { actingAdmin: req.platformAdmin?.username, targetAdmin: updated.username, status },
+    "Platform operator changed another platform admin's status",
+  );
+
+  return sendSuccess(res, updated, status === "INACTIVE" ? "Platform admin deactivated" : "Platform admin reactivated");
+}
+
+export async function resetAdminPassword(req: Request, res: Response) {
+  const id = getParam(req, "id");
+  const { newPassword } = req.body as { newPassword: string };
+  await service.resetAdminPassword(id, newPassword);
+  logger.warn({ actingAdmin: req.platformAdmin?.username, targetAdminId: id }, "Platform operator reset another platform admin's password");
+  return sendSuccess(res, null, "Password reset");
+}

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
 import type { ApiSuccess, Customer } from "../../types/api";
+import { labelClass, inputClass } from "../ui/formClasses";
 
 interface Props {
   value: Customer | null;
@@ -36,7 +37,7 @@ export function CustomerPicker({ value, onChange }: Props) {
 
   return (
     <div className="relative" ref={containerRef}>
-      <label className="mb-1 block text-sm font-medium text-slate-700">{t("pos.customer")}</label>
+      <label className={labelClass}>{t("pos.customer")}</label>
       <input
         value={open ? query : displayName}
         onChange={(e) => {
@@ -48,10 +49,10 @@ export function CustomerPicker({ value, onChange }: Props) {
           setOpen(true);
         }}
         placeholder={t("common.search")}
-        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+        className={inputClass}
       />
       {open && (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
           {(data ?? []).length === 0 && <p className="px-3 py-2 text-sm text-slate-400">{t("common.noResults")}</p>}
           {(data ?? []).map((c) => (
             <button
@@ -61,7 +62,7 @@ export function CustomerPicker({ value, onChange }: Props) {
                 onChange(c);
                 setOpen(false);
               }}
-              className="flex w-full flex-col items-start px-3 py-2 text-start text-sm hover:bg-slate-50"
+              className="flex w-full flex-col items-start px-3 py-2 text-start text-sm transition-colors hover:bg-slate-100"
             >
               <span className="font-medium text-slate-800">
                 {i18n.resolvedLanguage === "ar" ? c.nameAr || c.nameEn : c.nameEn}

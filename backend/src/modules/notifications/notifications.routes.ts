@@ -7,6 +7,7 @@ import { updateNotificationSettingsSchema, updateNotificationTemplateSchema } fr
 
 const router = Router();
 router.use(authenticate, requirePermission("settings.manage"));
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/settings", controller.getSettings);
 router.put("/settings", validate(updateNotificationSettingsSchema), controller.updateSettings);

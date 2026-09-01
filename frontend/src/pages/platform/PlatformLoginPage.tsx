@@ -37,38 +37,38 @@ export default function PlatformLoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-xl">
-        <div className="mb-6 text-center">
-          <div className="mb-2 text-3xl">🛡️</div>
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-xl">
+        <div className="mb-7 text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-2xl">🛡️</div>
           <h1 className="text-lg font-semibold text-white">Platform Console</h1>
           <p className="mt-1 text-sm text-slate-400">Operator access only</p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Username or Email</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-300">Username or Email</label>
             <input
               {...register("usernameOrEmail", { required: true })}
               autoFocus
-              className="w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Password</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-300">Password</label>
             <input
               type="password"
               {...register("password", { required: true })}
-              className="w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
             />
           </div>
 
-          {serverError && <p className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-300">{serverError}</p>}
+          {serverError && <p className="rounded-lg border border-red-900 bg-red-950 px-3.5 py-2.5 text-sm text-red-300">{serverError}</p>}
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+            className="w-full cursor-pointer rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Sign In
           </button>

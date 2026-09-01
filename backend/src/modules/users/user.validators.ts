@@ -48,6 +48,15 @@ export const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
 });
 
+export const setAppAccessSchema = z.object({
+  // null = inherit from the user's role (the default state for every user until an admin
+  // explicitly overrides it); true = force-grant even if the role lacks it; false = force-revoke
+  // even if the role has it. See middleware/authenticate.ts.
+  appAccessPosLaundry: z.boolean().nullable(),
+  appAccessUsersRules: z.boolean().nullable(),
+  appAccessZatca: z.boolean().nullable(),
+});
+
 export const listUserQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),

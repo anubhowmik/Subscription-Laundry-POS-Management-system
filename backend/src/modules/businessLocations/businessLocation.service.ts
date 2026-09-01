@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { parsePagination, parseSort } from "../../utils/pagination";
-import { NotFoundError } from "../../utils/AppError";
+import { AppError, AuthorizationError, NotFoundError } from "../../utils/AppError";
+import { getEntitlement } from "../billing/entitlement.service";
 import { InvoiceLayoutSettingsInput } from "./businessLocation.validators";
 
 const SORTABLE_FIELDS = ["branchName", "createdAt"];
@@ -47,8 +48,49 @@ export async function getById(id: string, organizationId: string) {
   return location;
 }
 
-export async function create(input: Omit<Prisma.BusinessLocationUncheckedCreateInput, "organizationId">, organizationId: string) {
-  return prisma.businessLocation.create({ data: { ...input, organizationId } });
+/** Deactivating a branch frees its seat back up - only ACTIVE branches count against the plan's limit. */
+export async function countBranchesTowardLimit(organizationId: string) {
+  return prisma.businessLocation.count({ where: { organizationId, status: "ACTIVE" } });
+}
+
+export async function create(
+  input: Omit<Prisma.BusinessLocationUncheckedCreateInput, "organizationId">,
+  organizationId: string,
+  createdByUserId: string,
+  isSystemAdmin: boolean,
+) {
+  // SECURITY: the built-in "Admin" role gets business_locations.create via its blanket "ALL"
+  // permission set, same as System Admin - but opening a brand-new branch is an org-expansion
+  // decision, not something scoped to whichever branch(es) an Admin happens to be assigned to
+  // manage. Without this, assigning someone Admin over a single branch would also hand them the
+  // power to add entirely new branches to the company. Only isSystemAdmin may create branches;
+  // editing/viewing an already-existing (assigned) branch is unaffected by this check.
+  if (!isSystemAdmin) {
+    throw new AuthorizationError("Only a system admin can add a new branch");
+  }
+
+  const { plan } = await getEntitlement(organizationId);
+  const maxBranches = plan?.maxBranches;
+  if (maxBranches != null) {
+    const activeCount = await countBranchesTowardLimit(organizationId);
+    if (activeCount >= maxBranches) {
+      throw new AppError(
+        403,
+        `Your ${plan!.nameEn} plan allows up to ${maxBranches} branch${maxBranches === 1 ? "" : "es"}. Deactivate a branch or upgrade your plan to add another.`,
+        undefined,
+        "BRANCH_LIMIT_REACHED",
+      );
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const location = await tx.businessLocation.create({ data: { ...input, organizationId } });
+    // Without this, the branch exists but is invisible to its own creator: the switcher in the
+    // top bar only shows branches explicitly assigned via UserBusinessLocation - isSystemAdmin
+    // bypasses ACCESS checks, but never controls what shows up there. See LocationContext.tsx.
+    await tx.userBusinessLocation.create({ data: { userId: createdByUserId, businessLocationId: location.id } });
+    return location;
+  });
 }
 
 export async function update(id: string, input: Prisma.BusinessLocationUncheckedUpdateInput, organizationId: string) {
@@ -56,9 +98,28 @@ export async function update(id: string, input: Prisma.BusinessLocationUnchecked
   return prisma.businessLocation.update({ where: { id }, data: input });
 }
 
-export async function deactivate(id: string, organizationId: string) {
+// SECURITY: deactivating (or reactivating) a branch is the same class of org-structural decision
+// as creating one - a plain Admin (blanket "ALL" role permissions, not isSystemAdmin) must not be
+// able to unilaterally take any branch in the company offline. Found live during a role-based
+// security audit: a non-system-admin Admin could DELETE any branch with no restriction at all.
+export async function deactivate(id: string, organizationId: string, isSystemAdmin: boolean) {
+  if (!isSystemAdmin) {
+    throw new AuthorizationError("Only a system admin can deactivate a branch");
+  }
   await getById(id, organizationId);
   return prisma.businessLocation.update({ where: { id }, data: { status: "INACTIVE" } });
+}
+
+// The counterpart to deactivate() - previously had NO working path at all: the update schema
+// never accepted a `status` field, so PUT .../:id with {"status":"ACTIVE"} silently dropped it
+// and returned a false "success" (found live during the same audit - a branch deactivated in
+// testing could not be brought back through any endpoint).
+export async function reactivate(id: string, organizationId: string, isSystemAdmin: boolean) {
+  if (!isSystemAdmin) {
+    throw new AuthorizationError("Only a system admin can reactivate a branch");
+  }
+  await getById(id, organizationId);
+  return prisma.businessLocation.update({ where: { id }, data: { status: "ACTIVE" } });
 }
 
 /** Returns null (not a default row) when the branch hasn't customized anything yet - the

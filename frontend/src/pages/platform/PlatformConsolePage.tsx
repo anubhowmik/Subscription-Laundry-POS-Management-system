@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
+import { isAxiosError } from "axios";
 import { platformApi } from "../../api/platformClient";
+import { confirmAction } from "../../stores/confirmStore";
 import { usePlatformAuth } from "../../contexts/PlatformAuthContext";
 import type { ApiSuccess } from "../../types/api";
 
@@ -14,6 +17,8 @@ interface PlatformOrganization {
   userCount: number;
   branchCount: number;
   planNameEn: string | null;
+  maxBranches: number | null;
+  maxUsers: number | null;
   billingInterval: string | null;
   subscriptionStatus: string | null;
   hasAccess: boolean;
@@ -43,23 +48,38 @@ interface Stats {
   totalRevenue: string;
 }
 
+interface PlatformAdminRow {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  status: "ACTIVE" | "INACTIVE";
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
 export default function PlatformConsolePage() {
   const { admin, loading, logout } = usePlatformAuth();
   const [orgs, setOrgs] = useState<PlatformOrganization[]>([]);
   const [payments, setPayments] = useState<PlatformPayment[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [admins, setAdmins] = useState<PlatformAdminRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showAddAdmin, setShowAddAdmin] = useState(false);
+  const [resetTarget, setResetTarget] = useState<PlatformAdminRow | null>(null);
 
   const load = useCallback(async () => {
-    const [o, p, s] = await Promise.all([
+    const [o, p, s, a] = await Promise.all([
       platformApi.get<ApiSuccess<PlatformOrganization[]>>("/organizations"),
       platformApi.get<ApiSuccess<PlatformPayment[]>>("/payments"),
       platformApi.get<ApiSuccess<Stats>>("/stats"),
+      platformApi.get<ApiSuccess<PlatformAdminRow[]>>("/admins"),
     ]);
     setOrgs(o.data.data);
     setPayments(p.data.data);
     setStats(s.data.data);
+    setAdmins(a.data.data);
   }, []);
 
   useEffect(() => {
@@ -71,7 +91,13 @@ export default function PlatformConsolePage() {
 
   async function toggleStatus(org: PlatformOrganization) {
     const next = org.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED";
-    if (next === "SUSPENDED" && !window.confirm(`Suspend "${org.nameEn}"? Everyone in this company will be signed out and blocked from logging in.`)) {
+    if (
+      next === "SUSPENDED" &&
+      !(await confirmAction({
+        message: `Suspend "${org.nameEn}"? Everyone in this company will be signed out and blocked from logging in.`,
+        danger: true,
+      }))
+    ) {
       return;
     }
     setBusyId(org.id);
@@ -81,6 +107,28 @@ export default function PlatformConsolePage() {
       await load();
     } catch {
       setError(`Could not update ${org.nameEn}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleAdminStatus(target: PlatformAdminRow) {
+    const next = target.status === "INACTIVE" ? "ACTIVE" : "INACTIVE";
+    if (
+      next === "INACTIVE" &&
+      !(await confirmAction({ message: `Deactivate "${target.fullName}"? They'll be signed out and unable to log back in.`, danger: true }))
+    ) {
+      return;
+    }
+    setBusyId(target.id);
+    setError(null);
+    try {
+      await platformApi.patch(`/admins/${target.id}/status`, { status: next });
+      await load();
+    } catch (err) {
+      // Surfaced verbatim - these two specific guards (can't deactivate yourself, can't
+      // deactivate the last remaining admin) are the whole point of showing the real message.
+      setError(isAxiosError(err) ? err.response?.data?.message ?? `Could not update ${target.fullName}` : `Could not update ${target.fullName}`);
     } finally {
       setBusyId(null);
     }
@@ -99,7 +147,7 @@ export default function PlatformConsolePage() {
           </div>
           <button
             onClick={() => logout()}
-            className="rounded-md bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-600"
+            className="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
           >
             Logout
           </button>
@@ -107,7 +155,7 @@ export default function PlatformConsolePage() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-8 px-6 py-8">
-        {error && <p className="rounded-md bg-red-950 px-4 py-3 text-sm text-red-300">{error}</p>}
+        {error && <p className="rounded-lg bg-red-950 px-4 py-3 text-sm text-red-300">{error}</p>}
 
         {stats && (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -144,7 +192,10 @@ export default function PlatformConsolePage() {
                       <StatusBadge status={org.status} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-slate-300">{org.billingInterval ?? "—"}</div>
+                      <div className="text-slate-300">
+                        {org.planNameEn ?? "—"}
+                        {org.billingInterval && <span className="text-slate-500"> · {org.billingInterval.toLowerCase()}</span>}
+                      </div>
                       <div className="text-xs text-slate-500">
                         {org.isTrial ? `Trial · ${org.trialDaysLeft} days left` : org.accessReason.replace(/_/g, " ").toLowerCase()}
                       </div>
@@ -152,15 +203,19 @@ export default function PlatformConsolePage() {
                     <td className="px-4 py-3 text-slate-400">
                       {org.expiresAt ? new Date(org.expiresAt).toISOString().slice(0, 10) : "Never"}
                     </td>
-                    <td className="px-4 py-3 text-slate-400">{org.userCount}</td>
-                    <td className="px-4 py-3 text-slate-400">{org.branchCount}</td>
+                    <td className="px-4 py-3">
+                      <UsageCell used={org.userCount} max={org.maxUsers} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <UsageCell used={org.branchCount} max={org.maxBranches} />
+                    </td>
                     <td className="px-4 py-3 text-end">
                       <button
                         onClick={() => toggleStatus(org)}
                         disabled={busyId === org.id}
-                        className={`rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-50 ${
                           org.status === "SUSPENDED"
-                            ? "bg-sky-600 text-white hover:bg-sky-700"
+                            ? "bg-blue-600 text-white hover:bg-blue-700"
                             : "bg-red-900 text-red-200 hover:bg-red-800"
                         }`}
                       >
@@ -173,6 +228,81 @@ export default function PlatformConsolePage() {
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                       No companies registered yet
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Platform Admins</h2>
+            <button
+              onClick={() => setShowAddAdmin(true)}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            >
+              + Add Admin
+            </button>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-slate-700">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-slate-800 text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Username</th>
+                  <th className="px-4 py-3">Email</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Last Login</th>
+                  <th className="px-4 py-3 text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {admins.map((a) => {
+                  const isSelf = a.id === admin.id;
+                  return (
+                    <tr key={a.id} className="hover:bg-slate-800/50">
+                      <td className="px-4 py-3 text-white">
+                        {a.fullName} {isSelf && <span className="text-xs text-slate-500">(you)</span>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-300">{a.username}</td>
+                      <td className="px-4 py-3 text-slate-400">{a.email}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${a.status === "ACTIVE" ? "bg-blue-950 text-blue-300" : "bg-slate-700 text-slate-300"}`}>
+                          {a.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-400">
+                        {a.lastLoginAt ? new Date(a.lastLoginAt).toISOString().slice(0, 10) : "Never"}
+                      </td>
+                      <td className="px-4 py-3 text-end">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setResetTarget(a)}
+                            className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                          >
+                            Reset password
+                          </button>
+                          <button
+                            onClick={() => toggleAdminStatus(a)}
+                            disabled={busyId === a.id || isSelf}
+                            title={isSelf ? "You cannot deactivate your own account" : undefined}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40 ${
+                              a.status === "INACTIVE" ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-red-900 text-red-200 hover:bg-red-800"
+                            }`}
+                          >
+                            {a.status === "INACTIVE" ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {admins.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      No platform admins found
                     </td>
                   </tr>
                 )}
@@ -218,6 +348,24 @@ export default function PlatformConsolePage() {
           </div>
         </section>
       </main>
+
+      {showAddAdmin && (
+        <AddAdminModal
+          onClose={() => setShowAddAdmin(false)}
+          onCreated={async () => {
+            setShowAddAdmin(false);
+            await load();
+          }}
+        />
+      )}
+
+      {resetTarget && (
+        <ResetAdminPasswordModal
+          target={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onDone={() => setResetTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -231,10 +379,157 @@ function StatCard({ label, value, tone = "normal" }: { label: string; value: str
   );
 }
 
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-800 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-4 text-sm font-semibold text-white">{title}</h3>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const modalInputClass =
+  "w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30";
+const modalLabelClass = "mb-1 block text-xs font-medium text-slate-400";
+
+function AddAdminModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    setSaving(true);
+    setError(null);
+    try {
+      await platformApi.post("/admins", { username, email, fullName, password });
+      onCreated();
+    } catch (err) {
+      setError(isAxiosError(err) ? err.response?.data?.message ?? "Could not create admin" : "Could not create admin");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalShell title="Add Platform Admin" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className={modalLabelClass}>Full Name</label>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={modalInputClass} />
+        </div>
+        <div>
+          <label className={modalLabelClass}>Username</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} className={modalInputClass} />
+        </div>
+        <div>
+          <label className={modalLabelClass}>Email</label>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} className={modalInputClass} />
+        </div>
+        <div>
+          <label className={modalLabelClass}>Password</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={modalInputClass} />
+        </div>
+        {error && <p className="rounded-lg bg-red-950 px-3 py-2 text-xs text-red-300">{error}</p>}
+        <div className="flex gap-2 pt-2">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving || !username || !email || !fullName || password.length < 8}
+            className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ResetAdminPasswordModal({ target, onClose, onDone }: { target: PlatformAdminRow; onClose: () => void; onDone: () => void }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    setSaving(true);
+    setError(null);
+    try {
+      await platformApi.post(`/admins/${target.id}/reset-password`, { newPassword });
+      setSuccess(true);
+    } catch (err) {
+      setError(isAxiosError(err) ? err.response?.data?.message ?? "Could not reset password" : "Could not reset password");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalShell title={`Reset Password — ${target.fullName}`} onClose={onClose}>
+      {success ? (
+        <div className="space-y-3">
+          <p className="rounded-lg bg-blue-950 px-3 py-2 text-xs text-blue-300">
+            Password reset. {target.fullName} has been signed out everywhere and must log in with the new password.
+          </p>
+          <button onClick={onDone} className="w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">
+            Done
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className={modalLabelClass}>New Password</label>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={modalInputClass} />
+          </div>
+          {error && <p className="rounded-lg bg-red-950 px-3 py-2 text-xs text-red-300">{error}</p>}
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving || newPassword.length < 8}
+              className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "…" : "Reset"}
+            </button>
+          </div>
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+function UsageCell({ used, max }: { used: number; max: number | null }) {
+  if (max === null) return <span className="text-slate-400">{used} <span className="text-slate-600">/ ∞</span></span>;
+  const atLimit = used >= max;
+  return (
+    <span className={atLimit ? "font-medium text-amber-400" : "text-slate-400"}>
+      {used} <span className={atLimit ? "text-amber-500" : "text-slate-600"}>/ {max}</span>
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    TRIAL: "bg-sky-950 text-sky-300",
-    ACTIVE: "bg-sky-950 text-sky-300",
+    TRIAL: "bg-blue-950 text-blue-300",
+    ACTIVE: "bg-blue-950 text-blue-300",
     SUSPENDED: "bg-red-950 text-red-300",
     CANCELLED: "bg-slate-700 text-slate-300",
   };

@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { CheckCircle2, AlertTriangle } from "lucide-react";
 import { api } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
+import { Spinner } from "../../components/ui/Spinner";
+import { Header } from "../../components/layout/Header";
+import { Footer } from "../../components/layout/Footer";
 
 /**
  * Where the payment gateway returns the customer after paying. It reads OUR billing-payment id
@@ -39,37 +45,40 @@ export default function BillingCallbackPage() {
   }, [params, navigate, refreshUser]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      <Header />
+      <main className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4 pb-24 pt-16 sm:pb-32 sm:pt-20">
+      <Card className="w-full max-w-sm p-8 text-center">
         {state === "verifying" && (
           <>
-            <div className="mb-3 text-3xl">⏳</div>
+            <div className="mb-3 flex justify-center text-sky-600">
+              <Spinner className="h-8 w-8" />
+            </div>
             <p className="text-sm text-slate-600">{isAr ? "جارٍ التحقق من الدفع..." : "Verifying your payment…"}</p>
           </>
         )}
         {state === "success" && (
           <>
-            <div className="mb-3 text-3xl">✅</div>
+            <CheckCircle2 className="mx-auto mb-3 h-9 w-9 text-emerald-500" strokeWidth={1.5} aria-hidden />
             <h1 className="text-lg font-semibold text-slate-800">{isAr ? "تم تفعيل الاشتراك" : "Subscription active"}</h1>
             <p className="mt-1 text-sm text-slate-500">{isAr ? "جارٍ توجيهك إلى لوحة التحكم..." : "Taking you to your dashboard…"}</p>
           </>
         )}
         {state === "failed" && (
           <>
-            <div className="mb-3 text-3xl">⚠️</div>
+            <AlertTriangle className="mx-auto mb-3 h-9 w-9 text-amber-500" strokeWidth={1.5} aria-hidden />
             <h1 className="text-lg font-semibold text-slate-800">{isAr ? "لم يكتمل الدفع" : "Payment not completed"}</h1>
             <p className="mt-1 text-sm text-slate-500">
               {isAr ? "لم نتمكن من تأكيد دفعتك." : "We couldn't confirm your payment."}
             </p>
-            <button
-              onClick={() => navigate("/billing", { replace: true })}
-              className="mt-4 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
-            >
+            <Button onClick={() => navigate("/billing", { replace: true })} className="mt-4" fullWidth>
               {t("common.retry", isAr ? "حاول مرة أخرى" : "Try again")}
-            </button>
+            </Button>
           </>
         )}
-      </div>
+      </Card>
+      </main>
+      <Footer />
     </div>
   );
 }

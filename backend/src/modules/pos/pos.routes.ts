@@ -14,6 +14,7 @@ import {
 
 const router = Router();
 router.use(authenticate, requirePermission("pos.access"));
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/search", validate(posSearchQuerySchema, "query"), controller.search);
 router.post("/checkout", requirePermission("sales.create"), validate(checkoutSchema), controller.checkout);

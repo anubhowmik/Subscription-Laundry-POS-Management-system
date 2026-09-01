@@ -1,5 +1,6 @@
+import bcrypt from "bcryptjs";
 import { prisma } from "../../config/prisma";
-import { NotFoundError } from "../../utils/AppError";
+import { AppError, NotFoundError } from "../../utils/AppError";
 import { computeEntitlement } from "../billing/entitlement.service";
 
 /**
@@ -30,7 +31,16 @@ export async function listOrganizations(query: Record<string, unknown>) {
     },
     include: {
       subscription: { include: { plan: true } },
-      _count: { select: { users: true, businessLocations: true } },
+      // Filtered to match exactly what actually counts against the plan's limits (see
+      // businessLocation.service.ts's countBranchesTowardLimit and user.service.ts's
+      // countUsersTowardLimit) - an unfiltered count would show numbers the operator could read
+      // as "this company is over its limit" when deactivated/non-login rows are why it isn't.
+      _count: {
+        select: {
+          users: { where: { status: "ACTIVE", deletedAt: null, allowLogin: true } },
+          businessLocations: { where: { status: "ACTIVE" } },
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -49,6 +59,8 @@ export async function listOrganizations(query: Record<string, unknown>) {
       branchCount: org._count.businessLocations,
       planCode: org.subscription?.plan.code ?? null,
       planNameEn: org.subscription?.plan.nameEn ?? null,
+      maxBranches: org.subscription?.plan.maxBranches ?? null,
+      maxUsers: org.subscription?.plan.maxUsers ?? null,
       billingInterval: org.subscription?.billingInterval ?? null,
       subscriptionStatus: org.subscription?.status ?? null,
       hasAccess: entitlement.hasAccess,
@@ -100,7 +112,10 @@ export async function listPayments(query: Record<string, unknown>) {
     organizationId: p.organizationId,
     organizationName: p.organization.nameEn,
     organizationSlug: p.organization.slug,
-    planCode: p.plan.code,
+    // null for SEAT_LICENSE payments, which aren't tied to a plan - see BillingPaymentPurpose.
+    planCode: p.plan?.code ?? null,
+    purpose: p.purpose,
+    seatQuantity: p.seatQuantity,
     amount: p.amount,
     currency: p.currency,
     billingInterval: p.billingInterval,
@@ -128,4 +143,68 @@ export async function getStats() {
     paidPaymentCount: paidAgg._count,
     totalRevenue: paidAgg._sum.amount ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Platform admins - who is allowed into this console at all.
+//
+// Creating the FIRST platform admin still requires shell access (scripts/createPlatformAdmin.ts) -
+// there is no bootstrap-from-nothing endpoint, since that would mean an unauthenticated way to
+// mint the platform's highest-privilege account. Once at least one admin exists, they can invite
+// more from here. Every admin has equal, full access - there is no lesser platform role.
+// ---------------------------------------------------------------------------
+
+function toSafeAdmin<T extends { passwordHash: string }>(admin: T): Omit<T, "passwordHash"> {
+  const { passwordHash: _passwordHash, ...rest } = admin;
+  return rest;
+}
+
+export async function listAdmins() {
+  const admins = await prisma.platformAdmin.findMany({ orderBy: { createdAt: "asc" } });
+  return admins.map(toSafeAdmin);
+}
+
+export async function createAdmin(input: { username: string; email: string; fullName: string; password: string }) {
+  const passwordHash = await bcrypt.hash(input.password, 12);
+  const admin = await prisma.platformAdmin.create({
+    data: { username: input.username, email: input.email.toLowerCase(), fullName: input.fullName, passwordHash },
+  });
+  return toSafeAdmin(admin);
+}
+
+async function assertNotLastActiveAdmin(targetId: string) {
+  const activeCount = await prisma.platformAdmin.count({ where: { status: "ACTIVE" } });
+  const target = await prisma.platformAdmin.findUnique({ where: { id: targetId } });
+  if (target?.status === "ACTIVE" && activeCount <= 1) {
+    throw new AppError(400, "Cannot deactivate the last remaining platform admin - it would lock everyone out of the console.");
+  }
+}
+
+export async function setAdminStatus(id: string, status: "ACTIVE" | "INACTIVE", actingAdminId: string) {
+  const admin = await prisma.platformAdmin.findUnique({ where: { id } });
+  if (!admin) throw new NotFoundError("Platform admin not found");
+
+  if (status === "INACTIVE") {
+    if (id === actingAdminId) throw new AppError(400, "You cannot deactivate your own account");
+    await assertNotLastActiveAdmin(id);
+  }
+
+  const updated = await prisma.platformAdmin.update({ where: { id }, data: { status } });
+
+  // Deactivating must also kill live sessions, same discipline as suspending a tenant org.
+  if (status === "INACTIVE") {
+    await prisma.platformRefreshToken.updateMany({ where: { platformAdminId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  return toSafeAdmin(updated);
+}
+
+export async function resetAdminPassword(id: string, newPassword: string) {
+  const admin = await prisma.platformAdmin.findUnique({ where: { id } });
+  if (!admin) throw new NotFoundError("Platform admin not found");
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await prisma.platformAdmin.update({ where: { id }, data: { passwordHash } });
+  // Force re-login everywhere, same as a tenant user's password reset.
+  await prisma.platformRefreshToken.updateMany({ where: { platformAdminId: id, revokedAt: null }, data: { revokedAt: new Date() } });
 }

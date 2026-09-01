@@ -4,17 +4,34 @@ import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { formatMoney } from "../../lib/format";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { Modal } from "../ui/Modal";
+import { Badge } from "../ui/Badge";
+import { Card } from "../ui/Card";
+import { LoadingState } from "../ui/Spinner";
+import { cn } from "../../lib/cn";
 
 export type ItemFulfillmentStatus = "PENDING" | "IN_PROGRESS" | "READY" | "DELIVERED" | "CANCELLED";
 
 const STATUS_ORDER: ItemFulfillmentStatus[] = ["PENDING", "IN_PROGRESS", "READY", "DELIVERED", "CANCELLED"];
 
-const STATUS_LABEL: Record<ItemFulfillmentStatus, { en: string; ar: string; cls: string }> = {
-  PENDING: { en: "Pending", ar: "قيد الانتظار", cls: "bg-slate-100 text-slate-600" },
-  IN_PROGRESS: { en: "In Progress", ar: "قيد التنفيذ", cls: "bg-amber-100 text-amber-700" },
-  READY: { en: "Ready", ar: "جاهز", cls: "bg-sky-100 text-sky-700" },
-  DELIVERED: { en: "Delivered", ar: "تم التسليم", cls: "bg-green-100 text-green-700" },
-  CANCELLED: { en: "Cancelled", ar: "ملغى", cls: "bg-red-100 text-red-700" },
+type BadgeVariant = "neutral" | "warning" | "info" | "success" | "danger";
+
+const STATUS_LABEL: Record<ItemFulfillmentStatus, { en: string; ar: string; variant: BadgeVariant }> = {
+  PENDING: { en: "Pending", ar: "قيد الانتظار", variant: "neutral" },
+  IN_PROGRESS: { en: "In Progress", ar: "قيد التنفيذ", variant: "warning" },
+  READY: { en: "Ready", ar: "جاهز", variant: "info" },
+  DELIVERED: { en: "Delivered", ar: "تم التسليم", variant: "success" },
+  CANCELLED: { en: "Cancelled", ar: "ملغى", variant: "danger" },
+};
+
+// Same color tokens as Badge's variants, applied directly to the interactive status-picker
+// buttons below (Badge itself is a non-interactive span, so the picker uses raw classes).
+const VARIANT_BUTTON_CLASS: Record<BadgeVariant, string> = {
+  neutral: "bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200",
+  success: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200",
+  warning: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200",
+  danger: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200",
+  info: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200",
 };
 
 interface SaleItemDetail {
@@ -61,52 +78,48 @@ export function SaleDetailModal({ saleId, onClose }: Props) {
   });
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{sale?.invoiceNumber ?? "…"}</h3>
-            {sale && <p className="text-xs text-slate-400">{isAr ? sale.customer.nameAr || sale.customer.nameEn : sale.customer.nameEn}</p>}
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
+    <Modal
+      title={sale?.invoiceNumber ?? "…"}
+      subtitle={sale ? (isAr ? sale.customer.nameAr || sale.customer.nameEn : sale.customer.nameEn) : undefined}
+      onClose={onClose}
+      size="lg"
+    >
+      {isLoading && <LoadingState label={isAr ? "جارٍ التحميل" : "Loading"} />}
 
-        {isLoading && <p className="py-8 text-center text-sm text-slate-400">{isAr ? "جارٍ التحميل" : "Loading"}</p>}
-
-        {sale && (
-          <div className="space-y-2">
-            {sale.items.map((item) => (
-              <div key={item.id} className="rounded-xl border border-slate-100 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">{isAr ? item.descriptionAr || item.descriptionEn : item.descriptionEn}</p>
-                    <p className="ltr-nums text-xs text-slate-400">
-                      {item.quantity} × {formatMoney(item.unitPrice, currency, locale)} = {formatMoney(item.total, currency, locale)}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_LABEL[item.fulfillmentStatus].cls}`}>
-                    {isAr ? STATUS_LABEL[item.fulfillmentStatus].ar : STATUS_LABEL[item.fulfillmentStatus].en}
-                  </span>
+      {sale && (
+        <div className="space-y-2">
+          {sale.items.map((item) => (
+            <Card key={item.id} className="p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{isAr ? item.descriptionAr || item.descriptionEn : item.descriptionEn}</p>
+                  <p className="ltr-nums text-xs text-slate-400">
+                    {item.quantity} × {formatMoney(item.unitPrice, currency, locale)} = {formatMoney(item.total, currency, locale)}
+                  </p>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {STATUS_ORDER.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => updateStatus.mutate({ itemId: item.id, status: s })}
-                      disabled={updateStatus.isPending || item.fulfillmentStatus === s}
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition disabled:cursor-default ${
-                        item.fulfillmentStatus === s ? `${STATUS_LABEL[s].cls} ring-1 ring-inset ring-current` : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      {isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
-                    </button>
-                  ))}
-                </div>
+                <Badge variant={STATUS_LABEL[item.fulfillmentStatus].variant} className="shrink-0">
+                  {isAr ? STATUS_LABEL[item.fulfillmentStatus].ar : STATUS_LABEL[item.fulfillmentStatus].en}
+                </Badge>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {STATUS_ORDER.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => updateStatus.mutate({ itemId: item.id, status: s })}
+                    disabled={updateStatus.isPending || item.fulfillmentStatus === s}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition disabled:cursor-default",
+                      item.fulfillmentStatus === s ? VARIANT_BUTTON_CLASS[STATUS_LABEL[s].variant] : "bg-slate-50 text-slate-500 hover:bg-slate-100",
+                    )}
+                  >
+                    {isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
+                  </button>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }

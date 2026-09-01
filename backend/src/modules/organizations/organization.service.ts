@@ -4,7 +4,8 @@ import { prisma } from "../../config/prisma";
 import { ConflictError, NotFoundError } from "../../utils/AppError";
 import { ROLE_DEFS } from "../../config/defaultRoles";
 import { PERMISSIONS } from "../../config/permissions";
-import { PLAN_DEFS, TRIAL_PLAN_CODE, TRIAL_DAYS } from "../../config/plans";
+import { PLAN_DEFS } from "../../config/plans";
+import { generateVerificationCode } from "../auth/auth.service";
 import { NOTIFICATION_TEMPLATE_DEFS } from "../../config/notificationTemplates";
 import { RegisterOrganizationInput } from "./organization.validators";
 
@@ -97,13 +98,17 @@ export async function registerOrganization(input: RegisterOrganizationInput) {
 
   const slug = await generateUniqueSlug(input.organizationNameEn);
   const allPermissions = await prisma.permission.findMany();
-  const trialPlan = await prisma.plan.findUniqueOrThrow({ where: { code: TRIAL_PLAN_CODE } });
   const passwordHash = await bcrypt.hash(input.adminPassword, 12);
-  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
-  return prisma.$transaction(async (tx) => {
+  const { organization, adminUser } = await prisma.$transaction(async (tx) => {
+    // status stays the schema default (TRIAL) and trialEndsAt stays null - the trial clock does
+    // not start at registration. It starts when the admin verifies their email (see
+    // auth.service.ts verifyEmailCode(), which is also what creates the Subscription row below -
+    // deliberately NOT created here). Until then, entitlement.service.ts's null-Subscription
+    // "NO_SUBSCRIPTION" branch keeps every protected route blocked, and login() independently
+    // blocks on emailVerified before a token is ever issued.
     const organization = await tx.organization.create({
-      data: { nameEn: input.organizationNameEn, nameAr: input.organizationNameAr, slug, status: "TRIAL", trialEndsAt },
+      data: { nameEn: input.organizationNameEn, nameAr: input.organizationNameAr, slug },
     });
 
     // Every tenant gets its own copy of the default role set.
@@ -177,6 +182,9 @@ export async function registerOrganization(input: RegisterOrganizationInput) {
         { organizationId: organization.id, nameEn: "Online Payment", nameAr: "دفع إلكتروني", code: "ONLINE" },
         { organizationId: organization.id, nameEn: "Store Credit", nameAr: "رصيد المتجر", code: "STORE_CREDIT" },
         { organizationId: organization.id, nameEn: "Cashback", nameAr: "رصيد الكاش باك", code: "CASHBACK" },
+        { organizationId: organization.id, nameEn: "Tamara", nameAr: "تمارا", code: "BNPL_TAMARA" },
+        { organizationId: organization.id, nameEn: "Tabby", nameAr: "تابي", code: "BNPL_TABBY" },
+        { organizationId: organization.id, nameEn: "MISPay", nameAr: "ميسباي", code: "BNPL_MISPAY" },
       ],
     });
 
@@ -184,15 +192,10 @@ export async function registerOrganization(input: RegisterOrganizationInput) {
       data: NOTIFICATION_TEMPLATE_DEFS.map((def) => ({ organizationId: organization.id, ...def })),
     });
 
-    await tx.subscription.create({
-      data: {
-        organizationId: organization.id,
-        planId: trialPlan.id,
-        status: "TRIALING",
-        currentPeriodEnd: trialEndsAt,
-      },
-    });
-
     return { organization, adminUser };
   });
+
+  await generateVerificationCode(adminUser.id);
+
+  return { organization, adminUser };
 }

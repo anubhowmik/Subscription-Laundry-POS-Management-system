@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError } from "../../utils/AppError";
 import { parsePagination } from "../../utils/pagination";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
+import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
@@ -101,8 +102,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const { page, limit, skip } = parsePagination(query);
   const where: Prisma.ExpenseWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.categoryId ? { categoryId: String(query.categoryId) } : {}),
     ...(query.paymentStatus ? { paymentStatus: query.paymentStatus as "PAID" | "PARTIAL" | "DUE" | "OVERPAID" } : {}),
   };

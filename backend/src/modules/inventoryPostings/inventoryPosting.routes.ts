@@ -7,6 +7,7 @@ import { createInventoryPostingSchema, listInventoryPostingQuerySchema } from ".
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 router.use(requirePermission("inventory_postings.manage"));
 
 router.get("/preview", controller.preview);

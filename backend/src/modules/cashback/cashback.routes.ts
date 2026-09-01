@@ -7,6 +7,7 @@ import { adjustCashbackSchema } from "./cashback.validators";
 
 const router = Router();
 router.use(authenticate, requirePermission("cashback.manage"));
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/customers/:customerId", controller.getLedger);
 router.post("/customers/:customerId/adjust", validate(adjustCashbackSchema), controller.adjustCashback);

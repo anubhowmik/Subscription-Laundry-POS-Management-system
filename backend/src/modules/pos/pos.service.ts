@@ -12,7 +12,10 @@ import { resolvePriceListId, getPriceOverrides } from "../priceLists/priceListRe
 import { parsePagination } from "../../utils/pagination";
 import { sendTemplatedSms } from "../notifications/notifications.service";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
+import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { adjustCashbackTx } from "../cashback/cashback.service";
+import { verifyAndConsumeSessionTx } from "../bnpl/bnpl.service";
+import { BNPL_PAYMENT_CODES } from "../bnpl/bnpl.constants";
 
 const { Decimal } = Prisma;
 
@@ -776,6 +779,16 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           });
         }
       }
+
+      // BNPL (Tier 4) rides input.payments the same way CASHBACK/CASH do - the frontend puts the
+      // captured BnplSession's id in referenceNumber. verifyAndConsumeSessionTx re-checks status,
+      // amount, expiry, and single-use against the database row inside this same transaction
+      // rather than trusting the client's belief that the session is good.
+      const bnplPayments = input.payments.filter((p) => BNPL_PAYMENT_CODES.includes(codeById.get(p.paymentMethodId) ?? ""));
+      for (const p of bnplPayments) {
+        if (!p.referenceNumber) throw new AppError(400, "A BNPL payment must reference its session id");
+        await verifyAndConsumeSessionTx(tx, p.referenceNumber, sale.id, p.amount, organizationId);
+      }
     }
 
     // Customer balance reflects what they still owe (or, if negative, a credit from overpayment).
@@ -1159,6 +1172,13 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
           });
         }
       }
+
+      // See the identical comment in checkout() - BNPL sessions are verified and consumed here too.
+      const bnplPayments = input.payments.filter((p) => BNPL_PAYMENT_CODES.includes(codeById.get(p.paymentMethodId) ?? ""));
+      for (const p of bnplPayments) {
+        if (!p.referenceNumber) throw new AppError(400, "A BNPL payment must reference its session id");
+        await verifyAndConsumeSessionTx(tx, p.referenceNumber, draft.id, p.amount, organizationId);
+      }
     }
 
     await tx.customer.update({
@@ -1235,8 +1255,7 @@ export async function listQuotes(query: Record<string, unknown>, organizationId:
   const where: Prisma.SaleWhereInput = {
     organizationId,
     status: "DRAFT",
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
   };
 
   const [data, total] = await Promise.all([

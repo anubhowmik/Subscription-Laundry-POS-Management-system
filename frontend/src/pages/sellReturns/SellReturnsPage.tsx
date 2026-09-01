@@ -3,10 +3,19 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { usePaymentMethods } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { inputClass, selectClass, labelClass } from "../../components/ui/formClasses";
+import { Undo2 } from "lucide-react";
 
 type Reason = "NOT_WASHABLE" | "DAMAGED" | "NOT_FOUND" | "OTHER";
 
@@ -56,37 +65,51 @@ export default function SellReturnsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "مرتجعات المبيعات" : "Sales Returns"}</h1>
-        <button onClick={() => setFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {isAr ? "مرتجع جديد" : "New Return"}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "مرتجعات المبيعات" : "Sales Returns"}
+        actions={
+          <Button onClick={() => setFormOpen(true)}>+ {isAr ? "مرتجع جديد" : "New Return"}</Button>
+        }
+      />
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Undo2}
+            cardBg="bg-rose-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "مرتجعات المبيعات" : "Sales Returns"}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "التاريخ" : "Date"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "إشعار دائن" : "Credit Note"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الفاتورة" : "Invoice"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "العميل" : "Customer"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الأصناف" : "Items"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "المسترد" : "Refunded"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
-              <th className="px-4 py-2 text-start"></th>
+              <Th>{isAr ? "التاريخ" : "Date"}</Th>
+              <Th>{isAr ? "إشعار دائن" : "Credit Note"}</Th>
+              <Th>{isAr ? "الفاتورة" : "Invoice"}</Th>
+              <Th>{isAr ? "العميل" : "Customer"}</Th>
+              <Th>{isAr ? "الأصناف" : "Items"}</Th>
+              <Th>{isAr ? "الإجمالي" : "Total"}</Th>
+              <Th>{isAr ? "المسترد" : "Refunded"}</Th>
+              <Th>{isAr ? "بواسطة" : "By"}</Th>
+              <Th></Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((r) => (
-              <tr key={r.id} className="border-b border-slate-100">
-                <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-2 font-medium"><span className="ltr-nums">{r.creditNoteNumber ?? "-"}</span></td>
-                <td className="px-4 py-2 font-medium"><span className="ltr-nums">{r.sale.invoiceNumber}</span></td>
-                <td className="px-4 py-2">{isAr ? r.customer.nameAr || r.customer.nameEn : r.customer.nameEn}</td>
-                <td className="px-4 py-2">
+              <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                <td className="px-4 py-3 font-medium"><span className="ltr-nums">{r.creditNoteNumber ?? "-"}</span></td>
+                <td className="px-4 py-3 font-medium"><span className="ltr-nums">{r.sale.invoiceNumber}</span></td>
+                <td className="px-4 py-3">{isAr ? r.customer.nameAr || r.customer.nameEn : r.customer.nameEn}</td>
+                <td className="px-4 py-3">
                   {r.items.map((item) => (
                     <div key={item.id} className="text-xs text-slate-600">
                       {isAr ? item.saleItem.descriptionAr || item.saleItem.descriptionEn : item.saleItem.descriptionEn}
@@ -95,20 +118,27 @@ export default function SellReturnsPage() {
                     </div>
                   ))}
                 </td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2 text-slate-500">{r.createdByUser.fullNameEn}</td>
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => {
-                      if (window.confirm(isAr ? "هل تريد إلغاء هذا المرتجع؟ سيتم عكس المخزون والرصيد." : "Void this return? Stock and balance will be reversed.")) {
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3 text-slate-500">{r.createdByUser.fullNameEn}</td>
+                <td className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="!text-red-600 hover:!bg-red-50"
+                    onClick={async () => {
+                      if (
+                        await confirmAction({
+                          message: isAr ? "هل تريد إلغاء هذا المرتجع؟ سيتم عكس المخزون والرصيد." : "Void this return? Stock and balance will be reversed.",
+                          danger: true,
+                        })
+                      ) {
                         voidMutation.mutate(r.id);
                       }
                     }}
-                    className="text-xs text-red-600 hover:underline"
                   >
                     {isAr ? "إلغاء" : "Void"}
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -120,14 +150,12 @@ export default function SellReturnsPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {formOpen && (
         <ReturnFormModal
           isAr={isAr}
-          currency={currency}
-          locale={locale}
           onClose={() => setFormOpen(false)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["sell-returns"] });
@@ -168,14 +196,10 @@ interface SelectedLine {
 
 function ReturnFormModal({
   isAr,
-  currency,
-  locale,
   onClose,
   onSaved,
 }: {
   isAr: boolean;
-  currency: string;
-  locale: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -231,137 +255,137 @@ function ReturnFormModal({
   const canSubmit = Boolean(saleId) && Object.keys(lines).length > 0 && Object.values(lines).every((l) => l.quantity > 0);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "مرتجع جديد" : "New Sales Return"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-
-        {!saleId && (
-          <div className="relative">
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "رقم الفاتورة" : "Invoice"}</label>
-            <input
-              value={search}
-              onChange={(e) => runSearch(e.target.value)}
-              placeholder={isAr ? "ابحث برقم الفاتورة" : "Search by invoice number"}
-              className={inp}
-            />
-            {results.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                {results.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setSaleId(s.id);
-                      setResults([]);
-                    }}
-                    className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
-                  >
-                    {s.invoiceNumber}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {sale && (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-600">
-              {sale.invoiceNumber} — {isAr ? sale.customer.nameAr || sale.customer.nameEn : sale.customer.nameEn}
-            </p>
-
-            <div className="space-y-2">
-              {sale.items.map((item) => {
-                const remaining = Number(item.remaining);
-                const selected = lines[item.id];
-                return (
-                  <div key={item.id} className={`rounded-lg border p-2.5 ${remaining <= 0 ? "border-slate-100 bg-slate-50 opacity-50" : "border-slate-200"}`}>
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                      <input
-                        type="checkbox"
-                        disabled={remaining <= 0}
-                        checked={Boolean(selected)}
-                        onChange={() => toggleLine(item.id, remaining)}
-                      />
-                      {isAr ? item.descriptionAr || item.descriptionEn : item.descriptionEn}
-                      <span className="ltr-nums text-xs text-slate-400">
-                        ({isAr ? "المتبقي" : "remaining"}: {item.remaining} / {item.quantity})
-                      </span>
-                    </label>
-                    {selected && (
-                      <div className="mt-2 grid grid-cols-3 gap-2 ps-6">
-                        <input
-                          type="number"
-                          min={0.01}
-                          max={remaining}
-                          step="0.01"
-                          value={selected.quantity}
-                          onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })}
-                          className={inp}
-                        />
-                        <select value={selected.reason} onChange={(e) => updateLine(item.id, { reason: e.target.value as Reason })} className={inp}>
-                          {(Object.keys(REASON_LABEL) as Reason[]).map((r) => (
-                            <option key={r} value={r}>
-                              {isAr ? REASON_LABEL[r].ar : REASON_LABEL[r].en}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          value={selected.note ?? ""}
-                          onChange={(e) => updateLine(item.id, { note: e.target.value })}
-                          placeholder={isAr ? "ملاحظة" : "Note"}
-                          className={inp}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ المسترد نقدًا" : "Cash Refunded"}</label>
-                <input type="number" min={0} value={refundedAmount} onChange={(e) => setRefundedAmount(e.target.value)} placeholder="0" className={inp} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "طريقة الدفع" : "Payment Method"}</label>
-                <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)} className={inp}>
-                  <option value="">{isAr ? "بلا (رصيد للعميل)" : "None (store credit)"}</option>
-                  {paymentMethods?.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {isAr ? m.nameAr : m.nameEn}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظات" : "Notes"}</label>
-              <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
-            </div>
-          </div>
-        )}
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        {sale && (
-          <button
+    <Modal
+      title={isAr ? "مرتجع جديد" : "New Sales Return"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        sale ? (
+          <Button
+            fullWidth
             onClick={() => {
               setError(null);
               mutation.mutate();
             }}
             disabled={!canSubmit || mutation.isPending}
-            className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
           >
             {mutation.isPending ? "…" : isAr ? "تقديم المرتجع" : "Submit Return"}
-          </button>
-        )}
-      </div>
-    </div>
+          </Button>
+        ) : undefined
+      }
+    >
+      {!saleId && (
+        <div className="relative">
+          <label className={labelClass}>{isAr ? "رقم الفاتورة" : "Invoice"}</label>
+          <input
+            value={search}
+            onChange={(e) => runSearch(e.target.value)}
+            placeholder={isAr ? "ابحث برقم الفاتورة" : "Search by invoice number"}
+            className={inputClass}
+          />
+          {results.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+              {results.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSaleId(s.id);
+                    setResults([]);
+                  }}
+                  className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                >
+                  {s.invoiceNumber}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {sale && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            {sale.invoiceNumber} — {isAr ? sale.customer.nameAr || sale.customer.nameEn : sale.customer.nameEn}
+          </p>
+
+          <div className="space-y-2">
+            {sale.items.map((item) => {
+              const remaining = Number(item.remaining);
+              const selected = lines[item.id];
+              return (
+                <div key={item.id} className={`rounded-lg border p-2.5 ${remaining <= 0 ? "border-slate-100 bg-slate-50 opacity-50" : "border-slate-200"}`}>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      disabled={remaining <= 0}
+                      checked={Boolean(selected)}
+                      onChange={() => toggleLine(item.id, remaining)}
+                    />
+                    {isAr ? item.descriptionAr || item.descriptionEn : item.descriptionEn}
+                    <span className="ltr-nums text-xs text-slate-400">
+                      ({isAr ? "المتبقي" : "remaining"}: {item.remaining} / {item.quantity})
+                    </span>
+                  </label>
+                  {selected && (
+                    <div className="mt-2 grid grid-cols-3 gap-2 ps-6">
+                      <input
+                        type="number"
+                        min={0.01}
+                        max={remaining}
+                        step="0.01"
+                        value={selected.quantity}
+                        onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })}
+                        className={inputClass}
+                      />
+                      <select value={selected.reason} onChange={(e) => updateLine(item.id, { reason: e.target.value as Reason })} className={selectClass}>
+                        {(Object.keys(REASON_LABEL) as Reason[]).map((r) => (
+                          <option key={r} value={r}>
+                            {isAr ? REASON_LABEL[r].ar : REASON_LABEL[r].en}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={selected.note ?? ""}
+                        onChange={(e) => updateLine(item.id, { note: e.target.value })}
+                        placeholder={isAr ? "ملاحظة" : "Note"}
+                        className={inputClass}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{isAr ? "المبلغ المسترد نقدًا" : "Cash Refunded"}</label>
+              <input type="number" min={0} value={refundedAmount} onChange={(e) => setRefundedAmount(e.target.value)} placeholder="0" className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "طريقة الدفع" : "Payment Method"}</label>
+              <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)} className={selectClass}>
+                <option value="">{isAr ? "بلا (رصيد للعميل)" : "None (store credit)"}</option>
+                {paymentMethods?.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {isAr ? m.nameAr : m.nameEn}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <Alert variant="danger" className="mt-3">
+          {error}
+        </Alert>
+      )}
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

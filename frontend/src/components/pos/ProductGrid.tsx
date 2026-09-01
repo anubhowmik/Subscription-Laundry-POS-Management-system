@@ -1,5 +1,7 @@
 import { forwardRef, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { LucideIcon } from "lucide-react";
+import { WashingMachine, Shirt, Sparkles, Star, Package } from "lucide-react";
 import {
   useBrands,
   useCategories,
@@ -22,16 +24,16 @@ interface Props {
 
 type Mode = "SERVICES" | "PRODUCTS";
 
-const SERVICE_ICONS: Record<string, string> = {
-  "wash & iron": "👕",
-  "iron only": "🧺",
-  "dry clean": "🧥",
-  special: "✨",
+const SERVICE_ICONS: Record<string, LucideIcon> = {
+  "wash & iron": WashingMachine,
+  "iron only": Shirt,
+  "dry clean": Sparkles,
+  special: Star,
 };
 
-function iconFor(categoryName: string | undefined | null): string {
-  if (!categoryName) return "🧺";
-  return SERVICE_ICONS[categoryName.trim().toLowerCase()] ?? "🧺";
+function iconFor(categoryName: string | undefined | null): LucideIcon {
+  if (!categoryName) return WashingMachine;
+  return SERVICE_ICONS[categoryName.trim().toLowerCase()] ?? WashingMachine;
 }
 
 /**
@@ -114,14 +116,14 @@ export const ProductGrid = forwardRef<HTMLInputElement, Props>(function ProductG
   }, [search, products, mode]);
 
   return (
-    <div className="flex min-h-0 flex-col rounded-2xl border-2 border-sky-400 bg-white p-4 shadow-sm">
+    <div className="flex min-h-0 flex-col rounded-xl border-2 border-sky-400 bg-white p-4 shadow-sm">
       {/* Mode tabs: New Order style */}
       <div className="mb-4 flex items-center gap-6 border-b border-slate-100 pb-3">
         {(["SERVICES", "PRODUCTS"] as Mode[]).map((m) => (
           <button
             key={m}
             onClick={() => { setMode(m); setSearch(""); }}
-            className={`pb-1 text-sm font-semibold transition ${
+            className={`rounded-t-lg pb-1 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 ${
               mode === m ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"
             }`}
           >
@@ -252,7 +254,7 @@ function CategoryPill({ active, onClick, label }: { active: boolean; onClick: ()
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+      className={`rounded-full px-4 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 ${
         active ? "bg-sky-500 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
       }`}
     >
@@ -268,7 +270,7 @@ interface ItemTileProps {
   onAdd: () => void;
   onInc: () => void;
   onDec: () => void;
-  icon?: string;
+  icon?: LucideIcon;
   image?: string | null;
   disabled?: boolean;
   stockBadge?: string;
@@ -276,7 +278,7 @@ interface ItemTileProps {
 }
 
 /** A single garment/item tile: icon or photo, name, price, and a quantity badge once in the cart. */
-function ItemTile({ name, price, qty, onAdd, onInc, onDec, icon, image, disabled, stockBadge, stockTone = "normal" }: ItemTileProps) {
+function ItemTile({ name, price, qty, onAdd, onInc, onDec, icon: Icon = Package, image, disabled, stockBadge, stockTone = "normal" }: ItemTileProps) {
   const inCart = qty > 0;
   return (
     <div
@@ -287,9 +289,9 @@ function ItemTile({ name, price, qty, onAdd, onInc, onDec, icon, image, disabled
       <button
         onClick={onAdd}
         disabled={disabled}
-        className="flex h-16 w-full items-center justify-center bg-gradient-to-br from-sky-50 to-slate-100 text-3xl disabled:cursor-not-allowed"
+        className="flex h-16 w-full items-center justify-center bg-gradient-to-br from-sky-50 to-slate-100 disabled:cursor-not-allowed"
       >
-        {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : icon ?? "📦"}
+        {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <Icon className="h-7 w-7 text-sky-400" strokeWidth={1.5} aria-hidden />}
       </button>
 
       {stockBadge && (

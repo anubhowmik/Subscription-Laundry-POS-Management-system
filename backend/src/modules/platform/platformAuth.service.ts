@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import { prisma } from "../../config/prisma";
 import { env } from "../../config/env";
 import { AuthenticationError } from "../../utils/AppError";
@@ -21,10 +22,12 @@ function msFromDuration(duration: string): number {
 }
 
 export async function issueTokens(platformAdminId: string, meta: RequestMeta) {
+  // See identical fix + rationale in modules/auth/auth.service.ts's issueTokens(): a shared
+  // literal placeholder collides under concurrent calls against the unique tokenHash constraint.
   const record = await prisma.platformRefreshToken.create({
     data: {
       platformAdminId,
-      tokenHash: "pending",
+      tokenHash: randomUUID(),
       userAgent: meta.userAgent,
       ipAddress: meta.ipAddress,
       expiresAt: new Date(Date.now() + msFromDuration(env.jwt.refreshExpiresIn)),

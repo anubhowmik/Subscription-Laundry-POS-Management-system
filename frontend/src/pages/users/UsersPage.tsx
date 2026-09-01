@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,6 +9,15 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, BusinessLocation, Customer, CustomerGroup } from "../../types/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass, selectClass, errorTextClass } from "../../components/ui/formClasses";
+import { Users, UserCheck, KeyRound, Ticket } from "lucide-react";
 
 interface Role {
   id: string;
@@ -63,6 +73,7 @@ export default function UsersPage() {
   const { t, i18n } = useTranslation();
   const { user: currentUser, can } = useAuth();
   const isAr = i18n.resolvedLanguage === "ar";
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -73,6 +84,18 @@ export default function UsersPage() {
   const { data: users } = useQuery({
     queryKey: ["users"],
     queryFn: async () => (await api.get<ApiSuccess<UserRow[]>>("/users", { params: { limit: 50 } })).data.data,
+  });
+
+  // Informational only (unlike branches, not every user counts - a non-login reference-only
+  // account never does), so this never disables "+ Add"; the actual gate is server-side and
+  // surfaces through serverError only when someone tries to add/reactivate a login-capable user
+  // past the limit. See user.service.ts's assertUserSeatAvailable(), which compares against
+  // Organization.purchasedUserSeats (one-time $10-per-seat purchases, see /licenses) rather than
+  // a plan tier's maxUsers - there's only a single Plan now, see config/plans.ts.
+  const { data: seatSummary } = useQuery({
+    queryKey: ["billing-seats-summary"],
+    queryFn: async () =>
+      (await api.get<ApiSuccess<{ purchasedUserSeats: number; usedUserSeats: number; availableUserSeats: number }>>("/billing/seats")).data.data,
   });
 
   const { data: roles } = useQuery({
@@ -105,7 +128,7 @@ export default function UsersPage() {
     watch,
     setValue,
     formState: { errors, isSubmitting },
-  } = useForm<CreateFormValues>({
+  } = useForm<z.input<typeof createSchema>, unknown, CreateFormValues>({
     resolver: zodResolver(createSchema),
     defaultValues: {
       businessLocationIds: [],
@@ -176,49 +199,109 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{t("nav.users")}</h1>
-        <button onClick={() => setShowForm(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {t("common.add")}
-        </button>
+    <div className="space-y-6">
+      <PageHeader
+        title={t("nav.users")}
+        actions={
+          <Button onClick={() => setShowForm(true)}>
+            + {t("common.add")}
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          icon={Users}
+          cardBg="bg-app-users-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={t("nav.users")}
+          value={String(users?.length ?? 0)}
+        />
+        <StatCard
+          icon={UserCheck}
+          cardBg="bg-emerald-50"
+          iconBg="bg-emerald-500"
+          iconColor="text-white"
+          label={isAr ? "المستخدمون النشطون" : "Active Users"}
+          value={String(users?.filter((u) => u.status === "ACTIVE").length ?? 0)}
+        />
+        {seatSummary && (
+          <>
+            <StatCard
+              icon={KeyRound}
+              cardBg="bg-sky-50"
+              iconBg="bg-sky-500"
+              iconColor="text-white"
+              label={isAr ? "المقاعد المشتراة" : "Purchased Seats"}
+              value={String(seatSummary.purchasedUserSeats)}
+            />
+            <StatCard
+              icon={Ticket}
+              cardBg="bg-amber-50"
+              iconBg="bg-amber-500"
+              iconColor="text-white"
+              label={isAr ? "المقاعد المتاحة" : "Available Seats"}
+              value={String(seatSummary.availableUserSeats)}
+              warn={seatSummary.availableUserSeats === 0}
+            />
+          </>
+        )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {seatSummary && (
+        <Alert variant={seatSummary.availableUserSeats === 0 ? "warning" : "info"}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="ltr-nums">
+              Using {seatSummary.usedUserSeats} of {seatSummary.purchasedUserSeats} purchased user seat
+              {seatSummary.purchasedUserSeats === 1 ? "" : "s"}.
+            </span>
+            <Button size="sm" variant="outline" onClick={() => navigate("/licenses")}>
+              Buy more seats
+            </Button>
+          </div>
+        </Alert>
+      )}
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">Username</th>
-              <th className="px-4 py-2 text-start">{t("common.name")}</th>
-              <th className="px-4 py-2 text-start">{t("common.email")}</th>
-              <th className="px-4 py-2 text-start">Role</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start">{t("common.actions")}</th>
+              <Th>Username</Th>
+              <Th>{t("common.name")}</Th>
+              <Th>{t("common.email")}</Th>
+              <Th>Role</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {users?.map((u) => (
-              <tr key={u.id} className="border-b border-slate-100">
-                <td className="px-4 py-2">
+              <tr key={u.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3">
                   {u.username ?? <span className="text-slate-400">—</span>}
                   {u.isSystemAdmin && (
-                    <span className="ms-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">System Admin</span>
+                    <Badge variant="info" className="ms-2">System Admin</Badge>
                   )}
                   {!u.allowLogin && (
-                    <span className="ms-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">No login</span>
+                    <Badge variant="neutral" className="ms-2">No login</Badge>
                   )}
                 </td>
-                <td className="px-4 py-2">{u.fullNameEn}</td>
-                <td className="px-4 py-2">{u.email}</td>
-                <td className="px-4 py-2">{isAr ? u.role.nameAr : u.role.nameEn}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${u.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                <td className="px-4 py-3">{u.fullNameEn}</td>
+                <td className="px-4 py-3">{u.email}</td>
+                <td className="px-4 py-3">{isAr ? u.role.nameAr : u.role.nameEn}</td>
+                <td className="px-4 py-3">
+                  <Badge variant={u.status === "ACTIVE" ? "success" : "neutral"}>
                     {u.status === "ACTIVE" ? t("common.active") : t("common.inactive")}
-                  </span>
+                  </Badge>
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3">
                   {can("users.reset_password") && (
-                    <button onClick={() => setResetTarget(u)} className="text-xs font-medium text-sky-700 hover:underline">
+                    <button
+                      onClick={() => setResetTarget(u)}
+                      className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100"
+                    >
                       Reset password
                     </button>
                   )}
@@ -226,213 +309,205 @@ export default function UsersPage() {
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       {showForm && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800">{t("common.add")}</h2>
-            <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-3">
+        <Modal
+          title={t("common.add")}
+          onClose={() => {
+            setShowForm(false);
+            reset();
+            setServerError(null);
+          }}
+        >
+          <form onSubmit={handleSubmit((v) => createMutation.mutate(v))} className="space-y-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" {...register("allowLogin")} />
+              Can log in (off = a staff record for reference only, e.g. as a technician on tickets)
+            </label>
+
+            {allowLogin && (
+              <>
+                <div>
+                  <label className={labelClass}>Username</label>
+                  <input {...register("username")} className={inputClass} />
+                  {errors.username && <p className={errorTextClass}>{errors.username.message}</p>}
+                </div>
+                <div>
+                  <label className={labelClass}>{t("common.email")}</label>
+                  <input {...register("email")} className={inputClass} />
+                  {errors.email && <p className={errorTextClass}>{errors.email.message}</p>}
+                </div>
+                <div>
+                  <label className={labelClass}>{t("auth.password")}</label>
+                  <input type="password" {...register("password")} className={inputClass} />
+                  {errors.password && <p className={errorTextClass}>{errors.password.message}</p>}
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className={labelClass}>{t("common.name")}</label>
+              <input {...register("fullNameEn")} className={inputClass} />
+              {errors.fullNameEn && <p className={errorTextClass}>{errors.fullNameEn.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>Max discount % (blank = unlimited)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                {...register("maxDiscountPercent")}
+                className={inputClass}
+              />
+              {errors.maxDiscountPercent && <p className={errorTextClass}>{errors.maxDiscountPercent.message}</p>}
+            </div>
+            <div>
+              <label className={labelClass}>Role</label>
+              <select {...register("roleId")} className={selectClass}>
+                <option value="">-</option>
+                {roles?.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {isAr ? r.nameAr : r.nameEn}
+                  </option>
+                ))}
+              </select>
+              {errors.roleId && <p className={errorTextClass}>{errors.roleId.message}</p>}
+            </div>
+
+            <div>
+              <label className={labelClass}>Business Locations</label>
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {locations?.map((loc) => (
+                  <label key={loc.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedLocationIds.includes(loc.id)}
+                      onChange={() => toggleLocation(loc.id)}
+                      disabled={grantSystemAdmin}
+                    />
+                    {loc.branchName}
+                  </label>
+                ))}
+              </div>
+              {!grantSystemAdmin && selectedLocationIds.length === 0 && (
+                <p className="mt-1 text-xs text-amber-600">
+                  No locations selected — this user won&apos;t be able to use POS or view location-scoped data.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className={labelClass}>Restrict to Customers (blank = unrestricted)</label>
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {customers?.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomerIds.includes(c.id)}
+                      onChange={() => toggleInArray("customerIds", selectedCustomerIds, c.id)}
+                    />
+                    {c.nameEn}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Restrict to Customer Groups (blank = unrestricted)</label>
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {customerGroups?.map((g) => (
+                  <label key={g.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomerGroupIds.includes(g.id)}
+                      onChange={() => toggleInArray("customerGroupIds", selectedCustomerGroupIds, g.id)}
+                    />
+                    {g.nameEn}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Can Transfer Stock From (blank = unrestricted)</label>
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {locations?.map((loc) => (
+                  <label key={loc.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedTransferFromLocationIds.includes(loc.id)}
+                      onChange={() => toggleInArray("transferFromLocationIds", selectedTransferFromLocationIds, loc.id)}
+                    />
+                    {loc.branchName}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {currentUser?.isSystemAdmin && (
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" {...register("allowLogin")} />
-                Can log in (off = a staff record for reference only, e.g. as a technician on tickets)
+                <input type="checkbox" {...register("isSystemAdmin")} />
+                Grant System Admin (full access to all locations and permissions)
               </label>
+            )}
 
-              {allowLogin && (
-                <>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Username</label>
-                    <input {...register("username")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                    {errors.username && <p className="mt-1 text-xs text-red-600">{errors.username.message}</p>}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.email")}</label>
-                    <input {...register("email")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                    {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">{t("auth.password")}</label>
-                    <input type="password" {...register("password")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                    {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>}
-                  </div>
-                </>
-              )}
+            {serverError && <Alert variant="danger">{serverError}</Alert>}
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">{t("common.name")}</label>
-                <input {...register("fullNameEn")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                {errors.fullNameEn && <p className="mt-1 text-xs text-red-600">{errors.fullNameEn.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Max discount % (blank = unlimited)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  {...register("maxDiscountPercent")}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                />
-                {errors.maxDiscountPercent && <p className="mt-1 text-xs text-red-600">{errors.maxDiscountPercent.message}</p>}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Role</label>
-                <select {...register("roleId")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  <option value="">-</option>
-                  {roles?.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {isAr ? r.nameAr : r.nameEn}
-                    </option>
-                  ))}
-                </select>
-                {errors.roleId && <p className="mt-1 text-xs text-red-600">{errors.roleId.message}</p>}
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Business Locations</label>
-                <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
-                  {locations?.map((loc) => (
-                    <label key={loc.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedLocationIds.includes(loc.id)}
-                        onChange={() => toggleLocation(loc.id)}
-                        disabled={grantSystemAdmin}
-                      />
-                      {loc.branchName}
-                    </label>
-                  ))}
-                </div>
-                {!grantSystemAdmin && selectedLocationIds.length === 0 && (
-                  <p className="mt-1 text-xs text-amber-600">
-                    No locations selected — this user won&apos;t be able to use POS or view location-scoped data.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Restrict to Customers (blank = unrestricted)</label>
-                <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
-                  {customers?.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedCustomerIds.includes(c.id)}
-                        onChange={() => toggleInArray("customerIds", selectedCustomerIds, c.id)}
-                      />
-                      {c.nameEn}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Restrict to Customer Groups (blank = unrestricted)</label>
-                <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
-                  {customerGroups?.map((g) => (
-                    <label key={g.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedCustomerGroupIds.includes(g.id)}
-                        onChange={() => toggleInArray("customerGroupIds", selectedCustomerGroupIds, g.id)}
-                      />
-                      {g.nameEn}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Can Transfer Stock From (blank = unrestricted)</label>
-                <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2">
-                  {locations?.map((loc) => (
-                    <label key={loc.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedTransferFromLocationIds.includes(loc.id)}
-                        onChange={() => toggleInArray("transferFromLocationIds", selectedTransferFromLocationIds, loc.id)}
-                      />
-                      {loc.branchName}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {currentUser?.isSystemAdmin && (
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" {...register("isSystemAdmin")} />
-                  Grant System Admin (full access to all locations and permissions)
-                </label>
-              )}
-
-              {serverError && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{serverError}</p>}
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    reset();
-                    setServerError(null);
-                  }}
-                  className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                >
-                  {t("common.save")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                onClick={() => {
+                  setShowForm(false);
+                  reset();
+                  setServerError(null);
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" fullWidth disabled={isSubmitting}>
+                {t("common.save")}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {resetTarget && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-1 text-lg font-semibold text-slate-800">Reset password</h2>
-            <p className="mb-4 text-sm text-slate-500">for {resetTarget.username}</p>
-
-            {resetSuccess ? (
-              <>
-                <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">Password reset successfully.</p>
-                <button onClick={closeResetModal} className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white">
-                  {t("common.close")}
-                </button>
-              </>
-            ) : (
-              <form
-                onSubmit={handleResetSubmit((v) => resetPasswordMutation.mutate({ userId: resetTarget.id, newPassword: v.newPassword }))}
-                className="space-y-3"
-              >
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">New password</label>
-                  <input type="password" {...registerReset("newPassword")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                  {resetErrors.newPassword && <p className="mt-1 text-xs text-red-600">{resetErrors.newPassword.message}</p>}
-                </div>
-                {resetError && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{resetError}</p>}
-                <div className="flex gap-2 pt-2">
-                  <button type="button" onClick={closeResetModal} className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
-                    {t("common.cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isResetting}
-                    className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                  >
-                    {t("common.confirm")}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
+        <Modal title="Reset password" subtitle={`for ${resetTarget.username}`} onClose={closeResetModal} size="sm">
+          {resetSuccess ? (
+            <>
+              <Alert variant="success">Password reset successfully.</Alert>
+              <Button fullWidth className="mt-4" onClick={closeResetModal}>
+                {t("common.close")}
+              </Button>
+            </>
+          ) : (
+            <form
+              onSubmit={handleResetSubmit((v) => resetPasswordMutation.mutate({ userId: resetTarget.id, newPassword: v.newPassword }))}
+              className="space-y-4"
+            >
+              <div>
+                <label className={labelClass}>New password</label>
+                <input type="password" {...registerReset("newPassword")} className={inputClass} />
+                {resetErrors.newPassword && <p className={errorTextClass}>{resetErrors.newPassword.message}</p>}
+              </div>
+              {resetError && <Alert variant="danger">{resetError}</Alert>}
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" fullWidth onClick={closeResetModal}>
+                  {t("common.cancel")}
+                </Button>
+                <Button type="submit" fullWidth disabled={isResetting}>
+                  {t("common.confirm")}
+                </Button>
+              </div>
+            </form>
+          )}
+        </Modal>
       )}
     </div>
   );

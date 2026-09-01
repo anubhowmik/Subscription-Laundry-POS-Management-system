@@ -1,5 +1,59 @@
 @import "tailwindcss";
 
+/* Brand palette: ink (#0D0D0D) + lilac (#D9B8FF). Overrides Tailwind's built-in "sky" scale so
+   every existing sky-* utility across the app (buttons, badges, focus rings, links, active nav)
+   picks up the new brand colors automatically. 50-300 are light lilac tints (used for subtle
+   backgrounds/borders/rings); 300 is the exact accent; 400-500 bridge to the exact ink at 600;
+   700-950 stay at pure black for hover/active states on already-near-black elements.
+   Exempt: the platform operator console (dark background) keeps its own blue accent - see
+   PlatformConsolePage.tsx / PlatformLoginPage.tsx, which use blue-* instead of sky-* on purpose.
+
+   Per-application identity colors (Odoo-style): each of the three applications on the Home
+   launcher gets its own accent - amber for POS Laundry, violet for Users & Rules, teal for
+   ZATCA KSA - carried from its Home card into that app's own Sidebar/Topbar once you're inside
+   it (see Sidebar.tsx's APPS array). Everything else (buttons, form focus rings, generic badges)
+   stays on the single ink/lilac sky-* accent above, so this stays "three departments, one
+   product" rather than turning into an inconsistent rainbow. */
+@theme {
+  --color-sky-50: #f9f4ff;
+  --color-sky-100: #f1e5ff;
+  --color-sky-200: #e6d1ff;
+  --color-sky-300: #d9b8ff;
+  --color-sky-400: #c09eea;
+  --color-sky-500: #9678c4;
+  --color-sky-600: #0d0d0d;
+  --color-sky-700: #000000;
+  --color-sky-800: #000000;
+  --color-sky-900: #000000;
+  --color-sky-950: #000000;
+
+  --color-app-pos-50: #fdf3e9;
+  --color-app-pos-100: #fbe3c9;
+  --color-app-pos-500: #d97a1f;
+  --color-app-pos-600: #b8630f;
+
+  --color-app-users-50: #f2eefc;
+  --color-app-users-100: #e2d8f9;
+  --color-app-users-500: #6d4bcf;
+  --color-app-users-600: #5936b3;
+
+  --color-app-zatca-50: #e9f6f2;
+  --color-app-zatca-100: #cbe9e0;
+  --color-app-zatca-500: #0e8f74;
+  --color-app-zatca-600: #0a7660;
+
+  --font-sans: "Plus Jakarta Sans", "Noto Sans Arabic", system-ui, "Segoe UI", Tahoma, Arial, sans-serif;
+  /* Marketing-only accent face (Home hero), used sparingly for a single word/annotation - Latin
+     script only, so it silently falls back to the Arabic body face for Arabic text rather than
+     needing a separate Arabic hand-drawn face that doesn't exist in this pairing. */
+  --font-script: "Caveat", "Noto Sans Arabic", cursive;
+  /* Second, distinct hand-drawn face for the "built for" marquee pills - same casual family as
+     --font-script but a visibly different letterform (Kalam's even, marker-like strokes vs
+     Caveat's flowing cursive), so the two accents read as a deliberate pair, not one font reused
+     everywhere. Same Latin-only/Arabic-fallback reasoning as --font-script. */
+  --font-script-2: "Kalam", "Noto Sans Arabic", cursive;
+}
+
 html,
 body,
 #root {
@@ -9,11 +63,101 @@ body,
 body {
   margin: 0;
   @apply bg-slate-50 text-slate-900 antialiased;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
 }
 
-/* Numbers stay LTR even inside RTL text (invoice totals, phone numbers, dates) */
+/* Home launcher entrance + hover motion. Kept to one place, one purpose: the app cards fade/lift
+   in on load, staggered, and lift a little further on hover. Respects reduced-motion below. */
+@keyframes fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-slide-up {
+  animation: fade-slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-slide-up {
+    animation: none;
+  }
+}
+
+/* Home "built for" strip - a continuous, Odoo-style marquee of business-segment badges. The
+   track is duplicated once in the markup and this animates it exactly -50% (one full copy's
+   width) so the loop point is seamless; pauses on hover/focus so it can actually be read, and
+   is skipped entirely under reduced-motion (falls back to a static row). */
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.animate-marquee {
+  animation: marquee-scroll 32s linear infinite;
+}
+.group\/marquee:hover .animate-marquee,
+.group\/marquee:focus-within .animate-marquee {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
+.marquee-fade {
+  mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
+}
+
+/* Native <button> defaults to cursor: default in every browser (only <a> gets pointer
+   automatically) - every clickable button in this app should read as clickable. */
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Row-hover scanning aid for every data table. The shared Tr component already carries this,
+   but most page table bodies map over native <tr> elements directly (to keep per-cell markup
+   flexible) - this catches those too so every table in the app behaves consistently.
+   slate-100 (not slate-50) because slate-50 is nearly indistinguishable from the white table
+   background - it technically applies but reads as "nothing happened" on hover. */
+table tbody tr {
+  transition: background-color 120ms ease;
+}
+table tbody tr:hover {
+  background-color: theme(colors.slate.100);
+}
+
+/* Numbers stay LTR even inside RTL text (invoice totals, phone numbers, dates).
+   Tabular figures keep digit columns aligned in tables/totals as values change. */
 .ltr-nums {
   direction: ltr;
   unicode-bidi: isolate;
   display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin, unobtrusive scrollbars for long lists/tables/modals (Chromium + Firefox) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme(colors.slate.300) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: theme(colors.slate.300);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

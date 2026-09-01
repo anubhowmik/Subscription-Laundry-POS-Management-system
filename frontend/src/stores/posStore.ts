@@ -47,6 +47,7 @@ export interface PosPayment {
   paymentMethodId: string;
   label: string;
   amount: number;
+  referenceNumber?: string; // BnplSession id, for BNPL tenders
 }
 
 export interface AppliedCoupon {
@@ -106,7 +107,7 @@ interface PosState {
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
 
-export const usePosStore = create<PosState>((set, get) => ({
+export const usePosStore = create<PosState>((set) => ({
   lines: [],
   customer: null,
   invoiceDiscountMode: "FIXED",

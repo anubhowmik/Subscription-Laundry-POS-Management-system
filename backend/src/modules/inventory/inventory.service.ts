@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError } from "../../utils/AppError";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
+import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
@@ -20,10 +21,16 @@ interface AdjustStockInput {
   reason: string;
 }
 
-export async function adjustStock(input: AdjustStockInput, organizationId: string, createdBy: string) {
+export async function adjustStock(
+  input: AdjustStockInput,
+  organizationId: string,
+  createdBy: string,
+  allowedLocationIds: string[] | null,
+) {
   const product = await prisma.product.findFirst({ where: { id: input.productId, organizationId, deletedAt: null } });
   if (!product) throw new NotFoundError("Product not found");
   await assertLocationInOrg(input.businessLocationId, organizationId);
+  assertLocationAllowed(input.businessLocationId, allowedLocationIds);
 
   const change = new Decimal(input.quantityChange);
 
@@ -272,9 +279,8 @@ export async function listTransactions(query: Record<string, unknown>, organizat
 
   const where: Prisma.InventoryTransactionWhereInput = {
     product: { organizationId },
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.productId ? { productId: String(query.productId) } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
     ...(query.type
       ? { type: query.type as "STOCK_IN" | "STOCK_OUT" | "SALE" | "SALE_RETURN" | "ADJUSTMENT" | "TRANSFER_IN" | "TRANSFER_OUT" }
       : {}),
@@ -318,8 +324,14 @@ const STOCK_ADJUSTMENT_INCLUDE = {
   items: { include: { product: { select: { nameEn: true, nameAr: true, sku: true } } } },
 } satisfies Prisma.StockAdjustmentInclude;
 
-export async function createStockAdjustment(input: CreateStockAdjustmentInput, organizationId: string, createdBy: string) {
+export async function createStockAdjustment(
+  input: CreateStockAdjustmentInput,
+  organizationId: string,
+  createdBy: string,
+  allowedLocationIds: string[] | null,
+) {
   await assertLocationInOrg(input.businessLocationId, organizationId);
+  assertLocationAllowed(input.businessLocationId, allowedLocationIds);
   if (input.items.length === 0) throw new AppError(400, "At least one item is required");
 
   const productIds = [...new Set(input.items.map((i) => i.productId))];
@@ -388,9 +400,8 @@ export async function listStockAdjustments(query: Record<string, unknown>, organ
 
   const where: Prisma.StockAdjustmentWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.status ? { status: query.status as "CONFIRMED" | "REVERSED" } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
   };
 
   const [data, total] = await Promise.all([

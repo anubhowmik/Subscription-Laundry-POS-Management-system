@@ -7,6 +7,7 @@ import { createMessageSchema, listMessageQuerySchema } from "./message.validator
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 router.use(requirePermission("messages.manage"));
 
 router.get("/", validate(listMessageQuerySchema, "query"), controller.list);

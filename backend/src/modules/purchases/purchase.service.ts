@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
 import { parsePagination } from "../../utils/pagination";
+import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
@@ -21,9 +22,17 @@ interface CreatePurchaseInput {
 // Receives stock from a supplier. This is the only place in the app that produces a non-zero
 // supplier "Purchase Due" balance - see the schema comment above the Supplier model for why
 // there's no separate purchase-order document type.
-export async function create(input: CreatePurchaseInput, organizationId: string, createdBy: string) {
+export async function create(
+  input: CreatePurchaseInput,
+  organizationId: string,
+  createdBy: string,
+  allowedLocationIds: string[] | null,
+) {
   const supplier = await prisma.supplier.findFirst({ where: { id: input.supplierId, organizationId, deletedAt: null } });
   if (!supplier) throw new NotFoundError("Supplier not found");
+  const location = await prisma.businessLocation.findFirst({ where: { id: input.businessLocationId, organizationId } });
+  if (!location) throw new NotFoundError("Business location not found");
+  assertLocationAllowed(input.businessLocationId, allowedLocationIds);
 
   const products = await prisma.product.findMany({
     where: { id: { in: input.items.map((l) => l.productId) }, organizationId },
@@ -126,8 +135,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const { page, limit, skip } = parsePagination(query);
   const where: Prisma.PurchaseWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.supplierId ? { supplierId: String(query.supplierId) } : {}),
   };
 
@@ -325,8 +333,7 @@ export async function listReturns(query: Record<string, unknown>, organizationId
   const { page, limit, skip } = parsePagination(query);
   const where: Prisma.PurchaseReturnWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.supplierId ? { supplierId: String(query.supplierId) } : {}),
   };
 

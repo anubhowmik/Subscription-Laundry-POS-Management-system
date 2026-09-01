@@ -13,6 +13,7 @@ import {
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/categories", requirePermission("expenses.view"), controller.listCategories);
 router.post("/categories", requirePermission("expense_categories.manage"), validate(createExpenseCategorySchema), controller.createCategory);

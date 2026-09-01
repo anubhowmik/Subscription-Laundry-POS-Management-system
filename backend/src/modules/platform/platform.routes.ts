@@ -17,6 +17,21 @@ const setStatusSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED"]),
 });
 
+const createAdminSchema = z.object({
+  username: z.string().min(3),
+  email: z.string().email(),
+  fullName: z.string().min(1),
+  password: z.string().min(8),
+});
+
+const setAdminStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "INACTIVE"]),
+});
+
+const resetAdminPasswordSchema = z.object({
+  newPassword: z.string().min(8),
+});
+
 const router = Router();
 
 // Auth endpoints are public (you cannot be logged in before logging in).
@@ -32,5 +47,10 @@ router.get("/stats", controller.getStats);
 router.get("/organizations", controller.listOrganizations);
 router.patch("/organizations/:id/status", validate(setStatusSchema), controller.setOrganizationStatus);
 router.get("/payments", controller.listPayments);
+
+router.get("/admins", controller.listAdmins);
+router.post("/admins", validate(createAdminSchema), controller.createAdmin);
+router.patch("/admins/:id/status", validate(setAdminStatusSchema), controller.setAdminStatus);
+router.post("/admins/:id/reset-password", validate(resetAdminPasswordSchema), controller.resetAdminPassword);
 
 export default router;

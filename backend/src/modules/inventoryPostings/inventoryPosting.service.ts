@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
 import { parsePagination } from "../../utils/pagination";
+import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
@@ -94,8 +95,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const { page, limit, skip } = parsePagination(query);
   const where: Prisma.InventoryPostingWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
   };
 
   const [data, total] = await Promise.all([

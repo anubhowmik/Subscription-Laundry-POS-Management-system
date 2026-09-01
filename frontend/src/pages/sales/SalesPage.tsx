@@ -7,6 +7,14 @@ import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { formatMoney, formatDate } from "../../lib/format";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { SaleDetailModal } from "../../components/sales/SaleDetailModal";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Badge } from "../../components/ui/Badge";
+import { Button } from "../../components/ui/Button";
+import { Pagination } from "../../components/ui/Pagination";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { Receipt } from "lucide-react";
 
 interface Sale {
   id: string;
@@ -20,11 +28,11 @@ interface Sale {
   customer: { nameEn: string; nameAr: string; phone: string };
 }
 
-const STATUS_STYLES: Record<Sale["paymentStatus"], string> = {
-  PAID: "bg-green-100 text-green-700",
-  PARTIAL: "bg-amber-100 text-amber-700",
-  DUE: "bg-red-100 text-red-700",
-  OVERPAID: "bg-blue-100 text-blue-700",
+const STATUS_VARIANT: Record<Sale["paymentStatus"], "success" | "warning" | "danger" | "info"> = {
+  PAID: "success",
+  PARTIAL: "warning",
+  DUE: "danger",
+  OVERPAID: "info",
 };
 
 export default function SalesPage() {
@@ -47,53 +55,66 @@ export default function SalesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-800">{t("nav.sales")}</h1>
+    <div className="space-y-6">
+      <PageHeader title={t("nav.sales")} />
 
-      <input
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPage(1);
-        }}
-        placeholder={t("common.search")}
-        className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm"
-      />
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard icon={Receipt} cardBg="bg-app-pos-500" iconBg="bg-white/20" iconColor="text-white" highlight label={t("nav.sales")} value={String(data.meta.total)} />
+        </div>
+      )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <TableContainer>
+        <TableToolbar>
+          <SearchInput
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder={t("common.search")}
+            className="max-w-xs"
+          />
+        </TableToolbar>
+        <TableScroll>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{t("pos.invoice")}</th>
-              <th className="px-4 py-2 text-start">{t("common.name")}</th>
-              <th className="px-4 py-2 text-start">Date</th>
-              <th className="px-4 py-2 text-start">{t("pos.total")}</th>
-              <th className="px-4 py-2 text-start">{t("pos.due")}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الجاهزية المتوقعة" : "Est. Ready"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-start">{t("common.actions")}</th>
+              <Th>{t("pos.invoice")}</Th>
+              <Th>{t("common.name")}</Th>
+              <Th>Date</Th>
+              <Th>{t("pos.total")}</Th>
+              <Th>{t("pos.due")}</Th>
+              <Th>{isAr ? "الجاهزية المتوقعة" : "Est. Ready"}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((s) => (
-              <tr key={s.id} className="border-b border-slate-100">
-                <td className="px-4 py-2"><span className="ltr-nums">{s.invoiceNumber}</span></td>
-                <td className="px-4 py-2">{isAr ? s.customer.nameAr || s.customer.nameEn : s.customer.nameEn}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatDate(s.saleDate, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(s.totalAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(s.dueAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2 text-xs text-slate-500">
+              <tr key={s.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{s.invoiceNumber}</span></td>
+                <td className="px-4 py-3">{isAr ? s.customer.nameAr || s.customer.nameEn : s.customer.nameEn}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatDate(s.saleDate, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.totalAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.dueAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3 text-xs text-slate-500">
                   <span className="ltr-nums">{s.estimatedReadyAt ? new Date(s.estimatedReadyAt).toLocaleString(locale) : "-"}</span>
                 </td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLES[s.paymentStatus]}`}>{s.paymentStatus}</span>
+                <td className="px-4 py-3">
+                  <Badge variant={STATUS_VARIANT[s.paymentStatus]}>{s.paymentStatus}</Badge>
                 </td>
-                <td className="px-4 py-2">
-                  <div className="flex gap-3">
-                    <button onClick={() => setDetailSaleId(s.id)} className="text-xs font-medium text-sky-700 hover:underline">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setDetailSaleId(s.id)}>
                       {isAr ? "الحالة" : "Status"}
-                    </button>
-                    <Link to={`/invoices/${s.id}`} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-sky-700 hover:underline">
+                    </Button>
+                    <Link
+                      to={`/invoices/${s.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-400 hover:bg-slate-200"
+                    >
                       {t("pos.invoice")}
                     </Link>
                   </div>
@@ -108,25 +129,18 @@ export default function SalesPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+        </TableScroll>
+      </TableContainer>
 
-      {data?.meta && data.meta.totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40">
-            ‹
-          </button>
-          <span>
-            {t("common.page")} {page} {t("common.of")} {data.meta.totalPages}
-          </span>
-          <button
-            disabled={page >= data.meta.totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
-          >
-            ›
-          </button>
-        </div>
+      {data?.meta && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
       )}
 
       {detailSaleId && <SaleDetailModal saleId={detailSaleId} onClose={() => setDetailSaleId(null)} />}

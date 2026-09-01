@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { X, User } from "lucide-react";
 import { usePosStore, usePosTotals, type DiscountMode } from "../../stores/posStore";
 import {
   useCustomers,
@@ -12,6 +12,12 @@ import {
   type PosPaymentMethod,
 } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
+import { Button } from "../../components/ui/Button";
+import { Modal } from "../../components/ui/Modal";
+import { inputClass, inputSmClass } from "../../components/ui/formClasses";
+import { BnplFlowModal } from "./BnplFlowModal";
+
+const BNPL_CODES = ["BNPL_TAMARA", "BNPL_TABBY", "BNPL_MISPAY"];
 
 interface Props {
   currency: string;
@@ -35,7 +41,7 @@ export function InvoicePanel(props: Props) {
   const lines = usePosStore((s) => s.lines);
 
   return (
-    <div className="flex min-h-0 flex-col rounded-2xl border-2 border-sky-400 bg-white shadow-sm">
+    <div className="flex min-h-0 flex-col rounded-xl border-2 border-sky-400 bg-white shadow-sm">
       <CustomerBar {...props} />
 
       {/* Item list */}
@@ -62,7 +68,7 @@ function ItemRow({ line, currency, locale, isAr }: Props & { line: ReturnType<ty
   const gross = line.unitPrice * line.quantity - line.discountAmount;
 
   return (
-    <div className={`flex items-center gap-3 rounded-lg px-2 py-2 ${overStock ? "bg-red-50" : "hover:bg-slate-50"}`}>
+    <div className={`flex items-center gap-3 rounded-lg px-2 py-2 transition-colors ${overStock ? "bg-red-50" : "hover:bg-slate-100"}`}>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-slate-800">{isAr ? line.nameAr || line.nameEn : line.nameEn}</p>
         {overStock && (
@@ -88,7 +94,7 @@ function ItemRow({ line, currency, locale, isAr }: Props & { line: ReturnType<ty
       </div>
       <span className="ltr-nums w-20 text-end text-sm font-semibold text-slate-800">{formatMoney(gross, currency, locale)}</span>
       <button onClick={() => store.removeLine(line.key)} className="text-slate-300 hover:text-red-500" aria-label="remove">
-        ✕
+        <X className="h-4 w-4" strokeWidth={2} aria-hidden />
       </button>
     </div>
   );
@@ -104,13 +110,13 @@ function CustomerBar(props: Props) {
   const { data: customers } = useCustomers(search);
 
   return (
-    <div className="relative rounded-t-2xl border-b border-slate-100 bg-slate-50/60 p-3">
+    <div className="relative rounded-t-xl border-b border-slate-100 bg-slate-50/60 p-3">
       <div className="flex items-center gap-2">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-start text-sm hover:bg-slate-200/70"
+          className="flex flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2.5 text-start text-sm hover:bg-slate-200/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
         >
-          <span>👤</span>
+          <User className="h-4 w-4 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
           <span className="flex-1 truncate font-medium text-slate-700">
             {customer ? (isAr ? customer.nameAr || customer.nameEn : customer.nameEn) : isAr ? "عميل نقدي" : "Walk-in Customer"}
           </span>
@@ -122,7 +128,7 @@ function CustomerBar(props: Props) {
         </button>
         <button
           onClick={() => setNewOpen(true)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-lg font-semibold text-white shadow-sm hover:bg-sky-600"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500 text-lg font-semibold text-white shadow-sm hover:bg-sky-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
           title={isAr ? "عميل جديد" : "New customer"}
         >
           +
@@ -147,7 +153,7 @@ function CustomerBar(props: Props) {
                   setOpen(false);
                   setSearch("");
                 }}
-                className="flex w-full items-center justify-between px-3 py-2 text-start text-sm hover:bg-slate-50"
+                className="flex w-full items-center justify-between px-3 py-2 text-start text-sm transition-colors hover:bg-slate-100"
               >
                 <span>{isAr ? c.nameAr || c.nameEn : c.nameEn}</span>
                 <span className="text-xs text-slate-400">{c.phone}</span>
@@ -202,24 +208,20 @@ function NewCustomerModal({
   }
 
   return (
-    <Modal onClose={onClose} title={isAr ? "عميل جديد" : "New Customer"}>
+    <Modal onClose={onClose} title={isAr ? "عميل جديد" : "New Customer"} size="sm">
       <div className="space-y-3">
         <Field label={isAr ? "الاسم (إنجليزي)" : "Name (English)"}>
-          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={inputCls} autoFocus />
+          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={inputClass} autoFocus />
         </Field>
         <Field label={isAr ? "الاسم (عربي) — مطلوب للفاتورة" : "Name (Arabic) — required to invoice"}>
-          <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" className={inputCls} />
+          <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" className={inputClass} />
         </Field>
         <Field label={isAr ? "الهاتف" : "Phone"}>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="05XXXXXXXX" className={inputCls} />
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="05XXXXXXXX" className={inputClass} />
         </Field>
-        <button
-          onClick={submit}
-          disabled={!nameEn || !phone || createCustomer.isPending}
-          className="w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-        >
+        <Button onClick={submit} disabled={!nameEn || !phone || createCustomer.isPending} fullWidth>
           {createCustomer.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
+        </Button>
       </div>
     </Modal>
   );
@@ -328,7 +330,8 @@ function QuickActions(props: Props) {
   const resumeHeldSale = useResumeHeldSale();
   const discardHeldSale = useDiscardHeldSale();
 
-  const pill = "rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-40";
+  const pill =
+    "rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40";
 
   async function holdCurrent() {
     if (!hasLines) return;
@@ -401,7 +404,7 @@ function QuickActions(props: Props) {
           <div className="absolute bottom-full start-0 z-20 mb-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
             {(heldSales?.length ?? 0) === 0 && <p className="px-2 py-3 text-center text-xs text-slate-400">{isAr ? "لا توجد فواتير معلّقة" : "No held sales"}</p>}
             {heldSales?.map((h) => (
-              <div key={h.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+              <div key={h.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-100">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-slate-700">{h.label}</p>
                   <p className="truncate text-[10px] text-slate-400">
@@ -412,7 +415,7 @@ function QuickActions(props: Props) {
                   <button onClick={() => resume(h.id)} className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold text-sky-700 hover:bg-sky-200">
                     {isAr ? "استئناف" : "Resume"}
                   </button>
-                  <button onClick={() => discardHeldSale.mutate(h.id)} className="rounded-full bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-100">
+                  <button onClick={() => discardHeldSale.mutate(h.id)} className="rounded-full bg-red-100 px-2 py-1 text-[10px] font-semibold text-red-600 transition-colors hover:bg-red-200">
                     {isAr ? "حذف" : "Discard"}
                   </button>
                 </div>
@@ -476,9 +479,10 @@ function CouponButton({ isAr, notify, pill, businessLocationId }: Props & { pill
           store.setCoupon(null);
           notify(isAr ? "تمت إزالة الكوبون" : "Coupon removed");
         }}
-        className={`${pill} !bg-green-100 !text-green-700 hover:!bg-green-200`}
+        className={`${pill} !bg-green-100 !text-green-700 hover:!bg-green-200 inline-flex items-center gap-1`}
       >
-        {coupon.code} ✕
+        {coupon.code}
+        <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
       </button>
     );
   }
@@ -496,15 +500,11 @@ function CouponButton({ isAr, notify, pill, businessLocationId }: Props & { pill
             onKeyDown={(e) => e.key === "Enter" && apply()}
             placeholder={isAr ? "أدخل كود الكوبون" : "Enter coupon code"}
             autoFocus
-            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-sky-400 focus:outline-none"
+            className={`${inputSmClass} w-full`}
           />
-          <button
-            onClick={apply}
-            disabled={preview.isPending || !code.trim()}
-            className="mt-2 w-full rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-          >
+          <Button onClick={apply} disabled={preview.isPending || !code.trim()} size="sm" fullWidth className="mt-2">
             {preview.isPending ? "…" : isAr ? "تطبيق" : "Apply"}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -523,14 +523,14 @@ function SubmitBar(props: Props) {
       <button
         onClick={onSaveAsQuote}
         disabled={!hasLines || saveQuotePending}
-        className="rounded-xl border border-slate-300 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-lg border border-slate-300 px-3 py-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {saveQuotePending ? "…" : isAr ? "حفظ كعرض سعر" : "Save as Quote"}
       </button>
       <button
         onClick={() => setPaymentOpen(true)}
         disabled={!hasLines}
-        className="flex flex-1 items-center justify-between rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex flex-1 items-center justify-between rounded-lg bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span>{isAr ? "الدفع" : "Submit"}</span>
         <span className="ltr-nums text-base">{formatMoney(totals.grandTotal, currency, locale)}</span>
@@ -540,25 +540,46 @@ function SubmitBar(props: Props) {
 }
 
 function CardOnlineButtons(props: Props) {
-  const { isAr, notify } = props;
+  const { isAr, notify, currency, locale, businessLocationId, paymentMethods } = props;
   const lines = usePosStore((s) => s.lines);
+  const customer = usePosStore((s) => s.customer);
   const hasLines = lines.length > 0;
+  const [bnplOpen, setBnplOpen] = useState(false);
+
   return (
     <div className="flex gap-2">
       <button
         onClick={() => notify(isAr ? "دفع بالبطاقة — سيُفعّل عند ربط الجهاز" : "Card payment — enable when a card terminal is connected")}
         disabled={!hasLines}
-        className="rounded-xl bg-indigo-500 px-3 py-3 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-40"
+        className="rounded-lg bg-indigo-500 px-3 py-3 text-xs font-semibold text-white hover:bg-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:opacity-40"
       >
         {isAr ? "بطاقة" : "Card"}
       </button>
       <button
         onClick={() => notify(isAr ? "الدفع الإلكتروني — قريبًا عبر بوابة الدفع" : "Online payment — coming via the payment gateway")}
         disabled={!hasLines}
-        className="rounded-xl bg-amber-400 px-3 py-3 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-40"
+        className="rounded-lg bg-amber-400 px-3 py-3 text-xs font-semibold text-white hover:bg-amber-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:opacity-40"
       >
         {isAr ? "إلكتروني" : "Online"}
       </button>
+      <button
+        onClick={() => (customer ? setBnplOpen(true) : notify(isAr ? "اختر عميلاً أولاً" : "Select a customer first"))}
+        disabled={!hasLines}
+        className="rounded-lg bg-violet-500 px-3 py-3 text-xs font-semibold text-white hover:bg-violet-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 disabled:opacity-40"
+      >
+        {isAr ? "دفع آجل" : "BNPL"}
+      </button>
+      {bnplOpen && (
+        <BnplFlowModal
+          isAr={isAr}
+          currency={currency}
+          locale={locale}
+          businessLocationId={businessLocationId}
+          paymentMethods={paymentMethods}
+          notify={notify}
+          onClose={() => setBnplOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -571,15 +592,15 @@ function PaymentModal(props: Props) {
   const customer = usePosStore((s) => s.customer);
 
   return (
-    <Modal onClose={() => setPaymentOpen(false)} title={isAr ? "الدفع" : "Payment"}>
-      <div className="mb-3 flex justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
+    <Modal onClose={() => setPaymentOpen(false)} title={isAr ? "الدفع" : "Payment"} size="sm">
+      <div className="mb-3 flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
         <span className="text-slate-500">{isAr ? "الإجمالي المستحق" : "Grand Total"}</span>
         <span className="ltr-nums font-semibold">{formatMoney(totals.grandTotal, currency, locale)}</span>
       </div>
 
       <div className="mb-2 grid grid-cols-2 gap-2">
         {paymentMethods
-          .filter((m) => m.code !== "STORE_CREDIT" && m.code !== "CASHBACK")
+          .filter((m) => m.code !== "STORE_CREDIT" && m.code !== "CASHBACK" && !BNPL_CODES.includes(m.code))
           .map((m) => (
             <button
               key={m.id}
@@ -594,7 +615,7 @@ function PaymentModal(props: Props) {
                 })
               }
               disabled={totals.due <= 0}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 disabled:opacity-40"
             >
               {isAr ? m.nameAr : m.nameEn}
             </button>
@@ -613,10 +634,10 @@ function PaymentModal(props: Props) {
                 })
               }
               disabled={totals.due <= 0}
-              className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-40"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 transition-colors hover:border-amber-300 hover:bg-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:opacity-40"
             >
               {isAr ? cashbackMethod.nameAr : cashbackMethod.nameEn}
-              <span className="ltr-nums ms-1 text-xs text-amber-500">({formatMoney(customer.cashBack, currency, locale)})</span>
+              <span className="ltr-nums ms-1 text-xs text-amber-500">({formatMoney(customer.cashBack ?? 0, currency, locale)})</span>
             </button>
           );
         })()}
@@ -627,7 +648,7 @@ function PaymentModal(props: Props) {
           <span>{p.label}</span>
           <span className="ltr-nums">{formatMoney(p.amount, currency, locale)}</span>
           <button onClick={() => store.removePayment(p.id)} className="text-slate-400 hover:text-red-500">
-            ✕
+            <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
           </button>
         </div>
       ))}
@@ -674,7 +695,7 @@ function PaymentModal(props: Props) {
       <button
         onClick={onCompleteSale}
         disabled={checkoutPending}
-        className="mt-3 w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+        className="mt-3 w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:opacity-50"
       >
         {checkoutPending ? "…" : isAr ? "إتمام البيع" : "Complete Sale"}
       </button>
@@ -684,29 +705,11 @@ function PaymentModal(props: Props) {
 
 // --- small shared bits -------------------------------------------------------------------
 
-const inputCls = "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
       {children}
-    </div>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }

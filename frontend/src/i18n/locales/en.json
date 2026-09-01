@@ -24,6 +24,8 @@
     "total": "Total",
     "close": "Close",
     "confirm": "Confirm",
+    "confirmTitle": "Please confirm",
+    "confirmDangerTitle": "This can't be undone",
     "required": "Required",
     "all": "All",
     "createdAt": "Created",
@@ -36,6 +38,21 @@
     "no": "No"
   },
   "nav": {
+    "section": {
+      "overview": "Overview",
+      "sales": "Sales & Orders",
+      "customers": "Customers",
+      "catalogInventory": "Catalog & Inventory",
+      "finance": "Finance",
+      "communications": "Communications",
+      "usersRules": "Users & Rules",
+      "zatca": "ZATCA KSA",
+      "settings": "Settings"
+    },
+    "home": "Home",
+    "menu": "Menu",
+    "branch": "Branch",
+    "switchBranch": "Switch branch",
     "dashboard": "Dashboard",
     "pos": "Point of Sale",
     "sales": "Sales",
@@ -56,6 +73,7 @@
     "compensations": "Compensations",
     "bookings": "Bookings",
     "notifications": "Notifications",
+    "bnpl": "BNPL Providers",
     "organizationSettings": "Organization Settings",
     "products": "Products",
     "services": "Services",
@@ -65,6 +83,9 @@
     "coupons": "Coupons",
     "priceLists": "Price Lists",
     "subscription": "Subscription",
+    "applicationAccess": "Application Access",
+    "licenses": "Licenses",
+    "zatca": "ZATCA KSA",
     "logout": "Logout"
   },
   "auth": {
@@ -75,6 +96,7 @@
     "invalidCredentials": "Invalid username or password",
     "welcomeBack": "Welcome back",
     "signInToContinue": "Sign in to continue to your dashboard",
+    "backToHome": "Back to home",
     "noAccount": "Don't have an account?",
     "registerCompany": "Register your company",
     "alreadyHaveAccount": "Already have an account?"
@@ -97,6 +119,58 @@
     "submit": "Create Company Account",
     "usernameTaken": "That username is already taken",
     "emailTaken": "That email is already registered"
+  },
+  "verifyEmail": {
+    "title": "Verify your email",
+    "subtitle": "Enter the 6-digit code we sent to your email address",
+    "emailLabel": "Email address",
+    "codeLabel": "Verification code",
+    "submit": "Verify",
+    "resend": "Resend code",
+    "resendCooldown": "Resend available in {{seconds}}s",
+    "resendSuccess": "If that email exists and isn't verified yet, a new code was sent",
+    "invalidCode": "Incorrect or expired code",
+    "codeLocked": "Too many incorrect attempts - request a new code",
+    "success": "Email verified. You can now sign in.",
+    "backToLogin": "Back to sign in"
+  },
+  "home": {
+    "tagline": "One platform for your laundry business - point of sale, your team, and Saudi e-invoicing.",
+    "signIn": "Sign In",
+    "startTrial": "Start Free Trial",
+    "signInToOpen": "Sign in to open",
+    "trialNote": "7-day free trial · No credit card required",
+    "trialEndsOn": "Your free trial ends on {{date}}",
+    "trialEnded": "Your free trial ended on {{date}}",
+    "subscribeNow": "Subscribe now",
+    "apps": {
+      "pos": { "name": "POS Laundry", "description": "Laundry Point of Sale & Operations" },
+      "usersRules": { "name": "Users & Rules", "description": "Users, Roles, Permissions & Licenses" },
+      "zatca": { "name": "ZATCA KSA", "description": "Saudi E-Invoicing & ZATCA" }
+    },
+    "builtForPrefix": "Built for every kind of",
+    "builtForEmphasis": "laundry business",
+    "segments": {
+      "dryCleaners": "Dry Cleaners",
+      "laundromats": "Self-Service Laundromats",
+      "hotelLaundry": "Hotel Laundry Services",
+      "industrialLaundry": "Industrial Laundry",
+      "linenRental": "Uniform & Linen Rental",
+      "homeDelivery": "Home Delivery Laundry",
+      "multiBranch": "Multi-Branch Chains",
+      "corporateContracts": "Corporate Contracts"
+    }
+  },
+  "footer": {
+    "product": "Product",
+    "contact": "Contact",
+    "rightsReserved": "All rights reserved.",
+    "social": {
+      "facebook": "Facebook",
+      "instagram": "Instagram",
+      "x": "X (Twitter)",
+      "linkedin": "LinkedIn"
+    }
   },
   "dashboard": {
     "title": "Dashboard",

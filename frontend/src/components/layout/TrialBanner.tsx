@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { Clock } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 
@@ -31,15 +32,16 @@ export function TrialBanner() {
   if (!info?.isTrial || !info.hasAccess) return null;
 
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-      <span>
+    <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 md:px-6">
+      <span className="flex items-center gap-2">
+        <Clock className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
         {isAr
           ? `الفترة التجريبية — ${info.trialDaysLeft} يومًا متبقية`
           : `Free trial — ${info.trialDaysLeft} ${info.trialDaysLeft === 1 ? "day" : "days"} left`}
       </span>
       <button
         onClick={() => navigate("/billing")}
-        className="shrink-0 rounded-md bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600"
+        className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600"
       >
         {isAr ? "اشترك الآن" : "Subscribe now"}
       </button>

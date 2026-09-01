@@ -145,6 +145,7 @@ export interface AuthUser {
   fullNameEn: string;
   fullNameAr: string | null;
   isSystemAdmin: boolean;
+  emailVerified: boolean;
   permissions: string[];
   businessLocations: BusinessLocation[];
   organizationId: string;

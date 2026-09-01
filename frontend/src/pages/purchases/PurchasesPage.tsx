@@ -6,6 +6,15 @@ import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta, Supplier } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
+import { cn } from "../../lib/cn";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Alert } from "../../components/ui/Alert";
+import { Modal } from "../../components/ui/Modal";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
+import { ShoppingBag, Undo2 } from "lucide-react";
 
 type ReturnReason = "DEFECTIVE" | "WRONG_ITEM" | "OVERSTOCK" | "OTHER";
 
@@ -70,56 +79,84 @@ export default function PurchasesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "المشتريات" : "Purchases"}</h1>
-        {tab === "PURCHASES" ? (
-          <button onClick={() => setPurchaseFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-            + {isAr ? "شراء جديد" : "New Purchase"}
-          </button>
-        ) : (
-          <button onClick={() => setReturnFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-            + {isAr ? "مرتجع شراء جديد" : "New Purchase Return"}
-          </button>
-        )}
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "المشتريات" : "Purchases"}
+        actions={
+          tab === "PURCHASES" ? (
+            <Button onClick={() => setPurchaseFormOpen(true)}>
+              + {isAr ? "شراء جديد" : "New Purchase"}
+            </Button>
+          ) : (
+            <Button onClick={() => setReturnFormOpen(true)}>
+              + {isAr ? "مرتجع شراء جديد" : "New Purchase Return"}
+            </Button>
+          )
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+        <StatCard
+          icon={ShoppingBag}
+          cardBg="bg-app-pos-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "المشتريات" : "Purchases"}
+          value={String(purchases?.meta.total ?? 0)}
+        />
+        <StatCard
+          icon={Undo2}
+          cardBg="bg-rose-50"
+          iconBg="bg-rose-500"
+          iconColor="text-white"
+          label={isAr ? "مرتجعات الشراء" : "Purchase Returns"}
+          value={String(returns?.meta.total ?? 0)}
+        />
       </div>
 
       <div className="flex gap-6 border-b border-slate-200">
         <button
           onClick={() => setTab("PURCHASES")}
-          className={`pb-2 text-sm font-semibold transition ${tab === "PURCHASES" ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"}`}
+          className={cn(
+            "pb-2.5 text-sm font-semibold transition-colors",
+            tab === "PURCHASES" ? "border-b-2 border-sky-600 text-sky-600" : "border-b-2 border-transparent text-slate-500 hover:text-slate-700",
+          )}
         >
           {isAr ? "المشتريات" : "Purchases"}
         </button>
         <button
           onClick={() => setTab("RETURNS")}
-          className={`pb-2 text-sm font-semibold transition ${tab === "RETURNS" ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"}`}
+          className={cn(
+            "pb-2.5 text-sm font-semibold transition-colors",
+            tab === "RETURNS" ? "border-b-2 border-sky-600 text-sky-600" : "border-b-2 border-transparent text-slate-500 hover:text-slate-700",
+          )}
         >
           {isAr ? "مرتجعات الشراء" : "Purchase Returns"}
         </button>
       </div>
 
       {tab === "PURCHASES" && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+        <TableContainer>
+          <Table>
+            <THead>
               <tr>
-                <th className="px-4 py-2 text-start">{isAr ? "التاريخ" : "Date"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "المرجع" : "Reference"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "المورد" : "Supplier"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الأصناف" : "Items"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "المدفوع" : "Paid"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
+                <Th>{isAr ? "التاريخ" : "Date"}</Th>
+                <Th>{isAr ? "المرجع" : "Reference"}</Th>
+                <Th>{isAr ? "المورد" : "Supplier"}</Th>
+                <Th>{isAr ? "الأصناف" : "Items"}</Th>
+                <Th>{isAr ? "الإجمالي" : "Total"}</Th>
+                <Th>{isAr ? "المدفوع" : "Paid"}</Th>
+                <Th>{isAr ? "بواسطة" : "By"}</Th>
               </tr>
-            </thead>
+            </THead>
             <tbody>
               {purchases?.rows.map((p) => (
-                <tr key={p.id} className="border-b border-slate-100">
-                  <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(p.purchaseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                  <td className="px-4 py-2 font-medium"><span className="ltr-nums">{p.referenceNumber}</span></td>
-                  <td className="px-4 py-2">{isAr ? p.supplier.nameAr || p.supplier.nameEn : p.supplier.nameEn}</td>
-                  <td className="px-4 py-2">
+                <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(p.purchaseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                  <td className="px-4 py-3 font-medium"><span className="ltr-nums">{p.referenceNumber}</span></td>
+                  <td className="px-4 py-3">{isAr ? p.supplier.nameAr || p.supplier.nameEn : p.supplier.nameEn}</td>
+                  <td className="px-4 py-3">
                     {p.items.map((item) => (
                       <div key={item.id} className="text-xs text-slate-600">
                         {isAr ? item.product.nameAr || item.product.nameEn : item.product.nameEn}
@@ -127,9 +164,9 @@ export default function PurchasesPage() {
                       </div>
                     ))}
                   </td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(p.totalAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(p.paidAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-2 text-slate-500">{p.createdByUser.fullNameEn}</td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.totalAmount, currency, locale)}</span></td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.paidAmount, currency, locale)}</span></td>
+                  <td className="px-4 py-3 text-slate-500">{p.createdByUser.fullNameEn}</td>
                 </tr>
               ))}
               {purchases?.rows.length === 0 && (
@@ -140,31 +177,31 @@ export default function PurchasesPage() {
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableContainer>
       )}
 
       {tab === "RETURNS" && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+        <TableContainer>
+          <Table>
+            <THead>
               <tr>
-                <th className="px-4 py-2 text-start">{isAr ? "التاريخ" : "Date"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "مرجع الشراء" : "Purchase Ref"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "المورد" : "Supplier"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الأصناف" : "Items"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "المسترد" : "Refunded"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "بواسطة" : "By"}</th>
+                <Th>{isAr ? "التاريخ" : "Date"}</Th>
+                <Th>{isAr ? "مرجع الشراء" : "Purchase Ref"}</Th>
+                <Th>{isAr ? "المورد" : "Supplier"}</Th>
+                <Th>{isAr ? "الأصناف" : "Items"}</Th>
+                <Th>{isAr ? "الإجمالي" : "Total"}</Th>
+                <Th>{isAr ? "المسترد" : "Refunded"}</Th>
+                <Th>{isAr ? "بواسطة" : "By"}</Th>
               </tr>
-            </thead>
+            </THead>
             <tbody>
               {returns?.rows.map((r) => (
-                <tr key={r.id} className="border-b border-slate-100">
-                  <td className="px-4 py-2 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                  <td className="px-4 py-2 font-medium"><span className="ltr-nums">{r.purchase.referenceNumber}</span></td>
-                  <td className="px-4 py-2">{isAr ? r.supplier.nameAr || r.supplier.nameEn : r.supplier.nameEn}</td>
-                  <td className="px-4 py-2">
+                <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
+                  <td className="px-4 py-3 font-medium"><span className="ltr-nums">{r.purchase.referenceNumber}</span></td>
+                  <td className="px-4 py-3">{isAr ? r.supplier.nameAr || r.supplier.nameEn : r.supplier.nameEn}</td>
+                  <td className="px-4 py-3">
                     {r.items.map((item) => (
                       <div key={item.id} className="text-xs text-slate-600">
                         {isAr ? item.purchaseItem.product.nameAr || item.purchaseItem.product.nameEn : item.purchaseItem.product.nameEn}
@@ -173,9 +210,9 @@ export default function PurchasesPage() {
                       </div>
                     ))}
                   </td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-2 text-slate-500">{r.createdByUser.fullNameEn}</td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span></td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span></td>
+                  <td className="px-4 py-3 text-slate-500">{r.createdByUser.fullNameEn}</td>
                 </tr>
               ))}
               {returns?.rows.length === 0 && (
@@ -186,8 +223,8 @@ export default function PurchasesPage() {
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableContainer>
       )}
 
       {purchaseFormOpen && (
@@ -292,138 +329,136 @@ function PurchaseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose:
   const canSubmit = Boolean(supplier) && Boolean(businessLocationId) && lines.length > 0 && lines.every((l) => l.quantity > 0 && l.unitCost >= 0);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "شراء جديد" : "New Purchase"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
-            <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inp}>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="relative">
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المورد" : "Supplier"}</label>
-            <input
-              value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
-              onChange={(e) => {
-                setSupplier(null);
-                runSupplierSearch(e.target.value);
-              }}
-              placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
-              className={inp}
-            />
-            {supplierResults.length > 0 && !supplier && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                {supplierResults.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setSupplier(s);
-                      setSupplierResults([]);
-                    }}
-                    className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
-                  >
-                    {isAr ? s.nameAr || s.nameEn : s.nameEn} <span className="ltr-nums text-xs text-slate-400">({s.code})</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="relative">
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إضافة منتج" : "Add Product"}</label>
-            <input
-              value={productSearch}
-              onChange={(e) => runProductSearch(e.target.value)}
-              placeholder={isAr ? "ابحث عن منتج..." : "Search for a product..."}
-              className={inp}
-            />
-            {productResults.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                {productResults.map((p) => (
-                  <button key={p.id} onClick={() => addProduct(p)} className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50">
-                    {isAr ? p.nameAr || p.nameEn : p.nameEn} <span className="ltr-nums text-xs text-slate-400">({p.sku})</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {lines.length > 0 && (
-            <div className="space-y-2">
-              {lines.map((l) => (
-                <div key={l.productId} className="rounded-lg border border-slate-200 p-2.5">
-                  <div className="mb-2 flex items-center justify-between text-sm font-medium text-slate-800">
-                    <span>
-                      {isAr ? l.nameAr || l.nameEn : l.nameEn} <span className="ltr-nums text-xs text-slate-400">({l.sku})</span>
-                    </span>
-                    <button onClick={() => removeLine(l.productId)} className="text-xs text-red-500 hover:text-red-700">
-                      {isAr ? "إزالة" : "Remove"}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">{isAr ? "الكمية" : "Quantity"}</label>
-                      <input
-                        type="number"
-                        min={0.001}
-                        step="0.001"
-                        value={l.quantity}
-                        onChange={(e) => updateLine(l.productId, { quantity: Number(e.target.value) })}
-                        className={inp}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] text-slate-500">{isAr ? "تكلفة الوحدة" : "Unit Cost"}</label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={l.unitCost}
-                        onChange={(e) => updateLine(l.productId, { unitCost: Number(e.target.value) })}
-                        className={inp}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
-            <input type="number" min={0} value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={inp} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظات" : "Notes"}</label>
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
-          </div>
-        </div>
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <button
+    <Modal
+      title={isAr ? "شراء جديد" : "New Purchase"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <Button
           onClick={() => {
             setError(null);
             mutation.mutate();
           }}
           disabled={!canSubmit || mutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+          fullWidth
         >
           {mutation.isPending ? "…" : isAr ? "حفظ الشراء" : "Save Purchase"}
-        </button>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
+          <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={selectClass}>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.branchName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="relative">
+          <label className={labelClass}>{isAr ? "المورد" : "Supplier"}</label>
+          <input
+            value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
+            onChange={(e) => {
+              setSupplier(null);
+              runSupplierSearch(e.target.value);
+            }}
+            placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
+            className={inputClass}
+          />
+          {supplierResults.length > 0 && !supplier && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-sm">
+              {supplierResults.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSupplier(s);
+                    setSupplierResults([]);
+                  }}
+                  className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                >
+                  {isAr ? s.nameAr || s.nameEn : s.nameEn} <span className="ltr-nums text-xs text-slate-400">({s.code})</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          <label className={labelClass}>{isAr ? "إضافة منتج" : "Add Product"}</label>
+          <input
+            value={productSearch}
+            onChange={(e) => runProductSearch(e.target.value)}
+            placeholder={isAr ? "ابحث عن منتج..." : "Search for a product..."}
+            className={inputClass}
+          />
+          {productResults.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-sm">
+              {productResults.map((p) => (
+                <button key={p.id} onClick={() => addProduct(p)} className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100">
+                  {isAr ? p.nameAr || p.nameEn : p.nameEn} <span className="ltr-nums text-xs text-slate-400">({p.sku})</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {lines.length > 0 && (
+          <div className="space-y-2">
+            {lines.map((l) => (
+              <div key={l.productId} className="rounded-lg border border-slate-200 p-2.5">
+                <div className="mb-2 flex items-center justify-between text-sm font-medium text-slate-800">
+                  <span>
+                    {isAr ? l.nameAr || l.nameEn : l.nameEn} <span className="ltr-nums text-xs text-slate-400">({l.sku})</span>
+                  </span>
+                  <button onClick={() => removeLine(l.productId)} className="text-xs text-red-500 hover:text-red-700">
+                    {isAr ? "إزالة" : "Remove"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">{isAr ? "الكمية" : "Quantity"}</label>
+                    <input
+                      type="number"
+                      min={0.001}
+                      step="0.001"
+                      value={l.quantity}
+                      onChange={(e) => updateLine(l.productId, { quantity: Number(e.target.value) })}
+                      className={cn(inputClass, "ltr-nums")}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">{isAr ? "تكلفة الوحدة" : "Unit Cost"}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={l.unitCost}
+                      onChange={(e) => updateLine(l.productId, { unitCost: Number(e.target.value) })}
+                      className={cn(inputClass, "ltr-nums")}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div>
+          <label className={labelClass}>{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
+          <input type="number" min={0} value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={cn(inputClass, "ltr-nums")} />
+        </div>
+        <div>
+          <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+        </div>
       </div>
-    </div>
+
+      {error && <Alert variant="danger" className="mt-4">{error}</Alert>}
+    </Modal>
   );
 }
 
@@ -504,119 +539,115 @@ function PurchaseReturnFormModal({ isAr, onClose, onSaved }: { isAr: boolean; on
   const canSubmit = Boolean(purchaseId) && Object.keys(lines).length > 0 && Object.values(lines).every((l) => l.quantity > 0);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "مرتجع شراء جديد" : "New Purchase Return"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-
-        {!purchaseId && (
-          <div className="relative">
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "مرجع الشراء" : "Purchase Reference"}</label>
-            <input
-              value={search}
-              onChange={(e) => runSearch(e.target.value)}
-              placeholder={isAr ? "ابحث برقم المرجع" : "Search by reference number"}
-              className={inp}
-            />
-            {results.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                {results.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      setPurchaseId(p.id);
-                      setResults([]);
-                    }}
-                    className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
-                  >
-                    {p.referenceNumber}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {purchase && (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-600">
-              {purchase.referenceNumber} — {isAr ? purchase.supplier.nameAr || purchase.supplier.nameEn : purchase.supplier.nameEn}
-            </p>
-
-            <div className="space-y-2">
-              {purchase.items.map((item) => {
-                const remaining = Number(item.remaining);
-                const selected = lines[item.id];
-                return (
-                  <div key={item.id} className={`rounded-lg border p-2.5 ${remaining <= 0 ? "border-slate-100 bg-slate-50 opacity-50" : "border-slate-200"}`}>
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                      <input type="checkbox" disabled={remaining <= 0} checked={Boolean(selected)} onChange={() => toggleLine(item.id, remaining)} />
-                      {isAr ? item.productNameAr || item.productNameEn : item.productNameEn}
-                      <span className="ltr-nums text-xs text-slate-400">
-                        ({isAr ? "المتبقي" : "remaining"}: {item.remaining} / {item.quantity})
-                      </span>
-                    </label>
-                    {selected && (
-                      <div className="mt-2 grid grid-cols-3 gap-2 ps-6">
-                        <input
-                          type="number"
-                          min={0.001}
-                          max={remaining}
-                          step="0.001"
-                          value={selected.quantity}
-                          onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })}
-                          className={inp}
-                        />
-                        <select value={selected.reason} onChange={(e) => updateLine(item.id, { reason: e.target.value as ReturnReason })} className={inp}>
-                          {(Object.keys(REASON_LABEL) as ReturnReason[]).map((r) => (
-                            <option key={r} value={r}>
-                              {isAr ? REASON_LABEL[r].ar : REASON_LABEL[r].en}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          value={selected.note ?? ""}
-                          onChange={(e) => updateLine(item.id, { note: e.target.value })}
-                          placeholder={isAr ? "ملاحظة" : "Note"}
-                          className={inp}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المبلغ المسترد" : "Refunded Amount"}</label>
-              <input type="number" min={0} value={refundedAmount} onChange={(e) => setRefundedAmount(e.target.value)} placeholder="0" className={inp} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "ملاحظات" : "Notes"}</label>
-              <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inp} />
-            </div>
-          </div>
-        )}
-
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        {purchase && (
-          <button
+    <Modal
+      title={isAr ? "مرتجع شراء جديد" : "New Purchase Return"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        purchase ? (
+          <Button
             onClick={() => {
               setError(null);
               mutation.mutate();
             }}
             disabled={!canSubmit || mutation.isPending}
-            className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+            fullWidth
           >
             {mutation.isPending ? "…" : isAr ? "تقديم المرتجع" : "Submit Return"}
-          </button>
-        )}
-      </div>
-    </div>
+          </Button>
+        ) : undefined
+      }
+    >
+      {!purchaseId && (
+        <div className="relative">
+          <label className={labelClass}>{isAr ? "مرجع الشراء" : "Purchase Reference"}</label>
+          <input
+            value={search}
+            onChange={(e) => runSearch(e.target.value)}
+            placeholder={isAr ? "ابحث برقم المرجع" : "Search by reference number"}
+            className={inputClass}
+          />
+          {results.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-sm">
+              {results.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setPurchaseId(p.id);
+                    setResults([]);
+                  }}
+                  className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                >
+                  {p.referenceNumber}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {purchase && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            {purchase.referenceNumber} — {isAr ? purchase.supplier.nameAr || purchase.supplier.nameEn : purchase.supplier.nameEn}
+          </p>
+
+          <div className="space-y-2">
+            {purchase.items.map((item) => {
+              const remaining = Number(item.remaining);
+              const selected = lines[item.id];
+              return (
+                <div key={item.id} className={cn("rounded-lg border p-2.5", remaining <= 0 ? "border-slate-100 bg-slate-50 opacity-50" : "border-slate-200")}>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                    <input type="checkbox" disabled={remaining <= 0} checked={Boolean(selected)} onChange={() => toggleLine(item.id, remaining)} />
+                    {isAr ? item.productNameAr || item.productNameEn : item.productNameEn}
+                    <span className="ltr-nums text-xs text-slate-400">
+                      ({isAr ? "المتبقي" : "remaining"}: {item.remaining} / {item.quantity})
+                    </span>
+                  </label>
+                  {selected && (
+                    <div className="mt-2 grid grid-cols-3 gap-2 ps-6">
+                      <input
+                        type="number"
+                        min={0.001}
+                        max={remaining}
+                        step="0.001"
+                        value={selected.quantity}
+                        onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })}
+                        className={cn(inputClass, "ltr-nums")}
+                      />
+                      <select value={selected.reason} onChange={(e) => updateLine(item.id, { reason: e.target.value as ReturnReason })} className={selectClass}>
+                        {(Object.keys(REASON_LABEL) as ReturnReason[]).map((r) => (
+                          <option key={r} value={r}>
+                            {isAr ? REASON_LABEL[r].ar : REASON_LABEL[r].en}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={selected.note ?? ""}
+                        onChange={(e) => updateLine(item.id, { note: e.target.value })}
+                        placeholder={isAr ? "ملاحظة" : "Note"}
+                        className={inputClass}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div>
+            <label className={labelClass}>{isAr ? "المبلغ المسترد" : "Refunded Amount"}</label>
+            <input type="number" min={0} value={refundedAmount} onChange={(e) => setRefundedAmount(e.target.value)} placeholder="0" className={cn(inputClass, "ltr-nums")} />
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+      )}
+
+      {error && <Alert variant="danger" className="mt-4">{error}</Alert>}
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

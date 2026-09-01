@@ -10,6 +10,17 @@ import {
   type PriceListItemRow,
 } from "../../api/posApi";
 import type { ApiSuccess } from "../../types/api";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Card } from "../../components/ui/Card";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { Tags } from "lucide-react";
 
 interface PickerResult {
   id: string;
@@ -28,47 +39,59 @@ export default function PriceListsPage() {
   const deactivateMutation = useDeactivatePriceList();
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <div className="space-y-4 lg:col-span-1">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-slate-800">{isAr ? "قوائم الأسعار" : "Price Lists"}</h1>
-          <button onClick={() => setFormOpen(true)} className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700">
-            + {isAr ? "جديد" : "Add"}
-          </button>
-        </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "قوائم الأسعار" : "Price Lists"}
+        actions={<Button onClick={() => setFormOpen(true)}>+ {isAr ? "جديد" : "Add"}</Button>}
+      />
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          {priceLists?.map((pl) => (
-            <button
-              key={pl.id}
-              onClick={() => setSelectedId(pl.id)}
-              className={`flex w-full items-center justify-between border-b border-slate-100 px-4 py-3 text-start text-sm last:border-0 ${
-                selectedId === pl.id ? "bg-sky-50 font-semibold text-sky-700" : "hover:bg-slate-50"
-              }`}
-            >
-              <span>{isAr ? pl.nameAr || pl.nameEn : pl.nameEn}</span>
-              {!pl.isActive && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{t("common.inactive")}</span>}
-            </button>
-          ))}
-          {priceLists?.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">{t("common.noResults")}</div>}
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+        <StatCard
+          icon={Tags}
+          cardBg="bg-app-pos-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "قوائم الأسعار" : "Price Lists"}
+          value={String(priceLists?.length ?? 0)}
+        />
       </div>
 
-      <div className="lg:col-span-2">
-        {selectedId ? (
-          <PriceListDetailPanel
-            id={selectedId}
-            isAr={isAr}
-            onDeactivate={() => {
-              deactivateMutation.mutate(selectedId);
-              setSelectedId(null);
-            }}
-          />
-        ) : (
-          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm text-slate-400">
-            {isAr ? "اختر قائمة أسعار لعرض التفاصيل" : "Select a price list to view details"}
-          </div>
-        )}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-1">
+          <Card className="overflow-hidden p-0">
+            {priceLists?.map((pl) => (
+              <button
+                key={pl.id}
+                onClick={() => setSelectedId(pl.id)}
+                className={`flex w-full items-center justify-between border-b border-slate-100 px-4 py-3 text-start text-sm transition-colors last:border-0 ${
+                  selectedId === pl.id ? "bg-sky-50 font-semibold text-sky-700" : "hover:bg-slate-100"
+                }`}
+              >
+                <span>{isAr ? pl.nameAr || pl.nameEn : pl.nameEn}</span>
+                {!pl.isActive && <Badge variant="neutral">{t("common.inactive")}</Badge>}
+              </button>
+            ))}
+            {priceLists?.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-400">{t("common.noResults")}</div>}
+          </Card>
+        </div>
+
+        <div className="lg:col-span-2">
+          {selectedId ? (
+            <PriceListDetailPanel
+              id={selectedId}
+              isAr={isAr}
+              onDeactivate={() => {
+                deactivateMutation.mutate(selectedId);
+                setSelectedId(null);
+              }}
+            />
+          ) : (
+            <Card>
+              <EmptyState title={isAr ? "اختر قائمة أسعار لعرض التفاصيل" : "Select a price list to view details"} />
+            </Card>
+          )}
+        </div>
       </div>
 
       {formOpen && (
@@ -92,24 +115,12 @@ function CreatePriceListModal({ isAr, onClose, onCreated }: { isAr: boolean; onC
   const createMutation = useCreatePriceList();
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "قائمة أسعار جديدة" : "New Price List"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
-            <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} autoFocus className={inp} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
-            <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" className={inp} />
-          </div>
-        </div>
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
+    <Modal
+      title={isAr ? "قائمة أسعار جديدة" : "New Price List"}
+      onClose={onClose}
+      footer={
+        <Button
+          fullWidth
           onClick={() => {
             setError(null);
             createMutation.mutate(
@@ -121,12 +132,27 @@ function CreatePriceListModal({ isAr, onClose, onCreated }: { isAr: boolean; onC
             );
           }}
           disabled={!nameEn.trim() || !nameAr.trim() || createMutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {createMutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "الاسم (إنجليزي)" : "Name (English)"}</label>
+          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} autoFocus className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>{isAr ? "الاسم (عربي)" : "Name (Arabic)"}</label>
+          <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" className={inputClass} />
+        </div>
       </div>
-    </div>
+      {error && (
+        <Alert variant="danger" className="mt-4">
+          {error}
+        </Alert>
+      )}
+    </Modal>
   );
 }
 
@@ -185,50 +211,50 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
   if (!detail) return null;
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <Card className="space-y-4 p-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">{isAr ? detail.nameAr || detail.nameEn : detail.nameEn}</h2>
+        <h2 className="text-sm font-semibold text-slate-800">{isAr ? detail.nameAr || detail.nameEn : detail.nameEn}</h2>
         {detail.isActive && (
-          <button onClick={onDeactivate} className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50">
+          <Button variant="danger" size="sm" onClick={onDeactivate}>
             {isAr ? "تعطيل" : "Deactivate"}
-          </button>
+          </Button>
         )}
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-200">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-3 py-2 text-start">{isAr ? "الصنف" : "Item"}</th>
-              <th className="px-3 py-2 text-start">{isAr ? "السعر" : "Price"}</th>
-              <th className="px-3 py-2 text-end">{t("common.actions")}</th>
+              <Th>{isAr ? "الصنف" : "Item"}</Th>
+              <Th>{isAr ? "السعر" : "Price"}</Th>
+              <Th>{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.id} className="border-b border-slate-100 last:border-0">
-                <td className="px-3 py-2">{item.product?.nameEn ?? item.service?.nameEn ?? "—"}</td>
-                <td className="px-3 py-2"><span className="ltr-nums">{item.price}</span></td>
-                <td className="px-3 py-2 text-end">
-                  <button onClick={() => removeItem(item)} className="text-xs text-red-600 hover:underline">
+              <tr key={item.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3">{item.product?.nameEn ?? item.service?.nameEn ?? "—"}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{item.price}</span></td>
+                <td className="px-4 py-3">
+                  <Button variant="ghost" size="sm" onClick={() => removeItem(item)}>
                     {isAr ? "إزالة" : "Remove"}
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={3} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
 
       <div className="rounded-lg border border-dashed border-slate-300 p-3">
-        <div className="mb-2 flex gap-2">
+        <div className="mb-2 flex flex-wrap gap-2">
           <select
             value={itemType}
             onChange={(e) => {
@@ -237,7 +263,7 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
               setResults([]);
               setPicked(null);
             }}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
           >
             <option value="SERVICE">{isAr ? "خدمة" : "Service"}</option>
             <option value="PRODUCT">{isAr ? "منتج" : "Product"}</option>
@@ -247,10 +273,10 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
               value={picked ? (isAr ? picked.nameAr || picked.nameEn : picked.nameEn) : search}
               onChange={(e) => runSearch(e.target.value)}
               placeholder={isAr ? "ابحث بالاسم..." : "Search by name..."}
-              className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-sky-500 focus:outline-none"
+              className={inputClass}
             />
             {results.length > 0 && !picked && (
-              <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
                 {results.map((r) => (
                   <button
                     key={r.id}
@@ -258,7 +284,7 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
                       setPicked(r);
                       setResults([]);
                     }}
-                    className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
+                    className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
                   >
                     {isAr ? r.nameAr || r.nameEn : r.nameEn}
                   </button>
@@ -272,27 +298,17 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             placeholder={isAr ? "السعر" : "Price"}
-            className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="w-24 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
           />
-          <button
-            onClick={addItem}
-            disabled={!picked || !price}
-            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-          >
+          <Button size="sm" onClick={addItem} disabled={!picked || !price}>
             {isAr ? "إضافة" : "Add"}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <button
-        onClick={save}
-        disabled={setItemsMutation.isPending || !pendingItems}
-        className="w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-      >
+      <Button fullWidth onClick={save} disabled={setItemsMutation.isPending || !pendingItems}>
         {setItemsMutation.isPending ? "…" : isAr ? "حفظ التغييرات" : "Save Changes"}
-      </button>
-    </div>
+      </Button>
+    </Card>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

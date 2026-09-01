@@ -15,6 +15,7 @@ import {
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/sales", requirePermission("reports.sales"), validate(salesReportQuerySchema, "query"), controller.salesReport);
 router.get("/inventory", requirePermission("reports.inventory"), validate(inventoryReportQuerySchema, "query"), controller.inventoryReport);

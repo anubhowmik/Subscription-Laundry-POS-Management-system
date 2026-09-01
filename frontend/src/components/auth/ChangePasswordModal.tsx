@@ -5,6 +5,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
+import { Modal } from "../ui/Modal";
+import { Button } from "../ui/Button";
+import { Alert } from "../ui/Alert";
+import { inputClass, labelClass, errorTextClass } from "../ui/formClasses";
 
 const schema = z.object({
   currentPassword: z.string().min(1, "Required"),
@@ -36,49 +40,39 @@ export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold text-slate-800">Change password</h2>
+    <Modal title="Change password" onClose={onClose} size="sm">
+      {success ? (
+        <>
+          <Alert variant="success">Password changed. You&apos;ll need it next time you log in.</Alert>
+          <Button fullWidth className="mt-4" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      ) : (
+        <form onSubmit={handleSubmit((v) => mutation.mutate(v))} className="space-y-4">
+          <div>
+            <label className={labelClass}>Current password</label>
+            <input type="password" {...register("currentPassword")} className={inputClass} autoFocus />
+            {errors.currentPassword && <p className={errorTextClass}>{errors.currentPassword.message}</p>}
+          </div>
+          <div>
+            <label className={labelClass}>New password</label>
+            <input type="password" {...register("newPassword")} className={inputClass} />
+            {errors.newPassword && <p className={errorTextClass}>{errors.newPassword.message}</p>}
+          </div>
 
-        {success ? (
-          <>
-            <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
-              Password changed. You&apos;ll need it next time you log in.
-            </p>
-            <button onClick={onClose} className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white">
-              Close
-            </button>
-          </>
-        ) : (
-          <form onSubmit={handleSubmit((v) => mutation.mutate(v))} className="space-y-3">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Current password</label>
-              <input type="password" {...register("currentPassword")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              {errors.currentPassword && <p className="mt-1 text-xs text-red-600">{errors.currentPassword.message}</p>}
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">New password</label>
-              <input type="password" {...register("newPassword")} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              {errors.newPassword && <p className="mt-1 text-xs text-red-600">{errors.newPassword.message}</p>}
-            </div>
+          {serverError && <Alert variant="danger">{serverError}</Alert>}
 
-            {serverError && <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{serverError}</p>}
-
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={onClose} className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-              >
-                Save
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="outline" fullWidth onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" fullWidth disabled={isSubmitting}>
+              Save
+            </Button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }

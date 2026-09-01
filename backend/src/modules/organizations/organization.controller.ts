@@ -1,22 +1,21 @@
 import { Request, Response } from "express";
 import * as service from "./organization.service";
-import { issueTokens } from "../auth/auth.service";
 import { toSafeUser } from "../users/user.mapper";
 import { sendSuccess } from "../../utils/apiResponse";
-import { REFRESH_COOKIE, refreshCookieOptions } from "../../utils/authCookie";
 import { writeAuditLog } from "../../utils/audit";
 
 export async function register(req: Request, res: Response) {
   const { organization, adminUser } = await service.registerOrganization(req.body);
 
-  const { accessToken, refreshToken } = await issueTokens(adminUser.id, {
-    ipAddress: req.ip,
-    userAgent: req.headers["user-agent"],
-  });
-
-  res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
-
-  return sendSuccess(res, { organization, accessToken, user: toSafeUser(adminUser) }, "Organization registered", 201);
+  // Deliberately no accessToken/refresh cookie here - a new signup must never be left in an
+  // authenticated state before verifying their email. A verification code has already been
+  // emailed (see registerOrganization()); the frontend routes to the verify-email screen next.
+  return sendSuccess(
+    res,
+    { organization, user: toSafeUser(adminUser), verificationRequired: true },
+    "Organization registered - check your email for a verification code",
+    201,
+  );
 }
 
 export async function getSettings(req: Request, res: Response) {

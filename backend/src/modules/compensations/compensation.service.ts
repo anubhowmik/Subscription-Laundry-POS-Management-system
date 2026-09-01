@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "../../utils/AppError";
 import { parsePagination } from "../../utils/pagination";
+import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { adjustPoints } from "../loyalty/loyalty.service";
 import { adjustCashback } from "../cashback/cashback.service";
 import * as couponService from "../coupons/coupon.service";
@@ -85,8 +86,7 @@ export async function list(
   const { page, limit, skip } = parsePagination(query);
   const where: Prisma.CompensationWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.status ? { status: query.status as "PENDING" | "APPROVED" | "REJECTED" | "PAID" } : {}),
     // Segregation of duties (P8-6): a user who can only file claims sees just their own; anyone
     // holding view_all (typically bundled with approve/pay) sees the whole location-scoped list.
@@ -110,6 +110,7 @@ interface ResolveCompensationInput {
 interface ResolveActor {
   isSystemAdmin: boolean;
   permissions: string[];
+  allowedLocationIds: string[] | null;
 }
 
 /**
@@ -122,6 +123,7 @@ interface ResolveActor {
 export async function resolve(id: string, input: ResolveCompensationInput, organizationId: string, resolvedBy: string, actor: ResolveActor) {
   const compensation = await prisma.compensation.findFirst({ where: { id, organizationId }, include: { items: true } });
   if (!compensation) throw new NotFoundError("Compensation not found");
+  assertLocationAllowed(compensation.businessLocationId, actor.allowedLocationIds);
 
   const can = (code: string) => actor.isSystemAdmin || actor.permissions.includes(code);
 
@@ -212,11 +214,33 @@ export async function resolve(id: string, input: ResolveCompensationInput, organ
 
 /** No side effects to reverse - resolve() never touches stock or money until PAID - so this is a
  * plain delete (cascades to CompensationItem), blocked once a claim has actually been paid out. */
-export async function remove(id: string, organizationId: string) {
+interface RemoveActor {
+  isSystemAdmin: boolean;
+  permissions: string[];
+  allowedLocationIds: string[] | null;
+  userId: string;
+}
+
+/**
+ * SECURITY: the route only requires compensations.file OR compensations.approve (see
+ * compensation.routes.ts) - without an ownership check here, anyone who can file a claim could
+ * delete ANY claim in the org, including ones filed by other people they can't even see in their
+ * own list (view_own scoping in list() above). Someone holding compensations.approve is trusted
+ * with claims org-wide already, so they may delete any non-PAID claim; a filer may only delete
+ * their own.
+ */
+export async function remove(id: string, organizationId: string, actor: RemoveActor) {
   const compensation = await prisma.compensation.findFirst({ where: { id, organizationId } });
   if (!compensation) throw new NotFoundError("Compensation not found");
   if (compensation.status === "PAID") {
     throw new ConflictError("Cannot delete a compensation claim that has already been paid");
   }
+  assertLocationAllowed(compensation.businessLocationId, actor.allowedLocationIds);
+
+  const canDeleteAny = actor.isSystemAdmin || actor.permissions.includes("compensations.approve");
+  if (!canDeleteAny && compensation.createdBy !== actor.userId) {
+    throw new AuthorizationError("You can only delete compensation claims you filed yourself");
+  }
+
   await prisma.compensation.delete({ where: { id } });
 }

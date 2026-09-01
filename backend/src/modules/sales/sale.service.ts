@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { NotFoundError } from "../../utils/AppError";
+import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { renderQrPngDataUrl } from "../zatca/qrCode.service";
 import { sendTemplatedSms } from "../notifications/notifications.service";
 
@@ -13,8 +14,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
 
   const where: Prisma.SaleWhereInput = {
     organizationId,
-    ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+    ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.customerId ? { customerId: String(query.customerId) } : {}),
     // Defaults to FINAL only - DRAFT quotes live on the Quotes page (see pos.service.ts
     // listQuotes) and CANCELLED/voided quotes shouldn't clutter the invoice list either.
@@ -93,8 +93,7 @@ export async function listBoardItems(query: Record<string, unknown>, organizatio
       // Only FINAL sales are real work-in-progress - a DRAFT quote hasn't been confirmed (or
       // paid, or stocked) yet, and CANCELLED/voided ones are done with.
       status: "FINAL",
-      ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-      ...(query.businessLocationId ? { businessLocationId: String(query.businessLocationId) } : {}),
+      ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
       ...(query.search
         ? {
             OR: [
@@ -108,12 +107,35 @@ export async function listBoardItems(query: Record<string, unknown>, organizatio
     ...(query.status ? { fulfillmentStatus: query.status as ItemFulfillmentStatus } : {}),
   };
 
-  return prisma.saleItem.findMany({
+  const items = await prisma.saleItem.findMany({
     where,
     orderBy: { sale: { saleDate: "asc" } },
     take: 300,
     include: { sale: { select: { id: true, invoiceNumber: true, saleDate: true, businessLocationId: true, customer: { select: { nameEn: true, nameAr: true, phone: true } } } } },
   });
+
+  // For cancelled items, look up what status they were cancelled FROM (recorded in the audit
+  // trail at cancel time), so the board can offer an accurate "restore" rather than guessing or
+  // always resetting to Pending. Cancelling has no single natural predecessor - it can happen
+  // from Pending, In Progress, or Ready - so this has to come from history, not a fixed map.
+  const cancelledIds = items.filter((i) => i.fulfillmentStatus === "CANCELLED").map((i) => i.id);
+  const restoreStatusById = new Map<string, ItemFulfillmentStatus>();
+  if (cancelledIds.length > 0) {
+    const lastCancellations = await prisma.saleItemStatusHistory.findMany({
+      where: { saleItemId: { in: cancelledIds }, toStatus: "CANCELLED" },
+      orderBy: { changedAt: "desc" },
+      distinct: ["saleItemId"],
+      select: { saleItemId: true, fromStatus: true },
+    });
+    for (const row of lastCancellations) {
+      if (row.fromStatus) restoreStatusById.set(row.saleItemId, row.fromStatus);
+    }
+  }
+
+  return items.map((item) => ({
+    ...item,
+    restoreStatus: item.fulfillmentStatus === "CANCELLED" ? (restoreStatusById.get(item.id) ?? "PENDING") : null,
+  }));
 }
 
 /**

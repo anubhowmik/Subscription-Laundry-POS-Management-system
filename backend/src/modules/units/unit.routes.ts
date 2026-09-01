@@ -7,6 +7,7 @@ import { createUnitSchema, listUnitQuerySchema, updateUnitSchema } from "./unit.
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 
 router.get("/", requirePermission("units.view"), validate(listUnitQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("units.view"), controller.getById);

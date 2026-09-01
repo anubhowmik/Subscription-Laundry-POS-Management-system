@@ -5,7 +5,8 @@ import { writeAuditLog } from "../../utils/audit";
 import { getParam } from "../../utils/params";
 
 export async function adjustStock(req: Request, res: Response) {
-  const txn = await service.adjustStock(req.body, req.user!.organizationId, req.user!.id);
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const txn = await service.adjustStock(req.body, req.user!.organizationId, req.user!.id, allowedLocationIds);
   await writeAuditLog({ req, action: "CREATE", module: "inventory_adjustment", entityId: txn.id, newValues: txn });
   return sendSuccess(res, txn, "Stock adjusted", 201);
 }
@@ -42,7 +43,8 @@ export async function listTransactions(req: Request, res: Response) {
 }
 
 export async function createStockAdjustment(req: Request, res: Response) {
-  const adjustment = await service.createStockAdjustment(req.body, req.user!.organizationId, req.user!.id);
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const adjustment = await service.createStockAdjustment(req.body, req.user!.organizationId, req.user!.id, allowedLocationIds);
   await writeAuditLog({ req, action: "CREATE", module: "stock_adjustment", entityId: adjustment.id, newValues: adjustment });
   return sendSuccess(res, adjustment, "Stock adjustment created", 201);
 }

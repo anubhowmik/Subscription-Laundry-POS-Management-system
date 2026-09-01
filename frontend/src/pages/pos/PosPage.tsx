@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { isAxiosError } from "axios";
+import { FileText, CheckCircle2 } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess, Customer } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
@@ -11,6 +12,8 @@ import { RegisterSessionBar } from "../../components/pos/RegisterSessionBar";
 import { usePosStore, selectTotals } from "../../stores/posStore";
 import { usePaymentMethods, useCheckout, useCreateQuote, useHoldSale, type SaleResult } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
 
 export default function PosPage() {
   const { t, i18n } = useTranslation();
@@ -68,7 +71,7 @@ export default function PosPage() {
           quantity: l.quantity,
           discountAmount: l.discountAmount,
         })),
-        payments: state.payments.map((p) => ({ paymentMethodId: p.paymentMethodId, amount: p.amount })),
+        payments: state.payments.map((p) => ({ paymentMethodId: p.paymentMethodId, amount: p.amount, referenceNumber: p.referenceNumber })),
         notes: state.note || undefined,
         couponCode: state.coupon?.code,
         invoiceDiscountMode: state.invoiceDiscountValue > 0 ? state.invoiceDiscountMode : undefined,
@@ -200,8 +203,8 @@ export default function PosPage() {
   if (completedSale) {
     if (savedAsQuote) {
       return (
-        <div className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <div className="mb-3 text-4xl">📝</div>
+        <Card className="mx-auto max-w-md p-8 text-center">
+          <FileText className="mx-auto mb-3 h-10 w-10 text-sky-500" strokeWidth={1.5} aria-hidden />
           <h2 className="text-lg font-semibold text-slate-800">{isAr ? "تم حفظ عرض السعر" : "Quote Saved"}</h2>
           <p className="ltr-nums mt-1 text-2xl font-bold text-sky-700">{completedSale.quoteNumber}</p>
           <div className="ltr-nums mt-4 space-y-1 text-sm text-slate-600">
@@ -210,20 +213,20 @@ export default function PosPage() {
           <div className="mt-6 flex gap-2">
             <Link
               to="/quotes"
-              className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
             >
               {isAr ? "عرض عروض الأسعار" : "View Quotes"}
             </Link>
-            <button onClick={startNewSale} className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+            <Button onClick={startNewSale} className="flex-1">
               {isAr ? "بيع جديد (F4)" : "New Sale (F4)"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       );
     }
     return (
-      <div className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <div className="mb-3 text-4xl">✅</div>
+      <Card className="mx-auto max-w-md p-8 text-center">
+        <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-500" strokeWidth={1.5} aria-hidden />
         <h2 className="text-lg font-semibold text-slate-800">{isAr ? "تم إتمام البيع" : "Sale Completed"}</h2>
         <p className="ltr-nums mt-1 text-2xl font-bold text-sky-700">{completedSale.invoiceNumber}</p>
         <div className="ltr-nums mt-4 space-y-1 text-sm text-slate-600">
@@ -232,7 +235,7 @@ export default function PosPage() {
           <p>{isAr ? "المتبقي" : "Due"}: {formatMoney(completedSale.dueAmount, currency, locale)}</p>
         </div>
         {completedSale.estimatedReadyAt && (
-          <p className="mt-3 rounded-md bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
+          <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
             {isAr ? "الجاهزية المتوقعة" : "Estimated ready"}:{" "}
             <span className="ltr-nums">{new Date(completedSale.estimatedReadyAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>
           </p>
@@ -242,15 +245,15 @@ export default function PosPage() {
             to={`/invoices/${completedSale.id}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 rounded-md border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
           >
             {isAr ? "طباعة (F5)" : "Print (F5)"}
           </Link>
-          <button onClick={startNewSale} className="flex-1 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+          <Button onClick={startNewSale} className="flex-1">
             {isAr ? "بيع جديد (F4)" : "New Sale (F4)"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -258,7 +261,7 @@ export default function PosPage() {
     <div className="flex h-full flex-col gap-2">
       <RegisterSessionBar businessLocationId={currentLocationId} currency={currency} locale={locale} isAr={isAr} notify={notify} />
       {banner && (
-        <div className="rounded-md bg-slate-800 px-4 py-2 text-sm text-white shadow">{banner}</div>
+        <div className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white shadow">{banner}</div>
       )}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,460px)_1fr]">
         <InvoicePanel

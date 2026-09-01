@@ -2,10 +2,20 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess } from "../../types/api";
 import { useCoupons, useCustomers, type CouponRow } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { Modal } from "../../components/ui/Modal";
+import { Alert } from "../../components/ui/Alert";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { Ticket } from "lucide-react";
 
 export default function CouponsPage() {
   const { t, i18n } = useTranslation();
@@ -24,59 +34,68 @@ export default function CouponsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{isAr ? "الكوبونات" : "Coupons"}</h1>
-        <button onClick={() => setFormOpen(true)} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {isAr ? "كوبون جديد" : "Add Coupon"}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={isAr ? "الكوبونات" : "Coupons"}
+        actions={<Button onClick={() => setFormOpen(true)}>+ {isAr ? "كوبون جديد" : "Add Coupon"}</Button>}
+      />
 
       {formOpen && <CouponFormModal isAr={isAr} onClose={() => setFormOpen(false)} onSaved={() => setFormOpen(false)} />}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+        <StatCard
+          icon={Ticket}
+          cardBg="bg-app-pos-500"
+          iconBg="bg-white/20"
+          iconColor="text-white"
+          highlight
+          label={isAr ? "الكوبونات" : "Coupons"}
+          value={String(coupons?.length ?? 0)}
+        />
+      </div>
+
+      <TableContainer>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{isAr ? "الكود" : "Code"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الخصم" : "Discount"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الحد الأدنى" : "Min Purchase"}</th>
-              <th className="px-4 py-2 text-start">{isAr ? "الاستخدام" : "Usage"}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-end">{t("common.actions")}</th>
+              <Th>{isAr ? "الكود" : "Code"}</Th>
+              <Th>{isAr ? "الخصم" : "Discount"}</Th>
+              <Th>{isAr ? "الحد الأدنى" : "Min Purchase"}</Th>
+              <Th>{isAr ? "الاستخدام" : "Usage"}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th>{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {coupons?.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100">
-                <td className="px-4 py-2 font-medium"><span className="ltr-nums">{c.code}</span></td>
-                <td className="px-4 py-2">
+              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3 font-medium"><span className="ltr-nums">{c.code}</span></td>
+                <td className="px-4 py-3">
                   <span className="ltr-nums">
                     {c.discountMode === "PERCENT" ? `${c.discountValue}%` : formatMoney(c.discountValue, currency, locale)}
                   </span>
                 </td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(c.minPurchaseAmount, currency, locale)}</span></td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(c.minPurchaseAmount, currency, locale)}</span></td>
+                <td className="px-4 py-3">
                   <span className="ltr-nums">
                     {c.usedCount}
                     {c.maxUses ? ` / ${c.maxUses}` : ""}
                   </span>
                 </td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${c.isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                    {c.isActive ? t("common.active") : t("common.inactive")}
-                  </span>
+                <td className="px-4 py-3">
+                  <Badge variant={c.isActive ? "success" : "neutral"}>{c.isActive ? t("common.active") : t("common.inactive")}</Badge>
                 </td>
-                <td className="px-4 py-2 text-end">
+                <td className="px-4 py-3 text-end">
                   {c.isActive && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm(isAr ? `تعطيل "${c.code}"؟` : `Deactivate "${c.code}"?`)) deactivateMutation.mutate(c.id);
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={async () => {
+                        if (await confirmAction({ message: isAr ? `تعطيل "${c.code}"؟` : `Deactivate "${c.code}"?`, danger: true })) deactivateMutation.mutate(c.id);
                       }}
-                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                     >
                       {isAr ? "تعطيل" : "Deactivate"}
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
@@ -89,8 +108,8 @@ export default function CouponsPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </TableContainer>
     </div>
   );
 }
@@ -148,136 +167,138 @@ function CouponFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose: (
   const canSubmit = code.trim().length >= 3 && Number(discountValue) > 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800">{isAr ? "كوبون جديد" : "Add Coupon"}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
-        </div>
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto pe-1">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الكود" : "Code"}</label>
-            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} autoFocus placeholder="SAVE10" className={inp} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "النوع" : "Type"}</label>
-              <select value={discountMode} onChange={(e) => setDiscountMode(e.target.value as "PERCENT" | "FIXED")} className={inp}>
-                <option value="PERCENT">{isAr ? "نسبة %" : "Percent %"}</option>
-                <option value="FIXED">{isAr ? "مبلغ ثابت" : "Fixed amount"}</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "القيمة" : "Value"}</label>
-              <input type="number" min={0} value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} className={inp} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الحد الأدنى للشراء" : "Min purchase"}</label>
-              <input type="number" min={0} value={minPurchaseAmount} onChange={(e) => setMinPurchaseAmount(e.target.value)} className={inp} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أقصى استخدام" : "Max uses"}</label>
-              <input type="number" min={1} value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder={isAr ? "بلا حد" : "Unlimited"} className={inp} />
-            </div>
-          </div>
-
-          {discountMode === "PERCENT" && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أقصى قيمة خصم" : "Max discount amount"}</label>
-              <input
-                type="number"
-                min={0}
-                value={maxDiscountAmount}
-                onChange={(e) => setMaxDiscountAmount(e.target.value)}
-                placeholder={isAr ? "بلا حد" : "No cap"}
-                className={inp}
-              />
-            </div>
-          )}
-
-          <div className="border-t border-slate-100 pt-3">
-            <p className="mb-2 text-xs font-semibold text-slate-500">{isAr ? "الاستهداف (اختياري)" : "Targeting (optional)"}</p>
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
-                <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inp}>
-                  <option value="">{isAr ? "كل الفروع" : "All branches"}</option>
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.branchName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "مجموعة العملاء" : "Customer group"}</label>
-                <select value={customerGroupId} onChange={(e) => setCustomerGroupId(e.target.value)} className={inp}>
-                  <option value="">{isAr ? "أي مجموعة" : "Any group"}</option>
-                  {customerGroups?.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {isAr ? g.nameAr || g.nameEn : g.nameEn}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="relative">
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "عميل محدد" : "Specific customer"}</label>
-                <input
-                  value={pickedCustomer ? (isAr ? pickedCustomer.nameAr || pickedCustomer.nameEn : pickedCustomer.nameEn) : customerSearch}
-                  onChange={(e) => {
-                    setPickedCustomer(null);
-                    setCustomerSearch(e.target.value);
-                  }}
-                  placeholder={isAr ? "أي عميل" : "Any customer"}
-                  className={inp}
-                />
-                {customerSearch && !pickedCustomer && (customerResults?.length ?? 0) > 0 && (
-                  <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
-                    {customerResults!.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => {
-                          setPickedCustomer(c);
-                          setCustomerSearch("");
-                        }}
-                        className="block w-full px-3 py-1.5 text-start text-sm hover:bg-sky-50"
-                      >
-                        {isAr ? c.nameAr || c.nameEn : c.nameEn} <span className="ltr-nums text-xs text-slate-400">({c.phone})</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "أقصى استخدام لكل عميل" : "Max uses per customer"}</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={maxUsesPerCustomer}
-                  onChange={(e) => setMaxUsesPerCustomer(e.target.value)}
-                  placeholder={isAr ? "بلا حد" : "Unlimited"}
-                  className={inp}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-        {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
+    <Modal
+      title={isAr ? "كوبون جديد" : "Add Coupon"}
+      onClose={onClose}
+      footer={
+        <Button
+          fullWidth
           onClick={() => {
             setError(null);
             createMutation.mutate();
           }}
           disabled={!canSubmit || createMutation.isPending}
-          className="mt-4 w-full rounded-md bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {createMutation.isPending ? "…" : isAr ? "حفظ" : "Save"}
-        </button>
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={labelClass}>{isAr ? "الكود" : "Code"}</label>
+          <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} autoFocus placeholder="SAVE10" className={inputClass} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>{isAr ? "النوع" : "Type"}</label>
+            <select value={discountMode} onChange={(e) => setDiscountMode(e.target.value as "PERCENT" | "FIXED")} className={inputClass}>
+              <option value="PERCENT">{isAr ? "نسبة %" : "Percent %"}</option>
+              <option value="FIXED">{isAr ? "مبلغ ثابت" : "Fixed amount"}</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "القيمة" : "Value"}</label>
+            <input type="number" min={0} value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>{isAr ? "الحد الأدنى للشراء" : "Min purchase"}</label>
+            <input type="number" min={0} value={minPurchaseAmount} onChange={(e) => setMinPurchaseAmount(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>{isAr ? "أقصى استخدام" : "Max uses"}</label>
+            <input type="number" min={1} value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder={isAr ? "بلا حد" : "Unlimited"} className={inputClass} />
+          </div>
+        </div>
+
+        {discountMode === "PERCENT" && (
+          <div>
+            <label className={labelClass}>{isAr ? "أقصى قيمة خصم" : "Max discount amount"}</label>
+            <input
+              type="number"
+              min={0}
+              value={maxDiscountAmount}
+              onChange={(e) => setMaxDiscountAmount(e.target.value)}
+              placeholder={isAr ? "بلا حد" : "No cap"}
+              className={inputClass}
+            />
+          </div>
+        )}
+
+        <div className="border-t border-slate-100 pt-4">
+          <p className="mb-2 text-xs font-semibold text-slate-500">{isAr ? "الاستهداف (اختياري)" : "Targeting (optional)"}</p>
+          <div className="space-y-4">
+            <div>
+              <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
+              <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={inputClass}>
+                <option value="">{isAr ? "كل الفروع" : "All branches"}</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.branchName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "مجموعة العملاء" : "Customer group"}</label>
+              <select value={customerGroupId} onChange={(e) => setCustomerGroupId(e.target.value)} className={inputClass}>
+                <option value="">{isAr ? "أي مجموعة" : "Any group"}</option>
+                {customerGroups?.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {isAr ? g.nameAr || g.nameEn : g.nameEn}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="relative">
+              <label className={labelClass}>{isAr ? "عميل محدد" : "Specific customer"}</label>
+              <input
+                value={pickedCustomer ? (isAr ? pickedCustomer.nameAr || pickedCustomer.nameEn : pickedCustomer.nameEn) : customerSearch}
+                onChange={(e) => {
+                  setPickedCustomer(null);
+                  setCustomerSearch(e.target.value);
+                }}
+                placeholder={isAr ? "أي عميل" : "Any customer"}
+                className={inputClass}
+              />
+              {customerSearch && !pickedCustomer && (customerResults?.length ?? 0) > 0 && (
+                <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+                  {customerResults!.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setPickedCustomer(c);
+                        setCustomerSearch("");
+                      }}
+                      className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                    >
+                      {isAr ? c.nameAr || c.nameEn : c.nameEn} <span className="ltr-nums text-xs text-slate-400">({c.phone})</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>{isAr ? "أقصى استخدام لكل عميل" : "Max uses per customer"}</label>
+              <input
+                type="number"
+                min={1}
+                value={maxUsesPerCustomer}
+                onChange={(e) => setMaxUsesPerCustomer(e.target.value)}
+                placeholder={isAr ? "بلا حد" : "Unlimited"}
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      {error && (
+        <Alert variant="danger" className="mt-4">
+          {error}
+        </Alert>
+      )}
+    </Modal>
   );
 }
-
-const inp = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";

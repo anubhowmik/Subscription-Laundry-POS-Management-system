@@ -52,6 +52,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "pos.register.manage", module: "pos", description: "Open and close the cash register" },
   { code: "coupons.manage", module: "pos", description: "Create and manage discount coupons" },
   { code: "price-lists.manage", module: "pos", description: "Create price lists and assign them to customers" },
+  { code: "bnpl.manage", module: "pos", description: "Configure BNPL (Tamara/Tabby/MISPay) providers for the organization" },
 
   { code: "reports.sales", module: "reports", description: "View sales reports" },
   { code: "reports.inventory", module: "reports", description: "View inventory reports" },
@@ -76,4 +77,15 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "announcements.manage", module: "announcements", description: "Create and manage company announcements" },
 
   { code: "settings.manage", module: "settings", description: "Manage system settings" },
+
+  // Application-level access gates for the Home launcher's three applications (POS Laundry /
+  // Users & Rules / ZATCA KSA). Additive on top of, not a replacement for, the fine-grained
+  // codes above - e.g. a user still needs both pos.access AND app.pos_laundry to use POS. See
+  // middleware/authenticate.ts for how a per-user Application Access override on top of these
+  // role-level grants is folded into req.user.permissions.
+  { code: "app.pos_laundry", module: "app", description: "Access the POS Laundry application" },
+  { code: "app.users_rules", module: "app", description: "Access the Users & Rules application" },
+  { code: "app.zatca", module: "app", description: "Access the ZATCA KSA application" },
+
+  { code: "licenses.manage", module: "billing", description: "View and purchase additional user license seats" },
 ];

@@ -2,10 +2,18 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { formatMoney } from "../../lib/format";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { ServiceFormModal, type EditingService } from "../../components/services/ServiceFormModal";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Button } from "../../components/ui/Button";
+import { Badge } from "../../components/ui/Badge";
+import { StatCard } from "../../components/ui/StatCard";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { SearchInput } from "../../components/ui/SearchInput";
+import { Shirt } from "lucide-react";
 
 interface Service {
   id: string;
@@ -67,19 +75,10 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-800">{t("services.title")}</h1>
-        <button onClick={openAdd} className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-          + {isAr ? "خدمة جديدة" : "Add Service"}
-        </button>
-      </div>
-
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={t("common.search")}
-        className="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm"
+    <div className="space-y-6">
+      <PageHeader
+        title={t("services.title")}
+        actions={<Button onClick={openAdd}>+ {isAr ? "خدمة جديدة" : "Add Service"}</Button>}
       />
 
       {formOpen && (
@@ -91,44 +90,63 @@ export default function ServicesPage() {
         />
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Shirt}
+            cardBg="bg-app-pos-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={t("services.title")}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
+
+      <TableContainer>
+        <TableToolbar>
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("common.search")} className="max-w-xs" />
+        </TableToolbar>
+        <TableScroll>
+        <Table>
+          <THead>
             <tr>
-              <th className="px-4 py-2 text-start">{t("services.code")}</th>
-              <th className="px-4 py-2 text-start">{t("common.name")}</th>
-              <th className="px-4 py-2 text-start">{t("services.category")}</th>
-              <th className="px-4 py-2 text-start">{t("services.price")}</th>
-              <th className="px-4 py-2 text-start">{t("common.status")}</th>
-              <th className="px-4 py-2 text-end">{t("common.actions")}</th>
+              <Th>{t("services.code")}</Th>
+              <Th>{t("common.name")}</Th>
+              <Th>{t("services.category")}</Th>
+              <Th>{t("services.price")}</Th>
+              <Th>{t("common.status")}</Th>
+              <Th className="text-end">{t("common.actions")}</Th>
             </tr>
-          </thead>
+          </THead>
           <tbody>
             {data?.rows.map((s) => (
-              <tr key={s.id} className="border-b border-slate-100">
-                <td className="px-4 py-2"><span className="ltr-nums">{s.code}</span></td>
-                <td className="px-4 py-2">{isAr ? s.nameAr || s.nameEn : s.nameEn}</td>
-                <td className="px-4 py-2">{s.category ? (isAr ? s.category.nameAr : s.category.nameEn) : "-"}</td>
-                <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(s.price, currency, locale)}</span></td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${s.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+              <tr key={s.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                <td className="px-4 py-3"><span className="ltr-nums">{s.code}</span></td>
+                <td className="px-4 py-3">{isAr ? s.nameAr || s.nameEn : s.nameEn}</td>
+                <td className="px-4 py-3">{s.category ? (isAr ? s.category.nameAr : s.category.nameEn) : "-"}</td>
+                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.price, currency, locale)}</span></td>
+                <td className="px-4 py-3">
+                  <Badge variant={s.status === "ACTIVE" ? "success" : "neutral"}>
                     {s.status === "ACTIVE" ? t("common.active") : t("common.inactive")}
-                  </span>
+                  </Badge>
                 </td>
-                <td className="px-4 py-2 text-end">
+                <td className="px-4 py-3 text-end">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => openEdit(s)} className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                    <Button size="sm" variant="outline" onClick={() => openEdit(s)}>
                       {isAr ? "تعديل" : "Edit"}
-                    </button>
+                    </Button>
                     {s.status === "ACTIVE" && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(isAr ? `حذف "${s.nameEn}"؟` : `Delete "${s.nameEn}"?`)) deleteMutation.mutate(s.id);
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={async () => {
+                          if (await confirmAction({ message: isAr ? `حذف "${s.nameEn}"؟` : `Delete "${s.nameEn}"?`, danger: true })) deleteMutation.mutate(s.id);
                         }}
-                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                       >
                         {isAr ? "حذف" : "Delete"}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </td>
@@ -142,8 +160,9 @@ export default function ServicesPage() {
               </tr>
             )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+        </TableScroll>
+      </TableContainer>
     </div>
   );
 }

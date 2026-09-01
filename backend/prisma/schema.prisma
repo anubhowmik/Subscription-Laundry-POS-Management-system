@@ -264,6 +264,17 @@ enum BillingPaymentStatus {
   REFUNDED
 }
 
+// What a BillingPayment is actually for. SUBSCRIPTION = the org's own recurring base seat
+// ($10/mo or annual); SEAT_LICENSE = a one-time $10 charge for one additional user seat.
+// These are deliberately decoupled from each other - see user.service.ts assertUserSeatAvailable()
+// and billing.service.ts verifyPayment(), which branch on this field but never let one purpose's
+// verification affect the other's state (Organization.status/Subscription for SUBSCRIPTION,
+// Organization.purchasedUserSeats for SEAT_LICENSE).
+enum BillingPaymentPurpose {
+  SUBSCRIPTION
+  SEAT_LICENSE
+}
+
 // ---------------------------------------------------------------------------
 // Multi-tenant foundation
 // ---------------------------------------------------------------------------
@@ -275,6 +286,13 @@ model Organization {
   slug        String             @unique // url-safe identifier
   status      OrganizationStatus @default(TRIAL)
   trialEndsAt DateTime?
+
+  // Included with the org's own base subscription seat; every additional active login-capable
+  // user beyond this count requires a one-time $10 seat purchase - see
+  // user.service.ts assertUserSeatAvailable() and billing.service.ts createSeatCheckout().
+  // Defaults to 1 (the owner's own seat). Deliberately independent of Subscription/trial state -
+  // see the BillingPaymentPurpose comment above.
+  purchasedUserSeats Int @default(1)
 
   // --- Org-wide settings (P6-4) ---
   fiscalYearStartMonth Int      @default(1) // 1-12
@@ -347,6 +365,8 @@ model Organization {
   expenseCategories    ExpenseCategory[]
   expenses             Expense[]
   stockAdjustments     StockAdjustment[]
+  bnplProviderSettings BnplProviderSettings[]
+  bnplSessions         BnplSession[]
 }
 
 // Billing plan catalog - global, not tenant-scoped (the plans a tenant can subscribe to).
@@ -395,25 +415,27 @@ model Subscription {
 // What a COMPANY pays US to use the platform. Deliberately separate from SalePayment, which is
 // what a company's own walk-in customer pays THEM at the POS counter.
 model BillingPayment {
-  id                 String               @id @default(uuid())
+  id                 String                @id @default(uuid())
   organizationId     String
   subscriptionId     String?
-  planId             String
-  amount             Decimal              @db.Decimal(10, 2)
-  currency           String               @default("SAR")
-  billingInterval    BillingInterval
-  status             BillingPaymentStatus @default(PENDING)
-  gateway            String               @default("moyasar")
-  gatewayPaymentId   String?              @unique // Moyasar payment id, set once the payment is created there
+  planId             String? // null for SEAT_LICENSE purchases, which aren't tied to a plan/subscription
+  purpose            BillingPaymentPurpose @default(SUBSCRIPTION)
+  seatQuantity       Int? // set only for SEAT_LICENSE purpose - how many one-time seats this payment buys
+  amount             Decimal               @db.Decimal(10, 2)
+  currency           String                @default("SAR")
+  billingInterval    BillingInterval? // null for SEAT_LICENSE purpose - one-time, not a recurring interval
+  status             BillingPaymentStatus  @default(PENDING)
+  gateway            String                @default("moyasar")
+  gatewayPaymentId   String?               @unique // Moyasar payment id, set once the payment is created there
   gatewayResponseRaw Json?
   failureReason      String?
   paidAt             DateTime?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   organization Organization  @relation(fields: [organizationId], references: [id])
   subscription Subscription? @relation(fields: [subscriptionId], references: [id])
-  plan         Plan          @relation(fields: [planId], references: [id])
+  plan         Plan?         @relation(fields: [planId], references: [id])
 
   @@index([organizationId])
   @@index([status])
@@ -477,6 +499,17 @@ model User {
   isSystemAdmin  Boolean    @default(false) // full access within their OWN organization only - bypasses business-location scoping, does not cross tenant boundaries
   allowLogin     Boolean    @default(true) // false = a staff record that exists only to be referenced (e.g. createdBy) - see (a) in P8-5
   maxDiscountPercent Decimal? @db.Decimal(5, 2) // null = unlimited - per-cashier invoice-discount ceiling (P8-5b), never applies to isSystemAdmin
+  // Email verification gate - see auth.service.ts verifyEmailCode(). New users default to false;
+  // existing users as of the migration that introduced this column are backfilled to true (they
+  // predate this concept and already have working accounts).
+  emailVerified  Boolean    @default(false)
+  // Per-user override on top of the role's app.* permission codes - null inherits the role's
+  // grant, true force-grants even if the role lacks the code, false force-revokes even if the
+  // role has it. Computed into req.user.permissions by middleware/authenticate.ts. See the
+  // "Application Access" page in the Users & Rules application.
+  appAccessPosLaundry Boolean?
+  appAccessUsersRules Boolean?
+  appAccessZatca      Boolean?
   lastLoginAt    DateTime?
   createdBy      String?
   updatedBy      String?
@@ -516,9 +549,27 @@ model User {
   customerRestrictions         UserCustomer[]
   customerGroupRestrictions    UserCustomerGroup[]
   transferFromLocationRestrictions UserTransferFromLocation[]
+  bnplSessionsCreated      BnplSession[]
+  emailVerificationCodes   EmailVerificationCode[]
 
   @@index([status])
   @@index([organizationId])
+}
+
+// Short-lived, single-use email verification codes (registration + resend). The raw code is
+// never stored - only its hash, same discipline as RefreshToken.tokenHash below.
+model EmailVerificationCode {
+  id           String    @id @default(uuid())
+  userId       String
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model UserGroup {
@@ -760,6 +811,7 @@ model BusinessLocation {
   expenses           Expense[]
   stockAdjustments   StockAdjustment[]
   userTransferFromRestrictions UserTransferFromLocation[]
+  bnplSessions       BnplSession[]
 
   @@unique([organizationId, branchCode])
   @@index([organizationId])
@@ -926,6 +978,7 @@ model Customer {
   sellReturns         SellReturn[]
   coupons             Coupon[]
   userRestrictions    UserCustomer[]
+  bnplSessions        BnplSession[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1283,6 +1336,83 @@ model PaymentMethod {
   @@index([organizationId])
 }
 
+// BNPL (Buy Now Pay Later): Tamara/Tabby/MISPay. No real merchant credentials exist yet for any
+// provider - see backend/src/modules/bnpl/bnplGateway.ts, whose "real" branch is a clearly-marked
+// stub until credentials are configured. Each provider is its own PaymentMethod code
+// (BNPL_TAMARA/BNPL_TABBY/BNPL_MISPAY) so the payment-method breakdown report shows per-provider
+// volume, same as CASH/CARD/CASHBACK today.
+enum BnplProvider {
+  TAMARA
+  TABBY
+  MISPAY
+}
+
+// CREATED (session opened with the provider) -> APPROVED (customer approved on their phone) ->
+// CAPTURED (funds confirmed, safe to ride as a Payment on the sale). The frontend auto-fires the
+// capture call the instant it observes APPROVED via polling - no cashier click - but the service
+// layer still re-verifies with the gateway before every status transition, never trusting the
+// client's view of the world (same discipline as billing.service.ts verifyPayment()).
+enum BnplSessionStatus {
+  CREATED
+  APPROVED
+  CAPTURED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+// Per-org, per-provider merchant configuration. merchantTokenEncrypted follows the same
+// secretBox.ts AES-256-GCM pattern as NotificationSettings.appSidEncrypted - the plaintext is
+// never returned to the frontend, only a hasMerchantToken boolean.
+model BnplProviderSettings {
+  id                     String       @id @default(uuid())
+  organizationId         String
+  provider               BnplProvider
+  isEnabled              Boolean      @default(false)
+  merchantTokenEncrypted String?      @db.Text
+  apiBaseUrlOverride     String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+}
+
+// One BNPL checkout attempt. saleId is set only once verifyAndConsumeSessionTx() has consumed it
+// inside the same transaction as the sale's Payment row - the @unique constraint below is what
+// makes a session usable exactly once, even under concurrent checkout attempts.
+model BnplSession {
+  id                 String            @id @default(uuid())
+  organizationId     String
+  businessLocationId String
+  provider           BnplProvider
+  providerSessionId  String
+  status             BnplSessionStatus @default(CREATED)
+  amount             Decimal           @db.Decimal(12, 2)
+  currency           String            @default("SAR")
+  customerId         String
+  customerPhone      String
+  checkoutUrl        String?           @db.Text
+  saleId             String?           @unique
+  rawLastResponse    Json?
+  failureReason      String?
+  expiresAt          DateTime
+  createdBy          String
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  customer         Customer         @relation(fields: [customerId], references: [id])
+  sale             Sale?            @relation(fields: [saleId], references: [id])
+  createdByUser    User             @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId, status])
+  @@index([businessLocationId])
+}
+
 model Sale {
   id                 String        @id @default(uuid()) // also serves as the ZATCA invoice UUID (cbc:UUID)
   organizationId     String
@@ -1341,6 +1471,7 @@ model Sale {
   loyaltyTransactions LoyaltyTransaction[]
   cashbackTransactions CashbackTransaction[]
   sellReturns         SellReturn[]
+  bnplSession         BnplSession?
 
   // Scoped to the branch, not the org - invoiceNumber/quoteNumber are now claimed from a
   // per-BusinessLocation counter (P7-5), so two different branches can legitimately produce the

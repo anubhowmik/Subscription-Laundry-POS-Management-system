@@ -7,6 +7,7 @@ import { createCompensationSchema, resolveCompensationSchema, listCompensationQu
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 
 // Segregation of duties (P8-6): filing, approving, and paying are three distinct permissions.
 // PUT /:id/resolve is shared by both the approve and the pay transition - requirePermission here

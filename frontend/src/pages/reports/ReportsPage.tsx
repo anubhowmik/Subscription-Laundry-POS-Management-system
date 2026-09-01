@@ -6,6 +6,14 @@ import type { ApiSuccess } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { formatMoney } from "../../lib/format";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Card } from "../../components/ui/Card";
+import { Badge } from "../../components/ui/Badge";
+import { LoadingState } from "../../components/ui/Spinner";
+import { StatCard as BaseStatCard } from "../../components/ui/StatCard";
+import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { labelClass, inputClass } from "../../components/ui/formClasses";
+import { BarChart3 } from "lucide-react";
 
 type Tab = "SALES" | "INVENTORY" | "ACCOUNTING" | "BY_SERVICE" | "AR_AGING" | "AP_AGING" | "STAFF" | "VAT";
 
@@ -20,10 +28,10 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>(canSales ? "SALES" : canInventory ? "INVENTORY" : "ACCOUNTING");
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-slate-800">{isAr ? "التقارير" : "Reports"}</h1>
+    <div className="space-y-6">
+      <PageHeader title={isAr ? "التقارير" : "Reports"} />
 
-      <div className="flex gap-6 border-b border-slate-200">
+      <div className="flex flex-wrap gap-6 overflow-x-auto border-b border-slate-200">
         {canSales && (
           <button
             onClick={() => setTab("SALES")}
@@ -139,20 +147,20 @@ function SalesReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => string }
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "من" : "From"}>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "إلى" : "To"}>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -164,8 +172,8 @@ function SalesReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => string }
             <StatCard label={isAr ? "متوسط الفاتورة" : "Avg Ticket"} value={formatMoney(data.summary.avgTicket, currency, locale)} />
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-slate-700">{isAr ? "المبيعات اليومية" : "Sales by Day"}</h3>
+          <Card className="p-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-800">{isAr ? "المبيعات اليومية" : "Sales by Day"}</h3>
             {data.byDay.length === 0 ? (
               <p className="py-6 text-center text-sm text-slate-400">{t("common.noResults")}</p>
             ) : (
@@ -182,21 +190,21 @@ function SalesReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => string }
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">{isAr ? "طريقة الدفع" : "Payment Method"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
+                  <Th>{isAr ? "طريقة الدفع" : "Payment Method"}</Th>
+                  <Th>{isAr ? "الإجمالي" : "Total"}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.byPaymentMethod.map((p) => (
-                  <tr key={p.paymentMethodId} className="border-b border-slate-100">
-                    <td className="px-4 py-2">{isAr ? p.nameAr : p.nameEn}</td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(p.total, currency, locale)}</span></td>
+                  <tr key={p.paymentMethodId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3">{isAr ? p.nameAr : p.nameEn}</td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.total, currency, locale)}</span></td>
                   </tr>
                 ))}
                 {data.byPaymentMethod.length === 0 && (
@@ -207,8 +215,8 @@ function SalesReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => string }
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
@@ -249,18 +257,18 @@ function InventoryReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => stri
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
-        <label className="flex items-center gap-2 pb-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 pb-2.5 text-sm text-slate-600">
           <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
           {isAr ? "المخزون المنخفض فقط" : "Low stock only"}
         </label>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -270,31 +278,31 @@ function InventoryReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => stri
             <StatCard label={isAr ? "مخزون منخفض" : "Low Stock"} value={String(data.summary.lowStockCount)} tone={data.summary.lowStockCount > 0 ? "warn" : "normal"} />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">SKU</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "المنتج" : "Product"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الفرع" : "Branch"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الكمية" : "Qty"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "القيمة" : "Value"}</th>
-                  <th className="px-4 py-2 text-start">{t("common.status")}</th>
+                  <Th>SKU</Th>
+                  <Th>{isAr ? "المنتج" : "Product"}</Th>
+                  <Th>{isAr ? "الفرع" : "Branch"}</Th>
+                  <Th>{isAr ? "الكمية" : "Qty"}</Th>
+                  <Th>{isAr ? "القيمة" : "Value"}</Th>
+                  <Th>{t("common.status")}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.rows.map((r) => (
-                  <tr key={`${r.productId}-${r.branchName}`} className="border-b border-slate-100">
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.sku}</span></td>
-                    <td className="px-4 py-2">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
-                    <td className="px-4 py-2">{r.branchName}</td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.quantity}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.stockValue, currency, locale)}</span></td>
-                    <td className="px-4 py-2">
+                  <tr key={`${r.productId}-${r.branchName}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.sku}</span></td>
+                    <td className="px-4 py-3">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
+                    <td className="px-4 py-3">{r.branchName}</td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.quantity}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.stockValue, currency, locale)}</span></td>
+                    <td className="px-4 py-3">
                       {r.isLowStock ? (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{isAr ? "منخفض" : "Low"}</span>
+                        <Badge variant="danger">{isAr ? "منخفض" : "Low"}</Badge>
                       ) : (
-                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{isAr ? "جيد" : "OK"}</span>
+                        <Badge variant="success">{isAr ? "جيد" : "OK"}</Badge>
                       )}
                     </td>
                   </tr>
@@ -307,8 +315,8 @@ function InventoryReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => stri
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
@@ -343,20 +351,20 @@ function AccountingReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => str
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "من" : "From"}>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "إلى" : "To"}>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -373,23 +381,23 @@ function AccountingReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => str
             />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">{isAr ? "الشهر" : "Month"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "صافي الإيراد" : "Net Revenue"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "ضريبة القيمة المضافة" : "VAT"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الفواتير" : "Invoices"}</th>
+                  <Th>{isAr ? "الشهر" : "Month"}</Th>
+                  <Th>{isAr ? "صافي الإيراد" : "Net Revenue"}</Th>
+                  <Th>{isAr ? "ضريبة القيمة المضافة" : "VAT"}</Th>
+                  <Th>{isAr ? "الفواتير" : "Invoices"}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.byMonth.map((m) => (
-                  <tr key={m.month} className="border-b border-slate-100">
-                    <td className="px-4 py-2"><span className="ltr-nums">{m.month}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(m.netRevenue, currency, locale)}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(m.vat, currency, locale)}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{m.count}</span></td>
+                  <tr key={m.month} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3"><span className="ltr-nums">{m.month}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(m.netRevenue, currency, locale)}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(m.vat, currency, locale)}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{m.count}</span></td>
                   </tr>
                 ))}
                 {data.byMonth.length === 0 && (
@@ -400,8 +408,8 @@ function AccountingReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => str
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
@@ -434,20 +442,20 @@ function SalesByServiceReportTab({ isAr, t }: { isAr: boolean; t: (k: string) =>
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "من" : "From"}>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "إلى" : "To"}>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -456,25 +464,25 @@ function SalesByServiceReportTab({ isAr, t }: { isAr: boolean; t: (k: string) =>
             <StatCard label={isAr ? "عدد الخدمات" : "Services"} value={String(data.summary.serviceCount)} />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">{isAr ? "الخدمة" : "Service"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الفئة" : "Category"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الكمية" : "Qty"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "عدد العناصر" : "Lines"}</th>
+                  <Th>{isAr ? "الخدمة" : "Service"}</Th>
+                  <Th>{isAr ? "الفئة" : "Category"}</Th>
+                  <Th>{isAr ? "الكمية" : "Qty"}</Th>
+                  <Th>{isAr ? "الإجمالي" : "Total"}</Th>
+                  <Th>{isAr ? "عدد العناصر" : "Lines"}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.rows.map((r) => (
-                  <tr key={r.serviceId} className="border-b border-slate-100">
-                    <td className="px-4 py-2">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
-                    <td className="px-4 py-2 text-slate-500">{(isAr ? r.categoryNameAr : r.categoryNameEn) ?? "-"}</td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.quantity}</span></td>
-                    <td className="px-4 py-2 font-semibold"><span className="ltr-nums">{formatMoney(r.total, currency, locale)}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.count}</span></td>
+                  <tr key={r.serviceId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
+                    <td className="px-4 py-3 text-slate-500">{(isAr ? r.categoryNameAr : r.categoryNameEn) ?? "-"}</td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.quantity}</span></td>
+                    <td className="px-4 py-3 font-semibold"><span className="ltr-nums">{formatMoney(r.total, currency, locale)}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.count}</span></td>
                   </tr>
                 ))}
                 {data.rows.length === 0 && (
@@ -485,8 +493,8 @@ function SalesByServiceReportTab({ isAr, t }: { isAr: boolean; t: (k: string) =>
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
@@ -524,14 +532,14 @@ function AgingReportTab({ isAr, t, endpoint, entityLabel }: { isAr: boolean; t: 
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -542,31 +550,29 @@ function AgingReportTab({ isAr, t, endpoint, entityLabel }: { isAr: boolean; t: 
             <StatCard label={isAr ? "الإجمالي" : "Grand Total"} value={formatMoney(data.grandTotal, currency, locale)} />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">{entityLabel}</th>
+                  <Th>{entityLabel}</Th>
                   {data.buckets.map((b) => (
-                    <th key={b} className="px-4 py-2 text-start">
-                      {b}
-                    </th>
+                    <Th key={b}>{b}</Th>
                   ))}
-                  <th className="px-4 py-2 text-start">{isAr ? "الإجمالي" : "Total"}</th>
+                  <Th>{isAr ? "الإجمالي" : "Total"}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.rows.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td className="px-4 py-2">
+                  <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3">
                       {isAr ? r.nameAr || r.nameEn : r.nameEn} <span className="ltr-nums text-xs text-slate-400">{r.phone}</span>
                     </td>
                     {data.buckets.map((b) => (
-                      <td key={b} className="px-4 py-2">
+                      <td key={b} className="px-4 py-3">
                         <span className="ltr-nums">{Number(r.buckets[b]) > 0 ? formatMoney(r.buckets[b], currency, locale) : "-"}</span>
                       </td>
                     ))}
-                    <td className="px-4 py-2 font-semibold"><span className="ltr-nums">{formatMoney(r.total, currency, locale)}</span></td>
+                    <td className="px-4 py-3 font-semibold"><span className="ltr-nums">{formatMoney(r.total, currency, locale)}</span></td>
                   </tr>
                 ))}
                 {data.rows.length === 0 && (
@@ -577,8 +583,8 @@ function AgingReportTab({ isAr, t, endpoint, entityLabel }: { isAr: boolean; t: 
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
@@ -617,39 +623,39 @@ function StaffProductivityReportTab({ isAr, t }: { isAr: boolean; t: (k: string)
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "من" : "From"}>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "إلى" : "To"}>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+        <TableContainer>
+          <Table>
+            <THead>
               <tr>
-                <th className="px-4 py-2 text-start">{isAr ? "الموظف" : "Staff"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "إجمالي المبيعات" : "Total Sales"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "عدد الفواتير" : "Invoices"}</th>
-                <th className="px-4 py-2 text-start">{isAr ? "متوسط الفاتورة" : "Avg Ticket"}</th>
+                <Th>{isAr ? "الموظف" : "Staff"}</Th>
+                <Th>{isAr ? "إجمالي المبيعات" : "Total Sales"}</Th>
+                <Th>{isAr ? "عدد الفواتير" : "Invoices"}</Th>
+                <Th>{isAr ? "متوسط الفاتورة" : "Avg Ticket"}</Th>
               </tr>
-            </thead>
+            </THead>
             <tbody>
               {data.rows.map((r) => (
-                <tr key={r.userId} className="border-b border-slate-100">
-                  <td className="px-4 py-2">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
-                  <td className="px-4 py-2 font-semibold"><span className="ltr-nums">{formatMoney(r.totalSales, currency, locale)}</span></td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{r.invoiceCount}</span></td>
-                  <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.avgTicket, currency, locale)}</span></td>
+                <tr key={r.userId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  <td className="px-4 py-3">{isAr ? r.nameAr || r.nameEn : r.nameEn}</td>
+                  <td className="px-4 py-3 font-semibold"><span className="ltr-nums">{formatMoney(r.totalSales, currency, locale)}</span></td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{r.invoiceCount}</span></td>
+                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.avgTicket, currency, locale)}</span></td>
                 </tr>
               ))}
               {data.rows.length === 0 && (
@@ -660,8 +666,8 @@ function StaffProductivityReportTab({ isAr, t }: { isAr: boolean; t: (k: string)
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </TableContainer>
       )}
     </div>
   );
@@ -693,20 +699,20 @@ function VatBreakdownReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => s
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <Field label={isAr ? "من" : "From"}>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "إلى" : "To"}>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
         </Field>
         <Field label={isAr ? "الفرع" : "Branch"}>
-          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inp}>
+          <select value={scope} onChange={(e) => setScope(e.target.value as "current" | "all")} className={inputClass}>
             <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
             <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
           </select>
         </Field>
       </div>
 
-      {isLoading && <p className="py-8 text-center text-sm text-slate-400">{t("common.loading")}</p>}
+      {isLoading && <LoadingState label={t("common.loading")} />}
 
       {data && (
         <>
@@ -715,25 +721,25 @@ function VatBreakdownReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => s
             <StatCard label={isAr ? "الوعاء الضريبي" : "Taxable Base"} value={formatMoney(data.summary.totalTaxableBase, currency, locale)} />
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+          <TableContainer>
+            <Table>
+              <THead>
                 <tr>
-                  <th className="px-4 py-2 text-start">{isAr ? "النسبة" : "Rate"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "فئة الضريبة" : "Category"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الوعاء الضريبي" : "Taxable Base"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "الضريبة" : "Tax"}</th>
-                  <th className="px-4 py-2 text-start">{isAr ? "عدد العناصر" : "Lines"}</th>
+                  <Th>{isAr ? "النسبة" : "Rate"}</Th>
+                  <Th>{isAr ? "فئة الضريبة" : "Category"}</Th>
+                  <Th>{isAr ? "الوعاء الضريبي" : "Taxable Base"}</Th>
+                  <Th>{isAr ? "الضريبة" : "Tax"}</Th>
+                  <Th>{isAr ? "عدد العناصر" : "Lines"}</Th>
                 </tr>
-              </thead>
+              </THead>
               <tbody>
                 {data.rows.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.taxPercent}%</span></td>
-                    <td className="px-4 py-2">{r.taxCategoryCode}</td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{formatMoney(r.subtotal, currency, locale)}</span></td>
-                    <td className="px-4 py-2 font-semibold"><span className="ltr-nums">{formatMoney(r.taxAmount, currency, locale)}</span></td>
-                    <td className="px-4 py-2"><span className="ltr-nums">{r.lineCount}</span></td>
+                  <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.taxPercent}%</span></td>
+                    <td className="px-4 py-3">{r.taxCategoryCode}</td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.subtotal, currency, locale)}</span></td>
+                    <td className="px-4 py-3 font-semibold"><span className="ltr-nums">{formatMoney(r.taxAmount, currency, locale)}</span></td>
+                    <td className="px-4 py-3"><span className="ltr-nums">{r.lineCount}</span></td>
                   </tr>
                 ))}
                 {data.rows.length === 0 && (
@@ -744,30 +750,37 @@ function VatBreakdownReportTab({ isAr, t }: { isAr: boolean; t: (k: string) => s
                   </tr>
                 )}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </TableContainer>
         </>
       )}
     </div>
   );
 }
 
+// Thin wrapper over the shared StatCard - every report tab already calls this with just
+// label/value/tone, and rather than touch all ~19 call sites individually to pick a bespoke icon
+// each, this reuses one consistent report-tile look (matching the rest of the app's cards) while
+// leaving every tab's own data/logic untouched.
 function StatCard({ label, value, tone = "normal" }: { label: string; value: string; tone?: "normal" | "warn" }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <p className="text-xs text-slate-400">{label}</p>
-      <p className={`ltr-nums mt-1 text-lg font-semibold ${tone === "warn" ? "text-red-600" : "text-slate-800"}`}>{value}</p>
-    </div>
+    <BaseStatCard
+      icon={BarChart3}
+      cardBg={tone === "warn" ? "bg-rose-50" : "bg-slate-50"}
+      iconBg={tone === "warn" ? "bg-rose-500" : "bg-slate-400"}
+      iconColor="text-white"
+      label={label}
+      value={value}
+      warn={tone === "warn"}
+    />
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
+      <label className={labelClass}>{label}</label>
       {children}
     </div>
   );
 }
-
-const inp = "rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-sky-500 focus:outline-none";

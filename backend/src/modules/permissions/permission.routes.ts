@@ -5,6 +5,7 @@ import { requirePermission } from "../../middleware/permission";
 
 const router = Router();
 router.use(authenticate, requirePermission("roles.view", "roles.create", "roles.update"));
+router.use(requirePermission("app.users_rules"));
 
 router.get("/", controller.list);
 

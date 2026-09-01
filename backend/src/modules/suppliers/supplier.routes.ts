@@ -7,6 +7,7 @@ import { createSupplierSchema, listSupplierQuerySchema, updateSupplierSchema } f
 
 const router = Router();
 router.use(authenticate);
+router.use(requirePermission("app.pos_laundry"));
 router.use(requirePermission("suppliers.manage"));
 
 router.get("/", validate(listSupplierQuerySchema, "query"), controller.list);

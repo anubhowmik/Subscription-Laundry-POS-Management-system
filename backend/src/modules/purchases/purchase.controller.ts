@@ -18,7 +18,7 @@ export async function getById(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const purchase = await service.create(req.body, req.user!.organizationId, req.user!.id);
+  const purchase = await service.create(req.body, req.user!.organizationId, req.user!.id, allowedLocationIds(req));
   await writeAuditLog({ req, action: "CREATE", module: "purchases", entityId: purchase.id, newValues: purchase });
   return sendSuccess(res, purchase, "Purchase recorded", 201);
 }
