@@ -12,11 +12,13 @@ export function Reveal({
   className = "",
   delayMs = 0,
   as: As = "div",
+  id,
 }: {
   children: ReactNode;
   className?: string;
   delayMs?: number;
   as?: "div" | "section";
+  id?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -40,6 +42,7 @@ export function Reveal({
   return (
     <As
       ref={ref as never}
+      id={id}
       style={visible ? { animationDelay: `${delayMs}ms` } : undefined}
       className={`${visible ? "animate-fade-slide-up" : "opacity-0"} ${className}`}
     >

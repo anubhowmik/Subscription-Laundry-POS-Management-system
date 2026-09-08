@@ -1,6 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Mail, Phone, MapPin } from "lucide-react";
 import { WaveDivider } from "../ui/WaveDivider";
+// Reversed (light-on-dark) variant - the footer's background stays near-black regardless of the
+// rest of the app's theme (see the bg-[#0d0d0d] note below), and the plain color mark's navy
+// arcs would disappear into it per the logo kit's own usage notes.
+import logo from "../../assets/logo-reversed.svg";
 
 /**
  * Placeholder company details/social links - swap these for the real ones whenever they're
@@ -29,13 +33,18 @@ export function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="relative bg-sky-600 text-white">
-      <WaveDivider fillClassName="text-sky-600" />
+    // Deliberately NOT bg-sky-600 - the footer keeps its original near-black background from
+    // before the Nordic Indigo/Vanilla Mist rebrand (per explicit user request), while every
+    // other sky-600 surface in the app (buttons, active nav, etc.) picked up the new brand color.
+    <footer className="relative bg-[#0d0d0d] text-white">
+      <WaveDivider fillClassName="text-[#0d0d0d]" />
       <div className="mx-auto max-w-5xl px-6 pb-12 pt-16">
         <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-xl">🧼</div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
+                <img src={logo} alt="" className="h-5 w-5 shrink-0" aria-hidden />
+              </div>
               <span className="text-base font-semibold text-white">{t("app.name")}</span>
             </div>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-white/50">{t("home.tagline")}</p>

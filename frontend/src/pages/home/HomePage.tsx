@@ -1,41 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ElementType } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
-import { WashingMachine, KeyRound, FileCheck2, type LucideIcon } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { useCurrentAppStore } from "../../stores/currentAppStore";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { Button } from "../../components/ui/Button";
-import { Card } from "../../components/ui/Card";
 import { Reveal } from "../../components/ui/Reveal";
 import { WaveDivider } from "../../components/ui/WaveDivider";
 import { Squiggle } from "../../components/ui/Squiggle";
 import { Header } from "../../components/layout/Header";
 import { Footer } from "../../components/layout/Footer";
+import { ModuleCard } from "../../components/appHome/ModuleCard";
+import { PosLaundryIcon, ServicePosIcon, ProductPosIcon, UsersRulesIcon, ZatcaIcon } from "../../components/appHome/AppIcons";
+import { pickAccent } from "../../lib/cardPalette";
 
-// Each application has its own identity color (see index.css's --color-app-* tokens) - Odoo-style,
-// so the launcher reads as three distinct departments rather than three identical tiles. Classes
-// are written out literally (not built from a template string) so Tailwind's static scanner can
-// see and generate them - the same color is then carried into that app's own Sidebar/Topbar once
-// you're inside it, see Sidebar.tsx's APPS array using the same key.
-// The launcher cards are styled as claim-ticket stubs - the one physical artifact every laundry
-// customer already recognizes (the perforated ticket you get for your order). All three cards
-// share the exact same ticket template (stub + dashed perforation + body); only the stub's tint,
-// icon and copy change per app, so the set reads as "one format, three departments" rather than
-// three unrelated card designs.
+// The five applications, each opening onto its own new card-grid landing view (see
+// AppLandingPage.tsx) rather than jumping straight into a content page - see App.tsx's
+// "pos-laundry"/"service-pos"/"product-pos"/"users-rules" routes (ZATCA is the one exemption,
+// being a single page already). Every card gets its own accent color cycled from
+// lib/cardPalette.ts (2026-09-08 design overhaul, matching the user's own reference mockup) -
+// apps are told apart by icon and label, not by a fixed per-app hue.
 interface AppDef {
   key: string;
-  /** Same lucide icon this app uses in its own Sidebar (see Sidebar.tsx's APPS array) - one
-   * consistent mark per app instead of the launcher inventing a second, different-looking logo. */
-  icon: LucideIcon;
+  /** A realistic, hand-drawn multi-part illustration specific to this launcher (see
+   * appHome/AppIcons.tsx) - deliberately NOT the same simple Lucide glyph the app's own Sidebar
+   * uses (WashingMachine/ShoppingCart/etc.), since those single-stroke icons read as generic
+   * placeholders at Home's much larger, hover-animated card size; the Sidebar keeps its compact
+   * Lucide icon, where a detailed illustration would just be visual noise at ~18px. */
+  icon: ElementType<{ className?: string; color?: string }>;
   to: string;
   permission: string;
-  /** Every class is written literally per-app (never built from a template string) so
-   * Tailwind's static scanner can see and generate it. */
-  cardClasses: string;
-  stubClasses: string;
-  iconColorClass: string;
-  titleHoverClasses: string;
 }
 
 interface SegmentDef {
@@ -55,104 +50,202 @@ const SEGMENTS: SegmentDef[] = [
 ];
 
 const APPS: AppDef[] = [
-  {
-    key: "pos",
-    icon: WashingMachine,
-    to: "/dashboard",
-    permission: "app.pos_laundry",
-    cardClasses:
-      "hover:border-app-pos-100 focus-visible:ring-app-pos-500/40 hover:shadow-[0_10px_30px_-12px_rgba(217,122,31,0.35)]",
-    stubClasses: "bg-app-pos-50 group-hover:bg-app-pos-100",
-    iconColorClass: "text-app-pos-600",
-    titleHoverClasses: "group-hover:text-app-pos-600",
-  },
-  {
-    key: "usersRules",
-    icon: KeyRound,
-    to: "/users",
-    permission: "app.users_rules",
-    cardClasses:
-      "hover:border-app-users-100 focus-visible:ring-app-users-500/40 hover:shadow-[0_10px_30px_-12px_rgba(109,75,207,0.35)]",
-    stubClasses: "bg-app-users-50 group-hover:bg-app-users-100",
-    iconColorClass: "text-app-users-600",
-    titleHoverClasses: "group-hover:text-app-users-600",
-  },
-  {
-    key: "zatca",
-    icon: FileCheck2,
-    to: "/zatca",
-    permission: "app.zatca",
-    cardClasses:
-      "hover:border-app-zatca-100 focus-visible:ring-app-zatca-500/40 hover:shadow-[0_10px_30px_-12px_rgba(14,143,116,0.35)]",
-    stubClasses: "bg-app-zatca-50 group-hover:bg-app-zatca-100",
-    iconColorClass: "text-app-zatca-600",
-    titleHoverClasses: "group-hover:text-app-zatca-600",
-  },
+  { key: "pos", icon: PosLaundryIcon, to: "/pos-laundry", permission: "app.pos_laundry" },
+  { key: "posService", icon: ServicePosIcon, to: "/service-pos", permission: "app.pos_service" },
+  { key: "posProduct", icon: ProductPosIcon, to: "/product-pos", permission: "app.pos_product" },
+  { key: "usersRules", icon: UsersRulesIcon, to: "/users-rules", permission: "app.users_rules" },
+  { key: "zatca", icon: ZatcaIcon, to: "/zatca", permission: "app.zatca" },
 ];
+
+/** Jumps to the section named by the URL hash (Header's #apps/#industries/#pricing links) - a
+ * plain react-router <Link to="/#apps"> only updates the URL, it doesn't scroll on its own. */
+function useScrollToHash() {
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    document.querySelector(hash)?.scrollIntoView({ behavior: "smooth" });
+  }, [hash]);
+}
+
+// Every card is a fixed 220px (see ModuleCard's width/height props) and the grid's own gap is
+// 20px (gap-5), so two full rows are always exactly this tall, regardless of how many columns
+// actually fit at the current width - the one number this whole "collapse after 2 rows" feature
+// is built on.
+const CARD_SIZE = 220;
+const GRID_GAP = 20;
+const TWO_ROW_HEIGHT = CARD_SIZE * 2 + GRID_GAP;
+
+/** Collapses the app grid to its first two rows, revealing the rest behind a Show more button -
+ * only actually needed once there are enough apps that a given screen width wraps to a 3rd row,
+ * so this measures the grid's real (unclamped) content height via ResizeObserver rather than
+ * assuming a fixed apps-per-row count that would immediately go stale on a different screen width
+ * or app count. */
+function useShowMoreGrid() {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const check = () => setHasMore(el.scrollHeight > TWO_ROW_HEIGHT + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return { gridRef, hasMore, expanded, setExpanded };
+}
 
 export default function HomePage() {
   const { t } = useTranslation();
   const { user, can } = useAuth();
   const navigate = useNavigate();
+  useScrollToHash();
+  const { gridRef, hasMore, expanded, setExpanded } = useShowMoreGrid();
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <Header />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-20">
-        <div className="mb-14 max-w-2xl animate-fade-slide-up">
-          <h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">
+      <main className="mx-auto w-full max-w-[1200px] flex-1 px-6 pb-20 pt-16 sm:pt-20">
+        <div className="mx-auto max-w-2xl animate-fade-slide-up text-center">
+          {/* The brand headline/subline is the page's identity, not just an acquisition pitch -
+              it stays for a returning signed-in user too, not swapped out for a plain "Welcome
+              back" heading. Only the acquisition-specific bits below it (Start Free Trial CTA,
+              the price callout) are logged-out only. */}
+          <h1 className="text-4xl font-bold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">
+            {t("home.heroLine1")}
+            <br />
+            <span className="relative inline-block pb-1.5">
+              <span style={{ fontFamily: "var(--font-script)" }}>{t("home.heroHighlight")}</span>
+              <Squiggle className="text-amber-300" />
+            </span>
+          </h1>
+          <p className="mt-5 text-xl text-slate-500 sm:text-2xl">
+            {t("home.heroSubPrefix")}{" "}
             <span className="relative inline-block pb-1">
-              <span style={{ fontFamily: "var(--font-script)" }} className="text-4xl font-bold text-sky-500 sm:text-5xl">
-                {t("app.name")}
+              <span style={{ fontFamily: "var(--font-script)" }} className="text-slate-900">
+                {t("home.heroSubHighlight")}
               </span>
               <Squiggle className="text-sky-300" />
             </span>
-          </h1>
-          <p className="mt-2.5 text-base text-slate-500">
-            {user ? `${t("auth.welcomeBack")}, ${user.fullNameEn}` : t("home.tagline")}
           </p>
+
           {user ? (
-            <TrialStatus />
+            <>
+              <p className="mt-4 text-base text-slate-500">
+                {t("auth.welcomeBack")}, {user.fullNameEn}
+              </p>
+              <TrialStatus />
+            </>
           ) : (
-            <div className="mt-6">
-              <div className="flex gap-3">
+            <>
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
                 <Link to="/register">
                   <Button>{t("home.startTrial")}</Button>
                 </Link>
-                <Link to="/login">
-                  <Button variant="outline">{t("home.signIn")}</Button>
-                </Link>
+                <a href="mailto:hello@saudilaundry.example.com">
+                  <Button variant="outline">{t("home.talkToUs")}</Button>
+                </a>
               </div>
-              <p style={{ fontFamily: "var(--font-script)" }} className="mt-3 flex items-center gap-1.5 text-lg text-slate-500">
-                <span aria-hidden className="text-sky-400 rtl:-scale-x-100">
-                  ↖
+
+              <div id="pricing" className="mt-7 scroll-mt-24">
+                <span
+                  style={{ fontFamily: "var(--font-script)" }}
+                  className="inline-block -rotate-1 rounded-lg border-[1.5px] border-dashed border-sky-600 bg-sky-100 px-5 py-2 text-lg font-bold text-sky-700"
+                >
+                  {t("home.priceCallout")}
                 </span>
-                {t("home.trialNote")}
-              </p>
-            </div>
+              </div>
+            </>
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {APPS.map((app, i) => {
-            const locked = user ? !can(app.permission) : false;
-            return (
-              <AppCard
-                key={app.key}
-                app={app}
-                delayMs={i * 90}
-                name={t(`home.apps.${app.key}.name`)}
-                description={t(`home.apps.${app.key}.description`)}
-                locked={locked}
-                onClick={() => (user ? (locked ? undefined : navigate(app.to)) : navigate("/login"))}
+        <div id="apps" className="mt-20 scroll-mt-20 sm:mt-24">
+          <div className="mx-auto max-w-xl text-center">
+            <span className="inline-block rounded-full border border-sky-600/15 bg-sky-600/[0.08] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-sky-600">
+              {t("home.appsPill")}
+            </span>
+            <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+              {t("home.appsHeading")}{" "}
+              <span className="relative inline-block pb-1">
+                <span style={{ fontFamily: "var(--font-script)" }} className="text-sky-500">
+                  {t("home.appsHeadingHighlight")}
+                </span>
+                <Squiggle className="text-sky-300" />
+              </span>
+            </h2>
+            <p className="mt-3 text-base text-slate-500">{t("home.appsSubtitle")}</p>
+          </div>
+
+          {/* flex-wrap + justify-center (not CSS grid) so a short last row centers its own
+              leftover cards too - grid's auto-placement always starts a partial row from the
+              start side, leaving it lopsided toward that side instead of centered as a block.
+              Every card gets an explicit pixel width/height (see ModuleCard's width/height
+              props) rather than a wrapper div's CSS class - that's what guarantees every card is
+              really identical regardless of its own title/description length, with nothing
+              (flex stretch, percentage heights, content-driven sizing) left to go wrong. */}
+          <div className="relative mt-12">
+            <div
+              ref={gridRef}
+              className="flex flex-wrap justify-center gap-5 overflow-hidden transition-[max-height] duration-300 ease-in-out"
+              style={{ maxHeight: expanded || !hasMore ? undefined : TWO_ROW_HEIGHT }}
+            >
+              {APPS.map((app, i) => {
+                const locked = user ? !can(app.permission) : false;
+                return (
+                  <ModuleCard
+                    key={app.key}
+                    width={220}
+                    height={220}
+                    to={app.to}
+                    icon={app.icon}
+                    title={t(`home.apps.${app.key}.name`)}
+                    description={t(`home.apps.${app.key}.description`)}
+                    accentColor={pickAccent(i)}
+                    exploreLabel={t("common.explore")}
+                    delayMs={i * 70}
+                    locked={locked}
+                    lockedHint={t("home.signInToOpen")}
+                    onClick={() => {
+                      if (!user) return navigate("/login");
+                      if (locked) return;
+                      // Recorded explicitly (not derived from the URL) so Sidebar.tsx's
+                      // useCurrentApp() knows which app you opened even for a page shared by
+                      // more than one (e.g. Customers is reachable from POS Laundry, Service
+                      // POS, and Product POS) - see currentAppStore.ts.
+                      useCurrentAppStore.getState().setApp(app.key);
+                      navigate(app.to);
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Fades the clipped 3rd row into the page background rather than cutting it off
+                with a hard edge, so "there's more below" reads visually, not just via the label
+                on the button underneath. */}
+            {hasMore && !expanded && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-50 to-transparent"
               />
-            );
-          })}
+            )}
+          </div>
+
+          {hasMore && (
+            <div className="mt-6 flex justify-center">
+              <Button variant="outline" onClick={() => setExpanded((e) => !e)}>
+                {expanded ? t("common.showLess") : t("common.showMore")}
+              </Button>
+            </div>
+          )}
         </div>
       </main>
 
-      <Reveal as="section" className="relative bg-white pb-28 pt-14">
+      <Reveal id="industries" as="section" className="relative scroll-mt-16 bg-white pb-28 pt-14">
         <WaveDivider fillClassName="text-white" />
         <p className="text-center text-lg text-slate-600 sm:text-xl">
           {t("home.builtForPrefix")}{" "}
@@ -241,80 +334,3 @@ function TrialStatus() {
   );
 }
 
-function AppCard({
-  app,
-  delayMs,
-  name,
-  description,
-  locked,
-  onClick,
-}: {
-  app: AppDef;
-  delayMs: number;
-  name: string;
-  description: string;
-  locked: boolean;
-  onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Card
-      role="button"
-      tabIndex={locked ? -1 : 0}
-      onClick={locked ? undefined : onClick}
-      onKeyDown={(e) => {
-        if (!locked && (e.key === "Enter" || e.key === " ")) onClick();
-      }}
-      style={{ animationDelay: `${delayMs}ms` }}
-      className={`animate-fade-slide-up group flex overflow-hidden rounded-2xl p-0 text-start transition-[transform,box-shadow,border-color] duration-200 ${
-        locked
-          ? "cursor-not-allowed opacity-60"
-          : `cursor-pointer hover:-translate-y-1 focus-visible:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 ${app.cardClasses}`
-      }`}
-    >
-      {/* The stub - same width/shape on every card, only the tint and icon change per app. */}
-      <div
-        className={`flex w-20 shrink-0 flex-col items-center justify-center transition-colors sm:w-24 ${
-          locked ? "bg-slate-100" : app.stubClasses
-        }`}
-      >
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm">
-          <app.icon className={locked ? "h-5 w-5 text-slate-400" : `h-5 w-5 ${app.iconColorClass}`} strokeWidth={2} aria-hidden />
-        </div>
-      </div>
-
-      {/* The perforation - a dashed tear line with two punched-out notches, top and bottom. */}
-      <div aria-hidden className="relative w-0 shrink-0">
-        <div className="absolute inset-y-4 border-s-2 border-dashed border-slate-300" />
-        <div className="absolute -top-2 start-0 h-4 w-4 -translate-x-1/2 rounded-full bg-slate-50 shadow-[inset_0_1px_2px_rgba(15,23,42,0.18)]" />
-        <div className="absolute -bottom-2 start-0 h-4 w-4 -translate-x-1/2 rounded-full bg-slate-50 shadow-[inset_0_1px_2px_rgba(15,23,42,0.18)]" />
-      </div>
-
-      <div className="min-w-0 flex-1 p-5">
-        <div className="flex items-start justify-between gap-2">
-          <h2
-            style={{ fontFamily: "var(--font-script)" }}
-            className={`text-xl font-bold leading-tight text-slate-900 transition-colors ${!locked && app.titleHoverClasses}`}
-          >
-            {name}
-          </h2>
-          {locked ? (
-            <span className="mt-0.5 shrink-0 text-slate-400">🔒</span>
-          ) : (
-            <ArrowIcon className="mt-1 h-4 w-4 shrink-0 text-slate-300 transition-all duration-200 rtl:rotate-180 group-hover:translate-x-0.5 group-hover:text-slate-400 rtl:group-hover:-translate-x-0.5" />
-          )}
-        </div>
-        <p className="mt-1.5 text-sm text-slate-500">{description}</p>
-        {locked && <p className="mt-2 text-xs font-medium text-slate-400">{t("home.signInToOpen")}</p>}
-      </div>
-    </Card>
-  );
-}
-
-function ArrowIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M5 12h14M13 5l7 7-7 7" />
-    </svg>
-  );
-}

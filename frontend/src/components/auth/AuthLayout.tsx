@@ -19,11 +19,11 @@ export function AuthLayout({ children, cardClassName = "max-w-sm" }: { children:
           viewport. */}
       <main className="mx-auto flex w-full max-w-5xl flex-1 justify-center px-4 pb-24 pt-16 sm:pb-32 sm:pt-20">
         <div
-          className={`h-fit w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_60px_-24px_rgba(150,120,196,0.45)] ${cardClassName}`}
+          className={`h-fit w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_60px_-24px_rgba(38,59,170,0.45)] ${cardClassName}`}
         >
-          {/* The same lilac signature accent the script-font headline uses (see Squiggle), carried
-              onto the card itself so the form doesn't read as a generic white box bolted onto a
-              hand-drawn page. */}
+          {/* The same Nordic Indigo signature accent the script-font headline uses (see Squiggle),
+              carried onto the card itself so the form doesn't read as a generic white box bolted
+              onto a hand-drawn page. */}
           <div className="h-1.5 bg-sky-300" aria-hidden />
           <div className="p-8">{children}</div>
         </div>

@@ -1,46 +1,58 @@
 @import "tailwindcss";
 
-/* Brand palette: ink (#0D0D0D) + lilac (#D9B8FF). Overrides Tailwind's built-in "sky" scale so
-   every existing sky-* utility across the app (buttons, badges, focus rings, links, active nav)
-   picks up the new brand colors automatically. 50-300 are light lilac tints (used for subtle
-   backgrounds/borders/rings); 300 is the exact accent; 400-500 bridge to the exact ink at 600;
-   700-950 stay at pure black for hover/active states on already-near-black elements.
+/* Brand palette: Nordic Indigo (#263BAA) + Vanilla Mist (#FFF4D6). Overrides Tailwind's built-in
+   "sky" scale so every existing sky-* utility across the app (buttons, badges, focus rings,
+   links, active nav) picks up the new brand colors automatically. 50-200 are light Vanilla Mist
+   tints (subtle backgrounds/hover states); 600 is the exact Nordic Indigo accent (primary
+   buttons, active nav, links); 300-500 bridge from mist to indigo; 700-950 darken further for
+   hover/active states on already-strong elements.
    Exempt: the platform operator console (dark background) keeps its own blue accent - see
    PlatformConsolePage.tsx / PlatformLoginPage.tsx, which use blue-* instead of sky-* on purpose.
 
-   Per-application identity colors (Odoo-style): each of the three applications on the Home
-   launcher gets its own accent - amber for POS Laundry, violet for Users & Rules, teal for
-   ZATCA KSA - carried from its Home card into that app's own Sidebar/Topbar once you're inside
-   it (see Sidebar.tsx's APPS array). Everything else (buttons, form focus rings, generic badges)
-   stays on the single ink/lilac sky-* accent above, so this stays "three departments, one
-   product" rather than turning into an inconsistent rainbow. */
+   One unified look across every application (2026-09-08, superseding the earlier five-distinct-
+   accents Odoo-style scheme): POS Laundry, Service POS, Product POS, Users & Rules, and ZATCA
+   KSA all now render the exact same Nordic Indigo/Vanilla Mist pair - apps are told apart by
+   icon and label, not by color, so the five --color-app-* families below are kept only because
+   HomePage.tsx's and Sidebar.tsx's className strings already reference them by name (Tailwind's
+   static scanner needs literal class names, not computed ones) - their values are now identical
+   across all five rather than each having its own hue. */
 @theme {
-  --color-sky-50: #f9f4ff;
-  --color-sky-100: #f1e5ff;
-  --color-sky-200: #e6d1ff;
-  --color-sky-300: #d9b8ff;
-  --color-sky-400: #c09eea;
-  --color-sky-500: #9678c4;
-  --color-sky-600: #0d0d0d;
-  --color-sky-700: #000000;
-  --color-sky-800: #000000;
-  --color-sky-900: #000000;
-  --color-sky-950: #000000;
+  --color-sky-50: #fffdf6;
+  --color-sky-100: #fff4d6;
+  --color-sky-200: #fce8b8;
+  --color-sky-300: #a9b7e8;
+  --color-sky-400: #5d71c9;
+  --color-sky-500: #3a4eb5;
+  --color-sky-600: #263baa;
+  --color-sky-700: #1d2f86;
+  --color-sky-800: #17245f;
+  --color-sky-900: #0f1938;
+  --color-sky-950: #0a1029;
 
-  --color-app-pos-50: #fdf3e9;
-  --color-app-pos-100: #fbe3c9;
-  --color-app-pos-500: #d97a1f;
-  --color-app-pos-600: #b8630f;
+  --color-app-pos-50: #fff4d6;
+  --color-app-pos-100: #fce8b8;
+  --color-app-pos-500: #3a4eb5;
+  --color-app-pos-600: #263baa;
 
-  --color-app-users-50: #f2eefc;
-  --color-app-users-100: #e2d8f9;
-  --color-app-users-500: #6d4bcf;
-  --color-app-users-600: #5936b3;
+  --color-app-posservice-50: #fff4d6;
+  --color-app-posservice-100: #fce8b8;
+  --color-app-posservice-500: #3a4eb5;
+  --color-app-posservice-600: #263baa;
 
-  --color-app-zatca-50: #e9f6f2;
-  --color-app-zatca-100: #cbe9e0;
-  --color-app-zatca-500: #0e8f74;
-  --color-app-zatca-600: #0a7660;
+  --color-app-posproduct-50: #fff4d6;
+  --color-app-posproduct-100: #fce8b8;
+  --color-app-posproduct-500: #3a4eb5;
+  --color-app-posproduct-600: #263baa;
+
+  --color-app-users-50: #fff4d6;
+  --color-app-users-100: #fce8b8;
+  --color-app-users-500: #3a4eb5;
+  --color-app-users-600: #263baa;
+
+  --color-app-zatca-50: #fff4d6;
+  --color-app-zatca-100: #fce8b8;
+  --color-app-zatca-500: #3a4eb5;
+  --color-app-zatca-600: #263baa;
 
   --font-sans: "Plus Jakarta Sans", "Noto Sans Arabic", system-ui, "Segoe UI", Tahoma, Arial, sans-serif;
   /* Marketing-only accent face (Home hero), used sparingly for a single word/annotation - Latin
@@ -58,6 +70,28 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* Smooth in-page jumps for Header's #apps/#industries/#pricing anchor links (2026-09-08). */
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Hanger sway for ServicePosIcon (see components/appHome/AppIcons.tsx) - Tailwind only ships
+   `spin`/`ping`/`bounce`/`pulse` built in, none of which read as "swinging from a hook". */
+@keyframes icon-swing {
+  0%,
+  100% {
+    transform: rotate(-9deg);
+  }
+  50% {
+    transform: rotate(9deg);
+  }
 }
 
 body {
