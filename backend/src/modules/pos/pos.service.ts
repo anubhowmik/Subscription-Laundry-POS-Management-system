@@ -19,51 +19,61 @@ import { BNPL_PAYMENT_CODES } from "../bnpl/bnpl.constants";
 
 const { Decimal } = Prisma;
 
-export async function search(businessLocationId: string, query: string | undefined, organizationId: string, customerId?: string) {
+export async function search(
+  businessLocationId: string,
+  query: string | undefined,
+  organizationId: string,
+  customerId?: string,
+  mode?: "SERVICE" | "PRODUCT",
+) {
   const search = (query ?? "").trim();
 
   const priceListId = await resolvePriceListId(prisma, customerId, organizationId, businessLocationId);
   const overrides = await getPriceOverrides(prisma, priceListId);
 
   const [products, services] = await Promise.all([
-    prisma.product.findMany({
-      where: {
-        organizationId,
-        status: "ACTIVE",
-        deletedAt: null,
-        businessLocations: { some: { businessLocationId } },
-        ...(search
-          ? {
-              OR: [
-                { nameEn: { contains: search, mode: "insensitive" } },
-                { nameAr: { contains: search } },
-                { sku: { contains: search, mode: "insensitive" } },
-                { barcode: { equals: search } },
-              ],
-            }
-          : {}),
-      },
-      include: { tax: true, unit: true, stocks: { where: { businessLocationId } } },
-      take: 25,
-    }),
-    prisma.service.findMany({
-      where: {
-        organizationId,
-        status: "ACTIVE",
-        businessLocations: { some: { businessLocationId } },
-        ...(search
-          ? {
-              OR: [
-                { nameEn: { contains: search, mode: "insensitive" } },
-                { nameAr: { contains: search } },
-                { code: { contains: search, mode: "insensitive" } },
-              ],
-            }
-          : {}),
-      },
-      include: { tax: true, unit: true },
-      take: 25,
-    }),
+    mode === "SERVICE"
+      ? Promise.resolve([])
+      : prisma.product.findMany({
+          where: {
+            organizationId,
+            status: "ACTIVE",
+            deletedAt: null,
+            businessLocations: { some: { businessLocationId } },
+            ...(search
+              ? {
+                  OR: [
+                    { nameEn: { contains: search, mode: "insensitive" } },
+                    { nameAr: { contains: search } },
+                    { sku: { contains: search, mode: "insensitive" } },
+                    { barcode: { equals: search } },
+                  ],
+                }
+              : {}),
+          },
+          include: { tax: true, unit: true, stocks: { where: { businessLocationId } } },
+          take: 25,
+        }),
+    mode === "PRODUCT"
+      ? Promise.resolve([])
+      : prisma.service.findMany({
+          where: {
+            organizationId,
+            status: "ACTIVE",
+            businessLocations: { some: { businessLocationId } },
+            ...(search
+              ? {
+                  OR: [
+                    { nameEn: { contains: search, mode: "insensitive" } },
+                    { nameAr: { contains: search } },
+                    { code: { contains: search, mode: "insensitive" } },
+                  ],
+                }
+              : {}),
+          },
+          include: { tax: true, unit: true },
+          take: 25,
+        }),
   ]);
 
   return {
@@ -93,6 +103,25 @@ export async function search(businessLocationId: string, query: string | undefin
       unit: s.unit.shortName,
     })),
   };
+}
+
+// Enforces that every cart/held-sale item matches the POS mode the request declared itself as
+// coming from - e.g. a Service POS checkout (mode: "SERVICE") may not contain a productId line.
+// A no-op when mode is omitted, which is exactly what the legacy /pos screen and any caller that
+// predates this concept relies on (mixed carts stay allowed there). This is the item-level half
+// of the enforcement; pos.routes.ts's requireModePermission is the other half (does this user
+// have permission to use this mode at all) - both are needed since this check alone only proves
+// the cart is internally consistent with the claimed mode, not that the caller was allowed to
+// claim it.
+function assertItemsMatchMode(items: { productId?: string; serviceId?: string }[], mode: "SERVICE" | "PRODUCT" | undefined) {
+  if (!mode) return;
+  const badIndex = items.findIndex((item) => (mode === "SERVICE" ? item.productId : item.serviceId));
+  if (badIndex !== -1) {
+    throw new ValidationError(
+      [{ field: `items[${badIndex}]`, message: `This item is not allowed in ${mode === "SERVICE" ? "Service" : "Product"} POS` }],
+      `Cart contains an item that does not belong in ${mode === "SERVICE" ? "Service" : "Product"} POS`,
+    );
+  }
 }
 
 interface PricedLine {
@@ -188,6 +217,8 @@ async function priceLine(
 }
 
 export async function checkout(input: CheckoutInput, createdBy: string, organizationId: string) {
+  assertItemsMatchMode(input.items, input.mode);
+
   const sale = await prisma.$transaction(async (tx) => {
     const customer = await tx.customer.findFirst({ where: { id: input.customerId, organizationId, deletedAt: null } });
     if (!customer) throw new NotFoundError("Customer not found");
@@ -260,6 +291,12 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     const priceListId = await resolvePriceListId(tx, input.customerId, organizationId, input.businessLocationId);
     const overrides = await getPriceOverrides(tx, priceListId);
     const lines = await Promise.all(input.items.map((item) => priceLine(tx, item, input.businessLocationId, organizationId, overrides)));
+
+    // Server-derived from the actual priced lines - never trusts input.mode for this, since mode
+    // is just the caller's declared intent (and may be absent entirely on the legacy /pos screen).
+    const hasProductLine = lines.some((l) => l.productId);
+    const hasServiceLine = lines.some((l) => l.serviceId);
+    const saleType: "PRODUCT" | "SERVICE" | "MIXED" = hasProductLine && hasServiceLine ? "MIXED" : hasProductLine ? "PRODUCT" : "SERVICE";
 
     const lineSubtotal = lines.reduce((sum, l) => sum.add(l.subtotal), new Decimal(0));
     const lineTaxAmount = lines.reduce((sum, l) => sum.add(l.taxAmount), new Decimal(0));
@@ -472,6 +509,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           saleDate,
           estimatedReadyAt,
           status: "DRAFT",
+          saleType,
           subtotal: subtotal.toDecimalPlaces(2),
           discountAmount: discountAmount.toDecimalPlaces(2),
           taxAmount: taxAmount.toDecimalPlaces(2),
@@ -642,6 +680,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         customerId: input.customerId,
         saleDate,
         estimatedReadyAt,
+        saleType,
         subtotal: subtotal.toDecimalPlaces(2),
         discountAmount: discountAmount.toDecimalPlaces(2),
         taxAmount: taxAmount.toDecimalPlaces(2),
@@ -1281,6 +1320,8 @@ export async function listQuotes(query: Record<string, unknown>, organizationId:
 // terminal, or the cashier logging out and back in - unlike an in-memory-only hold.
 
 export async function holdSale(input: HoldSaleInput, createdBy: string, organizationId: string) {
+  assertItemsMatchMode(input.items, input.mode);
+
   return prisma.heldSale.create({
     data: {
       organizationId,
@@ -1307,12 +1348,20 @@ export async function holdSale(input: HoldSaleInput, createdBy: string, organiza
   });
 }
 
-export async function listHeldSales(businessLocationId: string, organizationId: string) {
-  return prisma.heldSale.findMany({
+export async function listHeldSales(businessLocationId: string, organizationId: string, mode?: "SERVICE" | "PRODUCT") {
+  const heldSales = await prisma.heldSale.findMany({
     where: { organizationId, businessLocationId },
     orderBy: { createdAt: "desc" },
     include: { items: true, customer: { select: { nameEn: true, nameAr: true } } },
   });
+
+  // Unfiltered when mode is absent (legacy /pos sees everything, as today). When a mode is
+  // given, only surface held sales whose items are ALL consistent with it - a Service-POS
+  // cashier should never see (and fail to resume) a product-only or mixed held sale, and vice
+  // versa. This is a UX safeguard, not the security boundary - checkout/hold-sale enforce that
+  // server-side regardless of what this list happened to show.
+  if (!mode) return heldSales;
+  return heldSales.filter((held) => !held.items.some((item) => (mode === "SERVICE" ? item.productId : item.serviceId)));
 }
 
 export async function getHeldSale(id: string, organizationId: string) {

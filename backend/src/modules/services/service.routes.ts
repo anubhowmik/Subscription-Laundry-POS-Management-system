@@ -7,7 +7,7 @@ import { createServiceSchema, listServiceQuerySchema, updateServiceSchema } from
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service"));
 
 router.get("/", requirePermission("services.view"), validate(listServiceQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("services.view"), controller.getById);

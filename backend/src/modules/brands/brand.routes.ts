@@ -7,7 +7,7 @@ import { createBrandSchema, listBrandQuerySchema, updateBrandSchema } from "./br
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_product"));
 
 router.get("/", requirePermission("brands.view"), validate(listBrandQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("brands.view"), controller.getById);

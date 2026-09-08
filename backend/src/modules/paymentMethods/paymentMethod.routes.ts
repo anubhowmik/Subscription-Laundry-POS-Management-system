@@ -6,7 +6,7 @@ import { sendSuccess } from "../../utils/apiResponse";
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/", async (req, res) => {
   const methods = await prisma.paymentMethod.findMany({

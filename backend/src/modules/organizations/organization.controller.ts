@@ -3,16 +3,23 @@ import * as service from "./organization.service";
 import { toSafeUser } from "../users/user.mapper";
 import { sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
+import { showDevVerificationCode } from "../../config/env";
 
 export async function register(req: Request, res: Response) {
-  const { organization, adminUser } = await service.registerOrganization(req.body);
+  const { organization, adminUser, verificationCode } = await service.registerOrganization(req.body);
 
   // Deliberately no accessToken/refresh cookie here - a new signup must never be left in an
   // authenticated state before verifying their email. A verification code has already been
   // emailed (see registerOrganization()); the frontend routes to the verify-email screen next.
   return sendSuccess(
     res,
-    { organization, user: toSafeUser(adminUser), verificationRequired: true },
+    {
+      organization,
+      user: toSafeUser(adminUser),
+      verificationRequired: true,
+      // Only present with no real email provider configured - see showDevVerificationCode.
+      devVerificationCode: showDevVerificationCode ? verificationCode : undefined,
+    },
     "Organization registered - check your email for a verification code",
     201,
   );

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
+import { logger } from "../../config/logger";
 import { ConflictError, NotFoundError } from "../../utils/AppError";
 import { ROLE_DEFS } from "../../config/defaultRoles";
 import { PERMISSIONS } from "../../config/permissions";
@@ -195,7 +196,17 @@ export async function registerOrganization(input: RegisterOrganizationInput) {
     return { organization, adminUser };
   });
 
-  await generateVerificationCode(adminUser.id);
+  // The account itself is already committed at this point - a failure to actually deliver the
+  // confirmation email (provider outage, a not-yet-verified sending domain, etc.) must not turn
+  // into a failed registration with no account and a confusing "something went wrong" error.
+  // The code row is still created either way (see generateVerificationCode), so the "Resend"
+  // button on the waiting screen works to retry delivery once the underlying issue is fixed.
+  let verificationCode: string | undefined;
+  try {
+    verificationCode = (await generateVerificationCode(adminUser.id)).code;
+  } catch (err) {
+    logger.error({ err, userId: adminUser.id }, "Failed to send the initial verification email - account was still created");
+  }
 
-  return { organization, adminUser };
+  return { organization, adminUser, verificationCode };
 }

@@ -7,7 +7,7 @@ import { createAnnouncementSchema, listAnnouncementQuerySchema, updateAnnounceme
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 // Any authenticated user can see which announcements are currently live for their location -
 // this is what the dashboard banner calls. Managing announcements is gated below.

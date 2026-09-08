@@ -18,6 +18,7 @@ export interface PlatformAdminContext {
   id: string;
   username: string;
   fullName: string;
+  isOwner: boolean;
 }
 
 declare global {

@@ -7,7 +7,7 @@ import { createCustomerGroupSchema, listCustomerGroupQuerySchema, updateCustomer
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/", requirePermission("customer_groups.view"), validate(listCustomerGroupQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("customer_groups.view"), controller.getById);

@@ -7,7 +7,7 @@ import { createPriceListSchema, updatePriceListSchema, setPriceListItemsSchema }
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 router.use(requirePermission("price-lists.manage"));
 
 router.get("/", controller.list);

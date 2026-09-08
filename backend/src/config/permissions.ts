@@ -49,6 +49,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "sales.quote", module: "sales", description: "Create, confirm, and void quotes" },
 
   { code: "pos.access", module: "pos", description: "Access the POS screen" },
+  { code: "pos.access.service", module: "pos", description: "Access the Service POS screen" },
+  { code: "pos.access.product", module: "pos", description: "Access the Product POS screen" },
   { code: "pos.register.manage", module: "pos", description: "Open and close the cash register" },
   { code: "coupons.manage", module: "pos", description: "Create and manage discount coupons" },
   { code: "price-lists.manage", module: "pos", description: "Create price lists and assign them to customers" },
@@ -78,12 +80,16 @@ export const PERMISSIONS: PermissionDef[] = [
 
   { code: "settings.manage", module: "settings", description: "Manage system settings" },
 
-  // Application-level access gates for the Home launcher's three applications (POS Laundry /
-  // Users & Rules / ZATCA KSA). Additive on top of, not a replacement for, the fine-grained
-  // codes above - e.g. a user still needs both pos.access AND app.pos_laundry to use POS. See
-  // middleware/authenticate.ts for how a per-user Application Access override on top of these
-  // role-level grants is folded into req.user.permissions.
+  // Application-level access gates for the Home launcher's five applications (POS Laundry /
+  // Service POS / Product POS / Users & Rules / ZATCA KSA). Additive on top of, not a
+  // replacement for, the fine-grained codes above - e.g. a user still needs both pos.access AND
+  // app.pos_laundry to use the legacy combined POS screen, and both pos.access.service AND
+  // app.pos_service for the dedicated Service POS screen. See middleware/authenticate.ts for how
+  // a per-user Application Access override on top of these role-level grants is folded into
+  // req.user.permissions.
   { code: "app.pos_laundry", module: "app", description: "Access the POS Laundry application" },
+  { code: "app.pos_service", module: "app", description: "Access the Service POS application" },
+  { code: "app.pos_product", module: "app", description: "Access the Product POS application" },
   { code: "app.users_rules", module: "app", description: "Access the Users & Rules application" },
   { code: "app.zatca", module: "app", description: "Access the ZATCA KSA application" },
 

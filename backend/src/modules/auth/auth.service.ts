@@ -136,11 +136,39 @@ export async function generateVerificationCode(userId: string) {
     data: { userId, codeHash, expiresAt: new Date(Date.now() + VERIFICATION_CODE_TTL_MS) },
   });
 
+  // Pure one-click confirmation - the code is still the real, bcrypt-hashed secret that
+  // verifyEmailCode() checks (same expiry/attempt-limit as before), but it's never shown to a
+  // human or typed anywhere anymore. It only ever travels inside this link's query string.
+  // VerifyEmailPage reads ?email=&code= and confirms automatically the moment the link is opened.
+  const verifyUrl = `${env.clientUrl}/verify-email?email=${encodeURIComponent(user.email)}&code=${code}`;
+
   await getEmailSender().send({
     to: user.email,
-    subject: "Verify your email address",
-    text: `Your verification code is ${code}. It expires in 15 minutes. If you didn't request this, you can ignore this email.`,
+    subject: "Confirm your email address",
+    text: `Confirm your email to finish setting up your account: ${verifyUrl}\n\nThis link expires in 15 minutes. If you didn't request this, you can ignore this email.`,
+    html: `
+      <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; color: #1e293b;">
+        <div style="width: 44px; height: 44px; border-radius: 12px; background: #f0f9ff; display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 16px;">&#9993;&#65039;</div>
+        <h2 style="margin: 0 0 8px; font-size: 20px;">Confirm your email</h2>
+        <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+          Tap the button below to confirm your email and finish setting up your account.
+        </p>
+        <p style="text-align: center; margin: 0 0 24px;">
+          <a href="${verifyUrl}" style="background: #0284c7; color: #ffffff; padding: 12px 32px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block;">
+            Confirm my email
+          </a>
+        </p>
+        <p style="color: #94a3b8; font-size: 12px; line-height: 1.6; margin: 0;">
+          This link expires in 15 minutes. If you didn't request this, you can safely ignore this email.
+        </p>
+      </div>
+    `,
   });
+
+  // Returned so callers can surface it in the API response in dev (see env.showDevVerificationCode
+  // in the controllers) - the mock email sender only logs to the server console, which is useless
+  // for anyone testing signup without a terminal open. Never returned once a real provider is wired in.
+  return { code };
 }
 
 /**
@@ -150,8 +178,8 @@ export async function generateVerificationCode(userId: string) {
  */
 export async function resendVerificationCode(email: string) {
   const user = await prisma.user.findFirst({ where: { email } });
-  if (!user || user.emailVerified) return;
-  await generateVerificationCode(user.id);
+  if (!user || user.emailVerified) return undefined;
+  return generateVerificationCode(user.id);
 }
 
 /**

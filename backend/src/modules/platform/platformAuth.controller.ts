@@ -8,8 +8,8 @@ function requestMeta(req: Request) {
   return { ipAddress: req.ip, userAgent: req.headers["user-agent"] };
 }
 
-function toSafeAdmin(admin: { id: string; username: string; email: string; fullName: string; lastLoginAt: Date | null }) {
-  return { id: admin.id, username: admin.username, email: admin.email, fullName: admin.fullName, lastLoginAt: admin.lastLoginAt };
+function toSafeAdmin(admin: { id: string; username: string; email: string; fullName: string; isOwner: boolean; lastLoginAt: Date | null }) {
+  return { id: admin.id, username: admin.username, email: admin.email, fullName: admin.fullName, isOwner: admin.isOwner, lastLoginAt: admin.lastLoginAt };
 }
 
 export async function login(req: Request, res: Response) {

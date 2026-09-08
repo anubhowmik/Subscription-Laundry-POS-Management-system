@@ -11,7 +11,7 @@ import {
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 router.use(requirePermission("business_locations.update"));
 
 router.get("/", validate(listBusinessLocationGroupQuerySchema, "query"), controller.list);

@@ -18,7 +18,7 @@ export async function authenticatePlatformAdmin(req: Request, _res: Response, ne
       throw new AuthenticationError("Platform account is inactive or no longer exists");
     }
 
-    req.platformAdmin = { id: admin.id, username: admin.username, fullName: admin.fullName };
+    req.platformAdmin = { id: admin.id, username: admin.username, fullName: admin.fullName, isOwner: admin.isOwner };
     next();
   } catch (err) {
     if (err instanceof AuthenticationError) return next(err);

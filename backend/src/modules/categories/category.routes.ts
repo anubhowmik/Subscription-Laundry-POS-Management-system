@@ -7,7 +7,7 @@ import { createCategorySchema, listCategoryQuerySchema, updateCategorySchema } f
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_product"));
 
 router.get("/", requirePermission("categories.view"), validate(listCategoryQuerySchema, "query"), controller.list);
 router.get("/:id", requirePermission("categories.view"), controller.getById);

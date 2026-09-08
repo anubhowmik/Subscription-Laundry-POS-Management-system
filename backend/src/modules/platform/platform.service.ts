@@ -72,6 +72,49 @@ export async function listOrganizations(query: Record<string, unknown>) {
   });
 }
 
+// User account metadata only - email, verification/login status, role name. Never anything from
+// the tenant's own business tables, per the module-level constraint above.
+export async function listOrganizationUsers(organizationId: string) {
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true } });
+  if (!org) throw new NotFoundError("Organization not found");
+
+  const users = await prisma.user.findMany({
+    where: { organizationId },
+    select: {
+      id: true,
+      fullNameEn: true,
+      fullNameAr: true,
+      username: true,
+      email: true,
+      emailVerified: true,
+      status: true,
+      allowLogin: true,
+      isSystemAdmin: true,
+      lastLoginAt: true,
+      createdAt: true,
+      deletedAt: true,
+      role: { select: { nameEn: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return users.map((u) => ({
+    id: u.id,
+    fullNameEn: u.fullNameEn,
+    fullNameAr: u.fullNameAr,
+    username: u.username,
+    email: u.email,
+    emailVerified: u.emailVerified,
+    status: u.status,
+    allowLogin: u.allowLogin,
+    isSystemAdmin: u.isSystemAdmin,
+    roleNameEn: u.role.nameEn,
+    lastLoginAt: u.lastLoginAt,
+    createdAt: u.createdAt,
+    deletedAt: u.deletedAt,
+  }));
+}
+
 export async function setOrganizationStatus(organizationId: string, status: "ACTIVE" | "SUSPENDED") {
   const org = await prisma.organization.findUnique({ where: { id: organizationId } });
   if (!org) throw new NotFoundError("Organization not found");
@@ -151,7 +194,10 @@ export async function getStats() {
 // Creating the FIRST platform admin still requires shell access (scripts/createPlatformAdmin.ts) -
 // there is no bootstrap-from-nothing endpoint, since that would mean an unauthenticated way to
 // mint the platform's highest-privilege account. Once at least one admin exists, they can invite
-// more from here. Every admin has equal, full access - there is no lesser platform role.
+// more from here. Every admin has equal, full access, with exactly one exception: the admin
+// flagged isOwner cannot be deactivated or have their password reset by any OTHER admin (they can
+// still do both to themselves, and can do either to every non-owner admin) - added specifically so
+// adding a second admin can never mean handing them the ability to lock the owner out.
 // ---------------------------------------------------------------------------
 
 function toSafeAdmin<T extends { passwordHash: string }>(admin: T): Omit<T, "passwordHash"> {
@@ -184,8 +230,19 @@ export async function setAdminStatus(id: string, status: "ACTIVE" | "INACTIVE", 
   const admin = await prisma.platformAdmin.findUnique({ where: { id } });
   if (!admin) throw new NotFoundError("Platform admin not found");
 
+  if (id === actingAdminId) {
+    if (status === "INACTIVE") throw new AppError(400, "You cannot deactivate your own account");
+  } else {
+    // Changing ANOTHER admin's status (deactivate or reactivate) is owner-only, same restriction
+    // as resetting another admin's password - a non-owner admin cannot touch any other admin's
+    // status at all, which also means they can never reach the owner specifically.
+    const actingAdmin = await prisma.platformAdmin.findUnique({ where: { id: actingAdminId } });
+    if (!actingAdmin?.isOwner) {
+      throw new AppError(403, "Only the owner can change another admin's status");
+    }
+  }
+
   if (status === "INACTIVE") {
-    if (id === actingAdminId) throw new AppError(400, "You cannot deactivate your own account");
     await assertNotLastActiveAdmin(id);
   }
 
@@ -199,9 +256,25 @@ export async function setAdminStatus(id: string, status: "ACTIVE" | "INACTIVE", 
   return toSafeAdmin(updated);
 }
 
-export async function resetAdminPassword(id: string, newPassword: string) {
+export async function resetAdminPassword(id: string, newPassword: string, actingAdminId: string, currentPassword?: string) {
   const admin = await prisma.platformAdmin.findUnique({ where: { id } });
   if (!admin) throw new NotFoundError("Platform admin not found");
+
+  if (id === actingAdminId) {
+    // Changing your OWN password (self-service) must prove you still know the current one - same
+    // discipline as a tenant user's change-password flow (auth.service.ts changePassword()).
+    const matches = currentPassword ? await bcrypt.compare(currentPassword, admin.passwordHash) : false;
+    if (!matches) throw new AppError(400, "Current password is incorrect");
+  } else {
+    // Resetting someone ELSE's password is an administrative override - restricted to the owner
+    // only. A non-owner admin can never touch another admin's password, owner or not, only their
+    // own (with the current-password proof above) - keeps "only the owner can reset others"
+    // symmetric with "only the owner is protected from being reset by others".
+    const actingAdmin = await prisma.platformAdmin.findUnique({ where: { id: actingAdminId } });
+    if (!actingAdmin?.isOwner) {
+      throw new AppError(403, "Only the owner can reset another admin's password");
+    }
+  }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
   await prisma.platformAdmin.update({ where: { id }, data: { passwordHash } });

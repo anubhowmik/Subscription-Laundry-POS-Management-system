@@ -15,7 +15,7 @@ import {
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_product"));
 
 router.get("/transactions", requirePermission("inventory.view"), validate(listTransactionsQuerySchema, "query"), controller.listTransactions);
 router.post("/adjust", requirePermission("inventory.adjust"), validate(adjustStockSchema), controller.adjustStock);

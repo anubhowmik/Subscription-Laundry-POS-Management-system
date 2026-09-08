@@ -7,7 +7,7 @@ import { closeRegisterSchema, currentRegisterQuerySchema, listRegisterQuerySchem
 
 const router = Router();
 router.use(authenticate, requirePermission("pos.access"));
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/current", validate(currentRegisterQuerySchema, "query"), controller.current);
 router.get("/", requirePermission("pos.register.manage"), validate(listRegisterQuerySchema, "query"), controller.list);

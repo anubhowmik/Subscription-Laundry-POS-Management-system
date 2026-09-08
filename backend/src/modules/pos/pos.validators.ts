@@ -1,9 +1,17 @@
 import { z } from "zod";
 
+// Declares which POS screen a request came from (Service POS vs Product POS). Optional
+// everywhere it appears - omitting it preserves the original single-POS behavior exactly
+// (mixed carts allowed, no catalog filtering), which is what the legacy /pos screen still relies
+// on. See pos.service.ts's assertItemsMatchMode and pos.routes.ts's requireModePermission for the
+// two places this actually gets enforced.
+const modeSchema = z.enum(["SERVICE", "PRODUCT"]).optional();
+
 export const posSearchQuerySchema = z.object({
   query: z.string().optional(),
   businessLocationId: z.string().uuid(),
   customerId: z.string().uuid().optional(),
+  mode: modeSchema,
 });
 
 const cartItemSchema = z
@@ -36,6 +44,7 @@ export const checkoutSchema = z.object({
   redeemPoints: z.number().int().min(0).optional(),
   appliedCreditAmount: z.number().min(0).optional(),
   asDraft: z.boolean().optional(),
+  mode: modeSchema,
 });
 
 export const confirmQuoteSchema = z.object({
@@ -74,10 +83,12 @@ export const holdSaleSchema = z.object({
   label: z.string().min(1),
   note: z.string().optional(),
   items: z.array(heldItemSchema).min(1, "Cannot hold an empty cart"),
+  mode: modeSchema,
 });
 
 export type HoldSaleInput = z.infer<typeof holdSaleSchema>;
 
 export const listHeldSalesQuerySchema = z.object({
   businessLocationId: z.string().uuid(),
+  mode: modeSchema,
 });

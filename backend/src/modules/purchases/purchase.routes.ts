@@ -12,7 +12,7 @@ import {
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_product"));
 router.use(requirePermission("purchases.manage"));
 
 router.get("/", validate(listPurchaseQuerySchema, "query"), controller.list);

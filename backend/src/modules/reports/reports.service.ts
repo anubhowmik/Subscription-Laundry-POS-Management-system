@@ -34,10 +34,14 @@ export async function salesReport(query: Record<string, unknown>, organizationId
     ...(locationIds ? { businessLocationId: { in: locationIds } } : {}),
   };
 
+  // Unfiltered (today's exact behavior) unless the caller asks to break it down by PRODUCT /
+  // SERVICE / MIXED sales specifically.
+  const saleType = query.saleType as "PRODUCT" | "SERVICE" | "MIXED" | undefined;
+
   const sales = await prisma.sale.findMany({
     // FINAL only - a DRAFT quote has never actually sold anything yet, so it must not inflate
     // revenue/tax/discount totals just because it happens to have priced-out SaleItem rows.
-    where: { ...locationFilter, saleDate: { gte: from, lte: to }, status: "FINAL" },
+    where: { ...locationFilter, saleDate: { gte: from, lte: to }, status: "FINAL", ...(saleType ? { saleType } : {}) },
     select: { id: true, saleDate: true, subtotal: true, discountAmount: true, taxAmount: true, totalAmount: true },
   });
 

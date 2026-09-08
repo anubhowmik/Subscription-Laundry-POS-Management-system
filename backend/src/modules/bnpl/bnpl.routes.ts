@@ -7,7 +7,7 @@ import { createBnplSessionSchema, updateBnplProviderSettingsSchema } from "./bnp
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 // Session create/poll/capture happen mid-checkout, so they're gated the same way as
 // pos.routes.ts's /checkout: pos.access to be on the POS screen at all, sales.create to actually

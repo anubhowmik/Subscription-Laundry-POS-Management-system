@@ -12,6 +12,27 @@ export function requirePermission(...codes: string[]) {
 }
 
 /**
+ * Runs after `validate(...)` on a POS route whose body may carry a `mode: "SERVICE" | "PRODUCT"`
+ * field (checkout, quote creation, hold-sale). If a mode is declared, the caller must hold the
+ * matching pos.access.service/pos.access.product permission - otherwise a user restricted to one
+ * POS mode could bypass that restriction simply by calling the API directly with the other
+ * mode's value, since the item/mode consistency check in pos.service.ts only verifies the cart
+ * matches the claimed mode, not that the caller was allowed to claim it. A request with no
+ * `mode` field (the legacy /pos screen, or any caller predating this concept) is unaffected.
+ */
+export function requireModePermission() {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user) return next(new AuthenticationError());
+    if (req.user.isSystemAdmin) return next();
+    const mode = req.body?.mode as "SERVICE" | "PRODUCT" | undefined;
+    if (!mode) return next();
+    const requiredCode = mode === "SERVICE" ? "pos.access.service" : "pos.access.product";
+    if (!req.user.permissions.includes(requiredCode)) return next(new AuthorizationError());
+    next();
+  };
+}
+
+/**
  * Ensures the business location referenced by the request (route param,
  * body, or query - checked in that order) is within the user's assigned
  * locations. System Admins bypass this check. Must run after `authenticate`.

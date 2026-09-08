@@ -39,17 +39,21 @@ export const env = {
   },
   email: {
     // "mock" logs the email server-side and (non-production only) echoes the code back in the
-    // API response, so the verification flow is fully testable with no real inbox. Switch to
-    // "real" (and fill in provider credentials below) with ONE env change once a provider is
-    // chosen - no code change. See modules/notifications/emailSender.ts.
-    provider: (process.env.EMAIL_PROVIDER ?? "mock") as "mock" | "real",
-    from: process.env.EMAIL_FROM ?? "noreply@laundry.example.com",
-    // Generic SMTP credentials - populate whichever fields your chosen provider needs (e.g.
-    // SendGrid/Postmark/Resend can often be used via their own SMTP relay too).
+    // API response, so the verification flow is fully testable with no real inbox. "resend" uses
+    // the Resend API (needs RESEND_API_KEY, restricted to your own address until you verify a
+    // sending domain). "smtp" sends through a real mailbox (e.g. Gmail + an app password) via
+    // nodemailer - no domain verification needed, delivers to any address immediately. Switch
+    // providers with ONE env change - no code change. See modules/notifications/emailSender.ts.
+    provider: (process.env.EMAIL_PROVIDER ?? "mock") as "mock" | "resend" | "smtp",
+    from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+    resendApiKey: process.env.RESEND_API_KEY ?? "",
     smtp: {
-      host: process.env.SMTP_HOST ?? "",
-      port: Number(process.env.SMTP_PORT ?? 587),
+      host: process.env.SMTP_HOST ?? "smtp.gmail.com",
+      port: Number(process.env.SMTP_PORT ?? 465),
+      secure: (process.env.SMTP_SECURE ?? "true") === "true",
       user: process.env.SMTP_USER ?? "",
+      // A Gmail "app password" (16 chars, generated in Google Account -> Security -> App
+      // Passwords), never the account's real login password.
       pass: process.env.SMTP_PASS ?? "",
     },
   },
@@ -66,3 +70,7 @@ export const env = {
   },
   isProduction: process.env.NODE_ENV === "production",
 };
+
+// True only when there is no real inbox behind the verification email - the mock sender just
+// logs server-side, which no one testing signup can actually see. See email.provider above.
+export const showDevVerificationCode = !env.isProduction && env.email.provider === "mock";

@@ -8,6 +8,11 @@ export async function listOrganizations(req: Request, res: Response) {
   return sendSuccess(res, await service.listOrganizations(req.query));
 }
 
+export async function listOrganizationUsers(req: Request, res: Response) {
+  const organizationId = getParam(req, "id");
+  return sendSuccess(res, await service.listOrganizationUsers(organizationId));
+}
+
 export async function setOrganizationStatus(req: Request, res: Response) {
   const organizationId = getParam(req, "id");
   const { status } = req.body as { status: "ACTIVE" | "SUSPENDED" };
@@ -55,8 +60,8 @@ export async function setAdminStatus(req: Request, res: Response) {
 
 export async function resetAdminPassword(req: Request, res: Response) {
   const id = getParam(req, "id");
-  const { newPassword } = req.body as { newPassword: string };
-  await service.resetAdminPassword(id, newPassword);
+  const { newPassword, currentPassword } = req.body as { newPassword: string; currentPassword?: string };
+  await service.resetAdminPassword(id, newPassword, req.platformAdmin!.id, currentPassword);
   logger.warn({ actingAdmin: req.platformAdmin?.username, targetAdminId: id }, "Platform operator reset another platform admin's password");
   return sendSuccess(res, null, "Password reset");
 }

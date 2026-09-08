@@ -7,7 +7,7 @@ import { createCouponSchema, updateCouponSchema, validateCouponQuerySchema } fro
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 // Any POS user can preview a code at checkout; only managers can create/edit/list the catalog.
 router.get("/preview", requirePermission("pos.access"), validate(validateCouponQuerySchema, "query"), controller.preview);

@@ -5,6 +5,7 @@ import { sendSuccess } from "../../utils/apiResponse";
 import { AuthenticationError } from "../../utils/AppError";
 import { prisma } from "../../config/prisma";
 import { REFRESH_COOKIE, refreshCookieOptions } from "../../utils/authCookie";
+import { showDevVerificationCode } from "../../config/env";
 
 function requestMeta(req: Request) {
   return { ipAddress: req.ip, userAgent: req.headers["user-agent"] };
@@ -65,10 +66,16 @@ export async function verifyEmail(req: Request, res: Response) {
 
 export async function resendVerification(req: Request, res: Response) {
   const { email } = req.body;
-  await authService.resendVerificationCode(email);
-  // Deliberately the same response whether or not the email exists/is already verified - see
-  // authService.resendVerificationCode()'s non-enumeration comment.
-  return sendSuccess(res, null, "If that email exists and isn't verified yet, a new code was sent");
+  const result = await authService.resendVerificationCode(email);
+  // Deliberately the same response shape whether or not the email exists/is already verified -
+  // see authService.resendVerificationCode()'s non-enumeration comment. devVerificationCode is
+  // only ever present when result itself is present (a real account got a real code), so it
+  // can't be used to probe whether an email is registered.
+  return sendSuccess(
+    res,
+    { devVerificationCode: showDevVerificationCode ? result?.code : undefined },
+    "If that email exists and isn't verified yet, a new code was sent",
+  );
 }
 
 export async function changePassword(req: Request, res: Response) {

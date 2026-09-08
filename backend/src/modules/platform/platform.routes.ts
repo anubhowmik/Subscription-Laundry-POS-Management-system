@@ -29,6 +29,9 @@ const setAdminStatusSchema = z.object({
 });
 
 const resetAdminPasswordSchema = z.object({
+  // Required only when resetting your OWN password (enforced in the service, which knows the
+  // target vs. acting admin) - an admin resetting someone ELSE's password doesn't have it.
+  currentPassword: z.string().optional(),
   newPassword: z.string().min(8),
 });
 
@@ -45,6 +48,7 @@ router.use(authenticatePlatformAdmin);
 
 router.get("/stats", controller.getStats);
 router.get("/organizations", controller.listOrganizations);
+router.get("/organizations/:id/users", controller.listOrganizationUsers);
 router.patch("/organizations/:id/status", validate(setStatusSchema), controller.setOrganizationStatus);
 router.get("/payments", controller.listPayments);
 

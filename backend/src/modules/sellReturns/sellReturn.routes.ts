@@ -7,7 +7,7 @@ import { createSellReturnSchema, listSellReturnQuerySchema } from "./sellReturn.
 
 const router = Router();
 router.use(authenticate, requirePermission("sales.return"));
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/sale/:saleId", controller.getReturnableSale);
 router.get("/", validate(listSellReturnQuerySchema, "query"), controller.list);

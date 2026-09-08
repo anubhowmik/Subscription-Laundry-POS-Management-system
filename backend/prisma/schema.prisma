@@ -51,6 +51,14 @@ enum PaymentStatus {
   OVERPAID
 }
 
+// Server-computed from the sale's actual line items at checkout - never client-supplied. Null
+// only for historical sales predating this field with zero items (shouldn't exist in practice).
+enum SaleType {
+  PRODUCT
+  SERVICE
+  MIXED
+}
+
 enum InventoryTransactionType {
   STOCK_IN
   STOCK_OUT
@@ -684,6 +692,11 @@ model PlatformAdmin {
   passwordHash String
   fullName     String
   status       UserStatus @default(ACTIVE)
+  // The one admin no other admin can deactivate or password-reset - every other admin is fully
+  // equal to every other, this is the single exception. Set on exactly one row (backfilled onto
+  // the earliest-created admin in the migration that added this column); createAdmin() never
+  // grants it to a new admin - there is currently no UI path to transfer or grant ownership.
+  isOwner      Boolean    @default(false)
   lastLoginAt  DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -1424,6 +1437,7 @@ model Sale {
   estimatedReadyAt   DateTime? // max(estimatedProcessingHours) across service lines, from saleDate - null if no service line has one
   status             SaleStatus    @default(FINAL)
   paymentStatus      PaymentStatus @default(DUE)
+  saleType           SaleType? // PRODUCT / SERVICE / MIXED, derived from item composition at checkout - see SaleType
   subtotal           Decimal       @db.Decimal(12, 2)
   discountAmount     Decimal       @default(0) @db.Decimal(12, 2)
   taxAmount          Decimal       @default(0) @db.Decimal(12, 2)

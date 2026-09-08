@@ -7,7 +7,7 @@ import { createServiceCategorySchema } from "./serviceCategory.validators";
 
 const router = Router();
 router.use(authenticate);
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service"));
 
 router.get("/", requirePermission("services.view"), controller.list);
 router.post("/", requirePermission("services.create"), validate(createServiceCategorySchema), controller.create);

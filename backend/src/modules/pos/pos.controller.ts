@@ -20,6 +20,7 @@ export async function search(req: Request, res: Response) {
     req.query.query as string | undefined,
     req.user!.organizationId,
     req.query.customerId as string | undefined,
+    req.query.mode as "SERVICE" | "PRODUCT" | undefined,
   );
   return sendSuccess(res, results);
 }
@@ -40,7 +41,8 @@ export async function holdSale(req: Request, res: Response) {
 export async function listHeldSales(req: Request, res: Response) {
   const businessLocationId = String(req.query.businessLocationId);
   assertLocationAccess(req, businessLocationId);
-  return sendSuccess(res, await service.listHeldSales(businessLocationId, req.user!.organizationId));
+  const mode = req.query.mode as "SERVICE" | "PRODUCT" | undefined;
+  return sendSuccess(res, await service.listHeldSales(businessLocationId, req.user!.organizationId, mode));
 }
 
 export async function getHeldSale(req: Request, res: Response) {

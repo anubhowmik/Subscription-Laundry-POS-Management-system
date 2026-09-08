@@ -7,7 +7,7 @@ import { adjustPointsSchema } from "./loyalty.validators";
 
 const router = Router();
 router.use(authenticate, requirePermission("loyalty.manage"));
-router.use(requirePermission("app.pos_laundry"));
+router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/customers/:customerId", controller.getLedger);
 router.post("/customers/:customerId/adjust", validate(adjustPointsSchema), controller.adjustPoints);
