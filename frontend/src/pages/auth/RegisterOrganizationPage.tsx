@@ -44,14 +44,14 @@ export default function RegisterOrganizationPage() {
   async function onSubmit(values: FormValues) {
     setServerError(null);
     try {
-      await registerOrganization({
+      const devVerificationCode = await registerOrganization({
         ...values,
         branchName: values.branchName || undefined,
         adminFullNameAr: values.adminFullNameAr || undefined,
         adminPhone: values.adminPhone || undefined,
       });
       // Not auto-logged-in - a verification code has already been emailed to adminEmail.
-      navigate("/verify-email", { state: { email: values.adminEmail }, replace: true });
+      navigate("/verify-email", { state: { email: values.adminEmail, devVerificationCode }, replace: true });
     } catch (err) {
       if (isAxiosError(err) && err.response?.status === 409) {
         const message = String(err.response.data?.message ?? "");

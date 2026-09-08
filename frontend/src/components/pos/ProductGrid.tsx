@@ -14,15 +14,19 @@ import {
 import { usePosStore } from "../../stores/posStore";
 import { formatMoney } from "../../lib/format";
 
+type Mode = "SERVICES" | "PRODUCTS";
+
 interface Props {
   businessLocationId: string;
   currency: string;
   locale: string;
   isAr: boolean;
   onOutOfStock: (name: string) => void;
+  /** Locks the grid to one catalog and hides the tab switcher (from /pos/service or
+   * /pos/product). Undefined on the legacy combined /pos screen, which keeps today's exact
+   * behavior (both tabs, starts on Services). */
+  fixedMode?: Mode;
 }
-
-type Mode = "SERVICES" | "PRODUCTS";
 
 const SERVICE_ICONS: Record<string, LucideIcon> = {
   "wash & iron": WashingMachine,
@@ -43,11 +47,11 @@ function iconFor(categoryName: string | undefined | null): LucideIcon {
  * ordering screen.
  */
 export const ProductGrid = forwardRef<HTMLInputElement, Props>(function ProductGrid(
-  { businessLocationId, currency, locale, isAr, onOutOfStock },
+  { businessLocationId, currency, locale, isAr, onOutOfStock, fixedMode },
   searchRef,
 ) {
   const { t } = useTranslation();
-  const [mode, setMode] = useState<Mode>("SERVICES");
+  const [mode, setMode] = useState<Mode>(fixedMode ?? "SERVICES");
   const [search, setSearch] = useState("");
   const [prodCategoryId, setProdCategoryId] = useState("");
   const [brandId, setBrandId] = useState("");
@@ -61,9 +65,25 @@ export const ProductGrid = forwardRef<HTMLInputElement, Props>(function ProductG
 
   const { data: categories } = useCategories();
   const { data: brands } = useBrands();
-  const { data: products, isLoading: prodLoading } = useProducts({ businessLocationId, categoryId: prodCategoryId, brandId, search, customerId });
+  // On the legacy combined /pos page (fixedMode undefined) both catalogs are always fetched, same
+  // as before, so switching tabs stays instant. A fixed-mode page never needs the other catalog
+  // at all, so it's skipped entirely rather than just hidden.
+  const { data: products, isLoading: prodLoading } = useProducts({
+    businessLocationId,
+    categoryId: prodCategoryId,
+    brandId,
+    search,
+    customerId,
+    enabled: fixedMode ? fixedMode === "PRODUCTS" : true,
+  });
   const { data: svcCategories } = useServiceCategories();
-  const { data: services, isLoading: svcLoading } = useServices({ businessLocationId, categoryId: svcCategoryId, search, customerId });
+  const { data: services, isLoading: svcLoading } = useServices({
+    businessLocationId,
+    categoryId: svcCategoryId,
+    search,
+    customerId,
+    enabled: fixedMode ? fixedMode === "SERVICES" : true,
+  });
 
   function locationStock(p: PosProduct): number {
     if (!p.manageStock) return Infinity;
@@ -117,19 +137,20 @@ export const ProductGrid = forwardRef<HTMLInputElement, Props>(function ProductG
 
   return (
     <div className="flex min-h-0 flex-col rounded-xl border-2 border-sky-400 bg-white p-4 shadow-sm">
-      {/* Mode tabs: New Order style */}
+      {/* Mode tabs: New Order style - hidden entirely on a fixed-mode page, which only ever shows one catalog */}
       <div className="mb-4 flex items-center gap-6 border-b border-slate-100 pb-3">
-        {(["SERVICES", "PRODUCTS"] as Mode[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => { setMode(m); setSearch(""); }}
-            className={`rounded-t-lg pb-1 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 ${
-              mode === m ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"
-            }`}
-          >
-            {m === "SERVICES" ? (isAr ? "الخدمات" : "Services") : isAr ? "المنتجات" : "Products"}
-          </button>
-        ))}
+        {!fixedMode &&
+          (["SERVICES", "PRODUCTS"] as Mode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => { setMode(m); setSearch(""); }}
+              className={`rounded-t-lg pb-1 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 ${
+                mode === m ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              {m === "SERVICES" ? (isAr ? "الخدمات" : "Services") : isAr ? "المنتجات" : "Products"}
+            </button>
+          ))}
         <div className="ms-auto w-56">
           <input
             ref={searchRef}

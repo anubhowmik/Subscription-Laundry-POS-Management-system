@@ -48,12 +48,29 @@ interface Stats {
   totalRevenue: string;
 }
 
+interface OrgUserRow {
+  id: string;
+  fullNameEn: string;
+  fullNameAr: string | null;
+  username: string | null;
+  email: string | null;
+  emailVerified: boolean;
+  status: "ACTIVE" | "INACTIVE";
+  allowLogin: boolean;
+  isSystemAdmin: boolean;
+  roleNameEn: string;
+  lastLoginAt: string | null;
+  createdAt: string;
+  deletedAt: string | null;
+}
+
 interface PlatformAdminRow {
   id: string;
   username: string;
   email: string;
   fullName: string;
   status: "ACTIVE" | "INACTIVE";
+  isOwner: boolean;
   lastLoginAt: string | null;
   createdAt: string;
 }
@@ -68,6 +85,7 @@ export default function PlatformConsolePage() {
   const [error, setError] = useState<string | null>(null);
   const [showAddAdmin, setShowAddAdmin] = useState(false);
   const [resetTarget, setResetTarget] = useState<PlatformAdminRow | null>(null);
+  const [usersTarget, setUsersTarget] = useState<PlatformOrganization | null>(null);
 
   const load = useCallback(async () => {
     const [o, p, s, a] = await Promise.all([
@@ -210,17 +228,25 @@ export default function PlatformConsolePage() {
                       <UsageCell used={org.branchCount} max={org.maxBranches} />
                     </td>
                     <td className="px-4 py-3 text-end">
-                      <button
-                        onClick={() => toggleStatus(org)}
-                        disabled={busyId === org.id}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-50 ${
-                          org.status === "SUSPENDED"
-                            ? "bg-blue-600 text-white hover:bg-blue-700"
-                            : "bg-red-900 text-red-200 hover:bg-red-800"
-                        }`}
-                      >
-                        {org.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => setUsersTarget(org)}
+                          className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                        >
+                          Users
+                        </button>
+                        <button
+                          onClick={() => toggleStatus(org)}
+                          disabled={busyId === org.id}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-50 ${
+                            org.status === "SUSPENDED"
+                              ? "bg-blue-600 text-white hover:bg-blue-700"
+                              : "bg-red-900 text-red-200 hover:bg-red-800"
+                          }`}
+                        >
+                          {org.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -261,10 +287,15 @@ export default function PlatformConsolePage() {
               <tbody className="divide-y divide-slate-800">
                 {admins.map((a) => {
                   const isSelf = a.id === admin.id;
+                  // Only the owner can act on another admin's password or status - a non-owner
+                  // can only ever touch their own account. Blocked server-side too; this just
+                  // avoids showing a live button for an action that will only ever error.
+                  const lockedForMe = !isSelf && !admin.isOwner;
                   return (
                     <tr key={a.id} className="hover:bg-slate-800/50">
                       <td className="px-4 py-3 text-white">
                         {a.fullName} {isSelf && <span className="text-xs text-slate-500">(you)</span>}
+                        {a.isOwner && <span className="ms-1.5 rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-300">OWNER</span>}
                       </td>
                       <td className="px-4 py-3 text-slate-300">{a.username}</td>
                       <td className="px-4 py-3 text-slate-400">{a.email}</td>
@@ -280,14 +311,22 @@ export default function PlatformConsolePage() {
                         <div className="flex justify-end gap-2">
                           <button
                             onClick={() => setResetTarget(a)}
-                            className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                            disabled={lockedForMe}
+                            title={lockedForMe ? "Only the owner can reset another admin's password" : undefined}
+                            className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             Reset password
                           </button>
                           <button
                             onClick={() => toggleAdminStatus(a)}
-                            disabled={busyId === a.id || isSelf}
-                            title={isSelf ? "You cannot deactivate your own account" : undefined}
+                            disabled={busyId === a.id || isSelf || lockedForMe}
+                            title={
+                              isSelf
+                                ? "You cannot deactivate your own account"
+                                : lockedForMe
+                                  ? "Only the owner can change another admin's status"
+                                  : undefined
+                            }
                             className={`rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40 ${
                               a.status === "INACTIVE" ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-red-900 text-red-200 hover:bg-red-800"
                             }`}
@@ -362,10 +401,13 @@ export default function PlatformConsolePage() {
       {resetTarget && (
         <ResetAdminPasswordModal
           target={resetTarget}
+          isSelf={resetTarget.id === admin.id}
           onClose={() => setResetTarget(null)}
           onDone={() => setResetTarget(null)}
         />
       )}
+
+      {usersTarget && <OrgUsersModal org={usersTarget} onClose={() => setUsersTarget(null)} />}
     </div>
   );
 }
@@ -379,11 +421,21 @@ function StatCard({ label, value, tone = "normal" }: { label: string; value: str
   );
 }
 
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function ModalShell({
+  title,
+  onClose,
+  children,
+  widthClassName = "max-w-sm",
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  widthClassName?: string;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-800 p-5"
+        className={`w-full rounded-lg border border-slate-700 bg-slate-800 p-5 ${widthClassName}`}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-4 text-sm font-semibold text-white">{title}</h3>
@@ -458,17 +510,40 @@ function AddAdminModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   );
 }
 
-function ResetAdminPasswordModal({ target, onClose, onDone }: { target: PlatformAdminRow; onClose: () => void; onDone: () => void }) {
+function ResetAdminPasswordModal({
+  target,
+  isSelf,
+  onClose,
+  onDone,
+}: {
+  target: PlatformAdminRow;
+  isSelf: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Changing your OWN password proves you still know the current one (blocks a stolen session
+  // token from locking you out by changing it); resetting someone ELSE's is an administrative
+  // override with no current password to check. Either way, typing the new one twice catches a
+  // typo before it happens instead of after you're locked out.
+  const mismatch = newPassword.length > 0 && confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const canSubmit = newPassword.length >= 8 && newPassword === confirmPassword && (!isSelf || currentPassword.length > 0);
+
   async function submit() {
+    if (!canSubmit) return;
     setSaving(true);
     setError(null);
     try {
-      await platformApi.post(`/admins/${target.id}/reset-password`, { newPassword });
+      await platformApi.post(`/admins/${target.id}/reset-password`, {
+        newPassword,
+        ...(isSelf ? { currentPassword } : {}),
+      });
       setSuccess(true);
     } catch (err) {
       setError(isAxiosError(err) ? err.response?.data?.message ?? "Could not reset password" : "Could not reset password");
@@ -478,11 +553,13 @@ function ResetAdminPasswordModal({ target, onClose, onDone }: { target: Platform
   }
 
   return (
-    <ModalShell title={`Reset Password — ${target.fullName}`} onClose={onClose}>
+    <ModalShell title={isSelf ? "Change Your Password" : `Reset Password — ${target.fullName}`} onClose={onClose}>
       {success ? (
         <div className="space-y-3">
           <p className="rounded-lg bg-blue-950 px-3 py-2 text-xs text-blue-300">
-            Password reset. {target.fullName} has been signed out everywhere and must log in with the new password.
+            {isSelf
+              ? "Password changed. You've been signed out everywhere else and must log in again with the new password."
+              : `Password reset. ${target.fullName} has been signed out everywhere and must log in with the new password.`}
           </p>
           <button onClick={onDone} className="w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">
             Done
@@ -490,9 +567,31 @@ function ResetAdminPasswordModal({ target, onClose, onDone }: { target: Platform
         </div>
       ) : (
         <div className="space-y-3">
+          {isSelf && (
+            <div>
+              <label className={modalLabelClass}>Current Password</label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                className={modalInputClass}
+                autoFocus
+              />
+            </div>
+          )}
           <div>
             <label className={modalLabelClass}>New Password</label>
             <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={modalInputClass} />
+          </div>
+          <div>
+            <label className={modalLabelClass}>Confirm New Password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className={modalInputClass}
+            />
+            {mismatch && <p className="mt-1 text-xs text-red-400">Passwords don't match</p>}
           </div>
           {error && <p className="rounded-lg bg-red-950 px-3 py-2 text-xs text-red-300">{error}</p>}
           <div className="flex gap-2 pt-2">
@@ -504,14 +603,110 @@ function ResetAdminPasswordModal({ target, onClose, onDone }: { target: Platform
             </button>
             <button
               onClick={submit}
-              disabled={saving || newPassword.length < 8}
+              disabled={saving || !canSubmit}
               className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? "…" : "Reset"}
+              {saving ? "…" : isSelf ? "Change Password" : "Reset"}
             </button>
           </div>
         </div>
       )}
+    </ModalShell>
+  );
+}
+
+function OrgUsersModal({ org, onClose }: { org: PlatformOrganization; onClose: () => void }) {
+  const [users, setUsers] = useState<OrgUserRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    platformApi
+      .get<ApiSuccess<OrgUserRow[]>>(`/organizations/${org.id}/users`)
+      .then((res) => {
+        if (!cancelled) setUsers(res.data.data);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Failed to load users");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [org.id]);
+
+  return (
+    <ModalShell title={`Users — ${org.nameEn}`} onClose={onClose} widthClassName="max-w-3xl">
+      {error && <p className="mb-3 rounded-lg bg-red-950 px-3 py-2 text-xs text-red-300">{error}</p>}
+      <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-lg border border-slate-700">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className="sticky top-0 bg-slate-800 text-left text-xs uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Email</th>
+              <th className="px-4 py-3">Role</th>
+              <th className="px-4 py-3">Verified</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Last Login</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {users?.map((u) => (
+              <tr key={u.id} className="hover:bg-slate-800/50">
+                <td className="px-4 py-3 text-white">
+                  {u.fullNameEn}
+                  {u.isSystemAdmin && <span className="ms-1.5 text-xs text-slate-500">(admin)</span>}
+                  {u.deletedAt && <span className="ms-1.5 text-xs text-red-400">(deleted)</span>}
+                </td>
+                <td className="px-4 py-3 text-slate-300">{u.email ?? <span className="text-slate-600">—</span>}</td>
+                <td className="px-4 py-3 text-slate-400">{u.roleNameEn}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                      u.emailVerified ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
+                    }`}
+                  >
+                    {u.emailVerified ? "Verified" : "Unverified"}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                      u.status === "ACTIVE" && u.allowLogin ? "bg-blue-950 text-blue-300" : "bg-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {u.status === "ACTIVE" && u.allowLogin ? "Active" : u.status === "ACTIVE" ? "No login" : u.status}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-400">
+                  {u.lastLoginAt ? new Date(u.lastLoginAt).toISOString().slice(0, 10) : "Never"}
+                </td>
+              </tr>
+            ))}
+            {users?.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  No users in this organization
+                </td>
+              </tr>
+            )}
+            {users === null && !error && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  Loading…
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={onClose}
+          className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+        >
+          Close
+        </button>
+      </div>
     </ModalShell>
   );
 }

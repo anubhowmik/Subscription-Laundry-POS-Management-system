@@ -11,6 +11,7 @@ import { Badge } from "../../components/ui/Badge";
 import { StatCard } from "../../components/ui/StatCard";
 import { LoadingState } from "../../components/ui/Spinner";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 
 interface ActiveAnnouncement {
   id: string;
@@ -69,6 +70,11 @@ export default function DashboardPage() {
   const { currentLocation } = useBusinessLocation();
   const locale = isAr ? "ar-SA" : "en-US";
   const currency = currentLocation?.currency ?? "SAR";
+  // Dashboard is shared across POS Laundry/Service POS/Product POS, but "low stock" is a physical-
+  // inventory concept with nothing to show for a pure service business - hide it in Service POS
+  // rather than displaying a stat that's structurally always zero there. Same pattern as
+  // ReportsPage.tsx's Inventory/AP Aging tabs.
+  const hideLowStock = useCurrentApp()?.key === "posService";
 
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard-summary"],
@@ -101,7 +107,7 @@ export default function DashboardPage() {
 
       {/* KPI tile row - one card per headline metric, colored icon square + big value + a trend
           badge only where there's real day-over-day data to back it (never a fabricated %). */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-4 ${hideLowStock ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
         <StatCard
           icon={Wallet}
           cardBg="bg-app-pos-500"
@@ -129,15 +135,17 @@ export default function DashboardPage() {
           label={t("dashboard.totalCustomers")}
           value={String(data.totalCustomers)}
         />
-        <StatCard
-          icon={PackageX}
-          cardBg="bg-rose-50"
-          iconBg="bg-rose-500"
-          iconColor="text-white"
-          label={t("dashboard.lowStock")}
-          value={String(data.lowStockCount)}
-          warn={data.lowStockCount > 0}
-        />
+        {!hideLowStock && (
+          <StatCard
+            icon={PackageX}
+            cardBg="bg-rose-50"
+            iconBg="bg-rose-500"
+            iconColor="text-white"
+            label={t("dashboard.lowStock")}
+            value={String(data.lowStockCount)}
+            warn={data.lowStockCount > 0}
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

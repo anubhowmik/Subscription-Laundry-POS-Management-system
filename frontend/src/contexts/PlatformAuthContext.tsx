@@ -7,6 +7,7 @@ export interface PlatformAdmin {
   id: string;
   username: string;
   fullName: string;
+  isOwner: boolean;
 }
 
 interface PlatformAuthContextValue {

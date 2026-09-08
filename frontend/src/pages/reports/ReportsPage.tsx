@@ -14,6 +14,7 @@ import { StatCard as BaseStatCard } from "../../components/ui/StatCard";
 import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
 import { BarChart3 } from "lucide-react";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 
 type Tab = "SALES" | "INVENTORY" | "ACCOUNTING" | "BY_SERVICE" | "AR_AGING" | "AP_AGING" | "STAFF" | "VAT";
 
@@ -21,10 +22,23 @@ export default function ReportsPage() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const { can } = useAuth();
+  // Reports is a shared page (reachable from POS Laundry, Service POS, and Product POS alike),
+  // but a couple of its tabs are meaningful for only one side - Inventory and AP Aging are both
+  // stock/procurement concepts with nothing to show for a pure service sale, and By Service has
+  // nothing to do with physical goods. Gate those on the app you're actually viewing from, not
+  // just on the underlying permission (which a Service POS user can perfectly well hold, since
+  // that same permission is shared with POS Laundry). POS Laundry (or the legacy /pos context
+  // with no app resolved at all) keeps seeing every tab, exactly as before.
+  const appKey = useCurrentApp()?.key;
+  const hideInventory = appKey === "posService";
+  const hideByService = appKey === "posProduct";
+  const hideApAging = appKey === "posService";
 
   const canSales = can("reports.sales");
-  const canInventory = can("reports.inventory");
+  const canInventory = can("reports.inventory") && !hideInventory;
   const canAccounting = can("reports.accounting");
+  const canByService = canSales && !hideByService;
+  const canApAging = canAccounting && !hideApAging;
   const [tab, setTab] = useState<Tab>(canSales ? "SALES" : canInventory ? "INVENTORY" : "ACCOUNTING");
 
   return (
@@ -56,7 +70,7 @@ export default function ReportsPage() {
             {isAr ? "المحاسبة" : "Accounting"}
           </button>
         )}
-        {canSales && (
+        {canByService && (
           <button
             onClick={() => setTab("BY_SERVICE")}
             className={`pb-2 text-sm font-semibold transition ${tab === "BY_SERVICE" ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"}`}
@@ -72,7 +86,7 @@ export default function ReportsPage() {
             {isAr ? "أعمار الذمم المدينة" : "AR Aging"}
           </button>
         )}
-        {canAccounting && (
+        {canApAging && (
           <button
             onClick={() => setTab("AP_AGING")}
             className={`pb-2 text-sm font-semibold transition ${tab === "AP_AGING" ? "border-b-2 border-sky-500 text-sky-600" : "text-slate-400 hover:text-slate-600"}`}
@@ -101,9 +115,9 @@ export default function ReportsPage() {
       {tab === "SALES" && canSales && <SalesReportTab isAr={isAr} t={t} />}
       {tab === "INVENTORY" && canInventory && <InventoryReportTab isAr={isAr} t={t} />}
       {tab === "ACCOUNTING" && canAccounting && <AccountingReportTab isAr={isAr} t={t} />}
-      {tab === "BY_SERVICE" && canSales && <SalesByServiceReportTab isAr={isAr} t={t} />}
+      {tab === "BY_SERVICE" && canByService && <SalesByServiceReportTab isAr={isAr} t={t} />}
       {tab === "AR_AGING" && canAccounting && <ArAgingReportTab isAr={isAr} t={t} />}
-      {tab === "AP_AGING" && canAccounting && <ApAgingReportTab isAr={isAr} t={t} />}
+      {tab === "AP_AGING" && canApAging && <ApAgingReportTab isAr={isAr} t={t} />}
       {tab === "STAFF" && canSales && <StaffProductivityReportTab isAr={isAr} t={t} />}
       {tab === "VAT" && canAccounting && <VatBreakdownReportTab isAr={isAr} t={t} />}
     </div>

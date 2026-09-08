@@ -60,6 +60,8 @@ interface ProductFilters {
   brandId?: string;
   search?: string;
   customerId?: string;
+  /** Set false to skip fetching (e.g. a fixed-mode POS page that never shows products). Defaults to true. */
+  enabled?: boolean;
 }
 
 export function useCategories() {
@@ -93,7 +95,7 @@ export function useProducts(filters: ProductFilters) {
       });
       return res.data.data;
     },
-    enabled: Boolean(filters.businessLocationId),
+    enabled: Boolean(filters.businessLocationId) && (filters.enabled ?? true),
   });
 }
 
@@ -116,7 +118,7 @@ export function useServiceCategories() {
   });
 }
 
-export function useServices(filters: { businessLocationId?: string; categoryId?: string; search?: string; customerId?: string }) {
+export function useServices(filters: { businessLocationId?: string; categoryId?: string; search?: string; customerId?: string; enabled?: boolean }) {
   return useQuery({
     queryKey: ["pos", "services", filters],
     queryFn: async () => {
@@ -132,7 +134,7 @@ export function useServices(filters: { businessLocationId?: string; categoryId?:
       });
       return res.data.data;
     },
-    enabled: Boolean(filters.businessLocationId),
+    enabled: Boolean(filters.businessLocationId) && (filters.enabled ?? true),
   });
 }
 
@@ -179,6 +181,7 @@ export interface CheckoutInput {
   redeemPoints?: number;
   appliedCreditAmount?: number;
   asDraft?: boolean;
+  mode?: "SERVICE" | "PRODUCT";
 }
 export interface SaleResult {
   id: string;
@@ -288,6 +291,7 @@ export interface HoldSaleInput {
   label: string;
   note?: string;
   items: HeldSaleItemInput[];
+  mode?: "SERVICE" | "PRODUCT";
 }
 export interface HeldSaleItemRow extends HeldSaleItemInput {
   id: string;
@@ -302,10 +306,10 @@ export interface HeldSaleRow {
   items: HeldSaleItemRow[];
 }
 
-export function useHeldSales(businessLocationId: string | undefined) {
+export function useHeldSales(businessLocationId: string | undefined, mode?: "SERVICE" | "PRODUCT") {
   return useQuery({
-    queryKey: ["pos", "held-sales", businessLocationId],
-    queryFn: async () => (await api.get<ApiSuccess<HeldSaleRow[]>>("/pos/hold-sales", { params: { businessLocationId } })).data.data,
+    queryKey: ["pos", "held-sales", businessLocationId, mode],
+    queryFn: async () => (await api.get<ApiSuccess<HeldSaleRow[]>>("/pos/hold-sales", { params: { businessLocationId, mode } })).data.data,
     enabled: Boolean(businessLocationId),
   });
 }

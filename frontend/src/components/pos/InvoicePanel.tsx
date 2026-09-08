@@ -34,10 +34,14 @@ interface Props {
   notify: (msg: string) => void;
   onRecent: () => void;
   onPrintLast: () => void;
+  /** Fixed to a single POS mode when set (e.g. from /pos/service or /pos/product); undefined on
+   * the legacy combined /pos screen. Scopes the held-sale list and tags new held sales so a
+   * Service-POS cashier never sees (and fails to resume) a product-only held sale, and vice versa. */
+  mode?: "SERVICE" | "PRODUCT";
 }
 
 export function InvoicePanel(props: Props) {
-  const { isAr } = props;
+  const { isAr, mode } = props;
   const lines = usePosStore((s) => s.lines);
 
   return (
@@ -48,7 +52,17 @@ export function InvoicePanel(props: Props) {
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-3">
         {lines.length === 0 && (
           <p className="py-10 text-center text-sm text-slate-400">
-            {isAr ? "أضف خدمات أو منتجات للفاتورة" : "Add services or products to the invoice"}
+            {mode === "SERVICE"
+              ? isAr
+                ? "أضف خدمات للفاتورة"
+                : "Add services to the invoice"
+              : mode === "PRODUCT"
+                ? isAr
+                  ? "أضف منتجات للفاتورة"
+                  : "Add products to the invoice"
+                : isAr
+                  ? "أضف خدمات أو منتجات للفاتورة"
+                  : "Add services or products to the invoice"}
           </p>
         )}
         {lines.map((line) => (
@@ -318,14 +332,14 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 }
 
 function QuickActions(props: Props) {
-  const { isAr, notify, onRecent, onPrintLast, businessLocationId } = props;
+  const { isAr, notify, onRecent, onPrintLast, businessLocationId, mode } = props;
   const store = usePosStore();
   const lines = usePosStore((s) => s.lines);
   const customer = usePosStore((s) => s.customer);
   const hasLines = lines.length > 0;
   const [heldOpen, setHeldOpen] = useState(false);
 
-  const { data: heldSales } = useHeldSales(businessLocationId);
+  const { data: heldSales } = useHeldSales(businessLocationId, mode);
   const holdSale = useHoldSale();
   const resumeHeldSale = useResumeHeldSale();
   const discardHeldSale = useDiscardHeldSale();
@@ -340,6 +354,7 @@ function QuickActions(props: Props) {
         businessLocationId,
         customerId: customer?.id,
         label: `Hold ${new Date().toLocaleTimeString()}`,
+        mode,
         items: lines.map((l) => ({
           productId: l.type === "PRODUCT" ? l.id : undefined,
           serviceId: l.type === "SERVICE" ? l.id : undefined,

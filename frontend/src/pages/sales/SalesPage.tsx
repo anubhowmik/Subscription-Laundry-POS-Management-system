@@ -15,6 +15,7 @@ import { StatCard } from "../../components/ui/StatCard";
 import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { Receipt } from "lucide-react";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 
 interface Sale {
   id: string;
@@ -45,6 +46,10 @@ export default function SalesPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
+  // Est. Ready is only ever set for a sale with a service line (see pos.service.ts) - it's always
+  // "-" for every row in Product POS, so hide the column there instead of showing a dash for the
+  // whole table. Same pattern as ReportsPage.tsx/DashboardPage.tsx.
+  const hideEstimatedReady = useCurrentApp()?.key === "posProduct";
 
   const { data } = useQuery({
     queryKey: ["sales", search, page],
@@ -85,7 +90,7 @@ export default function SalesPage() {
               <Th>Date</Th>
               <Th>{t("pos.total")}</Th>
               <Th>{t("pos.due")}</Th>
-              <Th>{isAr ? "الجاهزية المتوقعة" : "Est. Ready"}</Th>
+              {!hideEstimatedReady && <Th>{isAr ? "الجاهزية المتوقعة" : "Est. Ready"}</Th>}
               <Th>{t("common.status")}</Th>
               <Th>{t("common.actions")}</Th>
             </tr>
@@ -98,9 +103,11 @@ export default function SalesPage() {
                 <td className="px-4 py-3"><span className="ltr-nums">{formatDate(s.saleDate, locale)}</span></td>
                 <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.totalAmount, currency, locale)}</span></td>
                 <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(s.dueAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3 text-xs text-slate-500">
-                  <span className="ltr-nums">{s.estimatedReadyAt ? new Date(s.estimatedReadyAt).toLocaleString(locale) : "-"}</span>
-                </td>
+                {!hideEstimatedReady && (
+                  <td className="px-4 py-3 text-xs text-slate-500">
+                    <span className="ltr-nums">{s.estimatedReadyAt ? new Date(s.estimatedReadyAt).toLocaleString(locale) : "-"}</span>
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <Badge variant={STATUS_VARIANT[s.paymentStatus]}>{s.paymentStatus}</Badge>
                 </td>
@@ -123,7 +130,7 @@ export default function SalesPage() {
             ))}
             {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={hideEstimatedReady ? 7 : 8} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>

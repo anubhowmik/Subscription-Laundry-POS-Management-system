@@ -19,9 +19,9 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
-  registerOrganization: (input: RegisterOrganizationInput) => Promise<void>;
+  registerOrganization: (input: RegisterOrganizationInput) => Promise<string | undefined>;
   verifyEmail: (email: string, code: string) => Promise<void>;
-  resendVerification: (email: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<string | undefined>;
   logout: () => Promise<void>;
   can: (...permissions: string[]) => boolean;
   refreshUser: () => Promise<void>;
@@ -69,7 +69,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // an authenticated state before verifying their email. The backend has already emailed a
   // verification code; RegisterOrganizationPage sends the user to /verify-email next.
   async function registerOrganization(input: RegisterOrganizationInput) {
-    await api.post("/organizations/register", input);
+    const res = await api.post<ApiSuccess<{ devVerificationCode?: string }>>("/organizations/register", input);
+    return res.data.data.devVerificationCode;
   }
 
   async function verifyEmail(email: string, code: string) {
@@ -77,7 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function resendVerification(email: string) {
-    await api.post("/auth/resend-verification", { email });
+    const res = await api.post<ApiSuccess<{ devVerificationCode?: string }>>("/auth/resend-verification", { email });
+    return res.data.data.devVerificationCode;
   }
 
   async function logout() {

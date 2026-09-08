@@ -15,6 +15,7 @@ import { StatCard } from "../../components/ui/StatCard";
 import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
 import { labelClass, inputClass, inputSmClass } from "../../components/ui/formClasses";
 import { Wallet } from "lucide-react";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 
 type PaymentStatus = "PAID" | "PARTIAL" | "DUE" | "OVERPAID";
 
@@ -56,6 +57,12 @@ export default function ExpensesPage() {
   const currency = currentLocation?.currency ?? "SAR";
   const locale = isAr ? "ar-SA" : "en-US";
   const qc = useQueryClient();
+  // Expenses is shared across POS Laundry/Service POS/Product POS, but linking an expense to a
+  // Supplier only makes sense where Suppliers themselves are manageable - Service POS never gets
+  // a Suppliers page (suppliers.manage is gated app.pos_laundry/app.pos_product server-side), so
+  // the /suppliers search this page's form does would just 403 there. Hide the column/field
+  // instead of offering something that silently breaks. See ReportsPage.tsx for the same pattern.
+  const hideSupplier = useCurrentApp()?.key === "posService";
 
   const [formOpen, setFormOpen] = useState(false);
 
@@ -95,7 +102,7 @@ export default function ExpensesPage() {
               <Th>{isAr ? "التاريخ" : "Date"}</Th>
               <Th>{isAr ? "الرقم" : "Number"}</Th>
               <Th>{isAr ? "الفئة" : "Category"}</Th>
-              <Th>{isAr ? "المورد" : "Supplier"}</Th>
+              {!hideSupplier && <Th>{isAr ? "المورد" : "Supplier"}</Th>}
               <Th>{isAr ? "الإجمالي" : "Total"}</Th>
               <Th>{isAr ? "المدفوع" : "Paid"}</Th>
               <Th>{isAr ? "المستحق" : "Due"}</Th>
@@ -116,7 +123,9 @@ export default function ExpensesPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">{isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn}</td>
-                <td className="px-4 py-3 text-slate-500">{e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"}</td>
+                {!hideSupplier && (
+                  <td className="px-4 py-3 text-slate-500">{e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"}</td>
+                )}
                 <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.totalAmount, currency, locale)}</span></td>
                 <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.paidAmount, currency, locale)}</span></td>
                 <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.dueAmount, currency, locale)}</span></td>
@@ -128,7 +137,7 @@ export default function ExpensesPage() {
             ))}
             {expenses?.rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={hideSupplier ? 8 : 9} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
@@ -140,6 +149,7 @@ export default function ExpensesPage() {
       {formOpen && (
         <ExpenseFormModal
           isAr={isAr}
+          hideSupplier={hideSupplier}
           onClose={() => setFormOpen(false)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["expenses"] });
@@ -151,7 +161,17 @@ export default function ExpensesPage() {
   );
 }
 
-function ExpenseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose: () => void; onSaved: () => void }) {
+function ExpenseFormModal({
+  isAr,
+  hideSupplier,
+  onClose,
+  onSaved,
+}: {
+  isAr: boolean;
+  hideSupplier: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { locations, currentLocationId } = useBusinessLocation();
   const qc = useQueryClient();
 
@@ -271,34 +291,36 @@ function ExpenseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose: 
           </div>
         </div>
 
-        <div className="relative">
-          <label className={labelClass}>{isAr ? "المورد (اختياري)" : "Supplier (optional)"}</label>
-          <input
-            value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
-            onChange={(e) => {
-              setSupplier(null);
-              runSupplierSearch(e.target.value);
-            }}
-            placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
-            className={inputClass}
-          />
-          {supplierResults.length > 0 && !supplier && (
-            <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
-              {supplierResults.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    setSupplier(s);
-                    setSupplierResults([]);
-                  }}
-                  className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
-                >
-                  {isAr ? s.nameAr || s.nameEn : s.nameEn}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {!hideSupplier && (
+          <div className="relative">
+            <label className={labelClass}>{isAr ? "المورد (اختياري)" : "Supplier (optional)"}</label>
+            <input
+              value={supplier ? (isAr ? supplier.nameAr || supplier.nameEn : supplier.nameEn) : supplierSearch}
+              onChange={(e) => {
+                setSupplier(null);
+                runSupplierSearch(e.target.value);
+              }}
+              placeholder={isAr ? "ابحث عن مورد..." : "Search for a supplier..."}
+              className={inputClass}
+            />
+            {supplierResults.length > 0 && !supplier && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+                {supplierResults.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      setSupplier(s);
+                      setSupplierResults([]);
+                    }}
+                    className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+                  >
+                    {isAr ? s.nameAr || s.nameEn : s.nameEn}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

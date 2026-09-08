@@ -15,7 +15,25 @@ import { formatMoney } from "../../lib/format";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 
-export default function PosPage() {
+interface PosPageProps {
+  /** Fixes this page to a single POS mode (from /pos/service or /pos/product). Undefined on the
+   * legacy combined /pos route, which keeps today's exact behavior (both catalogs, mixed carts
+   * allowed). Threaded into checkout/quote/hold-sale calls and ProductGrid's fixed tab. */
+  mode?: "SERVICE" | "PRODUCT";
+}
+
+// Module-level (not component state) so it survives PosPage unmounting/remounting as you
+// navigate between routes, but resets naturally on a full page reload. Used only to detect an
+// actual MODE SWITCH (e.g. POS Laundry's own "Service POS"/"Product POS" quick links, which jump
+// straight from one to the other without passing through Home) - deliberately not cleared just
+// because PosPage happened to unmount, since leaving the POS screen for something else (checking
+// a customer, glancing at Sales) and coming back with the cart intact is normal, expected
+// behavior. Caught live: switching modes via those quick links left a service item sitting in
+// the cart while on the Product POS screen, which would have failed checkout with a confusing
+// "item does not belong in Product POS" error instead of just starting the new mode with a clean cart.
+let lastPosMode: "SERVICE" | "PRODUCT" | "UNMODED" | undefined;
+
+export default function PosPage({ mode }: PosPageProps) {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const navigate = useNavigate();
@@ -40,6 +58,18 @@ export default function PosPage() {
     window.clearTimeout((notify as unknown as { _t?: number })._t);
     (notify as unknown as { _t?: number })._t = window.setTimeout(() => setBanner(null), 3000);
   }
+
+  // Clear the cart only when actually switching between incompatible modes (see lastPosMode
+  // above) - not on every mount, so a cart survives incidental navigation away and back within
+  // the same mode.
+  useEffect(() => {
+    const current = mode ?? "UNMODED";
+    if (lastPosMode !== undefined && lastPosMode !== current) {
+      store.clear();
+    }
+    lastPosMode = current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Default to Walk-in Customer so the cashier can start immediately.
   useEffect(() => {
@@ -79,6 +109,7 @@ export default function PosPage() {
         shipping: state.shipping > 0 ? state.shipping : undefined,
         redeemPoints: state.redeemPoints > 0 ? state.redeemPoints : undefined,
         appliedCreditAmount: selectTotals(state).appliedCredit > 0 ? selectTotals(state).appliedCredit : undefined,
+        mode,
       },
       {
         onSuccess: (sale) => {
@@ -114,6 +145,7 @@ export default function PosPage() {
         invoiceDiscountMode: state.invoiceDiscountValue > 0 ? state.invoiceDiscountMode : undefined,
         invoiceDiscountValue: state.invoiceDiscountValue > 0 ? state.invoiceDiscountValue : undefined,
         shipping: state.shipping > 0 ? state.shipping : undefined,
+        mode,
       },
       {
         onSuccess: (sale) => {
@@ -156,6 +188,7 @@ export default function PosPage() {
               businessLocationId: currentLocationId,
               customerId: state.customer?.id,
               label: `Hold ${new Date().toLocaleTimeString()}`,
+              mode,
               items: state.lines.map((l) => ({
                 productId: l.type === "PRODUCT" ? l.id : undefined,
                 serviceId: l.type === "SERVICE" ? l.id : undefined,
@@ -279,6 +312,7 @@ export default function PosPage() {
           notify={notify}
           onRecent={() => navigate("/sales")}
           onPrintLast={() => notify(isAr ? "أكمل بيعًا أولاً للطباعة" : "Complete a sale first to print")}
+          mode={mode}
         />
         <ProductGrid
           ref={searchRef}
@@ -287,6 +321,7 @@ export default function PosPage() {
           locale={locale}
           isAr={isAr}
           onOutOfStock={(name) => notify(isAr ? `${name}: نفد المخزون` : `${name}: out of stock`)}
+          fixedMode={mode === "SERVICE" ? "SERVICES" : mode === "PRODUCT" ? "PRODUCTS" : undefined}
         />
       </div>
     </div>

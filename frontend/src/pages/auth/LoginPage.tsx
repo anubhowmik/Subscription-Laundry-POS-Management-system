@@ -43,7 +43,11 @@ export default function LoginPage() {
       navigate("/", { replace: true });
     } catch (err) {
       if (isAxiosError(err) && err.response?.data?.code === "EMAIL_NOT_VERIFIED") {
-        navigate("/verify-email", { state: { email: values.usernameOrEmail } });
+        // Only pass this through as "the email" if it actually looks like one - this field
+        // accepts a username too, and showing "we sent a link to <username>" on the next page
+        // would be both wrong and useless for the resend button (which looks up by email).
+        const maybeEmail = values.usernameOrEmail.includes("@") ? values.usernameOrEmail : undefined;
+        navigate("/verify-email", { state: { email: maybeEmail } });
       } else if (isAxiosError(err) && err.response?.status === 401) {
         setServerError(t("auth.invalidCredentials"));
       } else {

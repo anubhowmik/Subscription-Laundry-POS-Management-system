@@ -21,6 +21,7 @@ import { StatCard } from "../../components/ui/StatCard";
 import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
 import { Tags } from "lucide-react";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 
 interface PickerResult {
   id: string;
@@ -164,7 +165,13 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
   const [pendingItems, setPendingItems] = useState<PriceListItemRow[] | null>(null);
   const items = pendingItems ?? detail?.items ?? [];
 
-  const [itemType, setItemType] = useState<"PRODUCT" | "SERVICE">("SERVICE");
+  // Product POS/Service POS only ever reach /products or /services respectively server-side
+  // (product.routes.ts and service.routes.ts are gated per app - see App.tsx) - offering the
+  // other type's picker here would search an endpoint that just 403s for that app. POS Laundry
+  // (or the legacy /pos context) keeps the free choice between both, exactly as before.
+  const appKey = useCurrentApp()?.key;
+  const lockedItemType = appKey === "posService" ? "SERVICE" : appKey === "posProduct" ? "PRODUCT" : undefined;
+  const [itemType, setItemType] = useState<"PRODUCT" | "SERVICE">(lockedItemType ?? "SERVICE");
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<PickerResult[]>([]);
   const [picked, setPicked] = useState<PickerResult | null>(null);
@@ -255,19 +262,25 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
 
       <div className="rounded-lg border border-dashed border-slate-300 p-3">
         <div className="mb-2 flex flex-wrap gap-2">
-          <select
-            value={itemType}
-            onChange={(e) => {
-              setItemType(e.target.value as "PRODUCT" | "SERVICE");
-              setSearch("");
-              setResults([]);
-              setPicked(null);
-            }}
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-          >
-            <option value="SERVICE">{isAr ? "خدمة" : "Service"}</option>
-            <option value="PRODUCT">{isAr ? "منتج" : "Product"}</option>
-          </select>
+          {lockedItemType ? (
+            <span className="flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-600">
+              {lockedItemType === "SERVICE" ? (isAr ? "خدمة" : "Service") : isAr ? "منتج" : "Product"}
+            </span>
+          ) : (
+            <select
+              value={itemType}
+              onChange={(e) => {
+                setItemType(e.target.value as "PRODUCT" | "SERVICE");
+                setSearch("");
+                setResults([]);
+                setPicked(null);
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+            >
+              <option value="SERVICE">{isAr ? "خدمة" : "Service"}</option>
+              <option value="PRODUCT">{isAr ? "منتج" : "Product"}</option>
+            </select>
+          )}
           <div className="relative flex-1">
             <input
               value={picked ? (isAr ? picked.nameAr || picked.nameEn : picked.nameEn) : search}
