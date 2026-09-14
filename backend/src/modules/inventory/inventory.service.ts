@@ -284,6 +284,14 @@ export async function listTransactions(query: Record<string, unknown>, organizat
     ...(query.type
       ? { type: query.type as "STOCK_IN" | "STOCK_OUT" | "SALE" | "SALE_RETURN" | "ADJUSTMENT" | "TRANSFER_IN" | "TRANSFER_OUT" }
       : {}),
+    ...(query.from || query.to
+      ? {
+          createdAt: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
   const [data, total] = await Promise.all([

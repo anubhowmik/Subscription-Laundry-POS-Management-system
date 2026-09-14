@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
+
+const SORTABLE_FIELDS = ["createdAt", "subject"];
 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null, userId: string) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "createdAt");
   const where: Prisma.MessageWhereInput = {
     organizationId,
     ...(allowedLocationIds
@@ -23,7 +26,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const [rows, total] = await Promise.all([
     prisma.message.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: {

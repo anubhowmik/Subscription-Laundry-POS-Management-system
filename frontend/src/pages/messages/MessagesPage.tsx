@@ -5,16 +5,22 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { confirmAction } from "../../stores/confirmStore";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { cn } from "../../lib/cn";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { Mail, MailOpen } from "lucide-react";
+import { Mail, MailOpen, Eye, Reply as ReplyIcon, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface MessageRow {
   id: string;
@@ -36,11 +42,29 @@ export default function MessagesPage() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageRow | null>(null);
   const [viewing, setViewing] = useState<MessageRow | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+
+  // Sortable column headers - backend whitelists these fields (message.service.ts's
+  // SORTABLE_FIELDS).
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { search, sortBy, sortOrder };
 
   const { data } = useQuery({
-    queryKey: ["messages", search],
+    queryKey: ["messages", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<MessageRow[]>>("/messages", { params: { search, limit: 50 } });
+      const res = await api.get<ApiSuccess<MessageRow[]>>("/messages", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
@@ -64,6 +88,40 @@ export default function MessagesPage() {
     queryKey: ["messages-unread-count"],
     queryFn: async () => (await api.get<ApiSuccess<{ count: number }>>("/messages/unread-count")).data.data.count,
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (m: MessageRow) => ReactNode; exportValue: (m: MessageRow) => string | number | null }[] = [
+    {
+      key: "fromBusinessLocation",
+      label: isAr ? "من" : "From",
+      render: (m) => (
+        <>
+          {!m.readByMe && <span className="me-1.5 inline-block h-2 w-2 rounded-full bg-sky-500" aria-hidden />}
+          {m.fromBusinessLocation.branchName}
+        </>
+      ),
+      exportValue: (m) => m.fromBusinessLocation.branchName,
+    },
+    { key: "toBusinessLocation", label: isAr ? "إلى" : "To", render: (m) => m.toBusinessLocation.branchName, exportValue: (m) => m.toBusinessLocation.branchName },
+    {
+      key: "subject",
+      label: isAr ? "الرسالة" : "Message",
+      sortField: "subject",
+      render: (m) => (
+        <>
+          <p className={cn("text-slate-800", !m.readByMe ? "font-semibold" : "font-medium")}>{m.subject}</p>
+          <p className="line-clamp-1 text-xs text-slate-500">{m.content}</p>
+        </>
+      ),
+      exportValue: (m) => m.subject,
+    },
+    { key: "createdByUser", label: isAr ? "بواسطة" : "By", render: (m) => <span className="text-slate-500">{m.createdByUser.fullNameEn}</span>, exportValue: (m) => m.createdByUser.fullNameEn },
+  ];
+
+  const columnVisibility = useColumnVisibility(
+    "messages",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -104,56 +162,94 @@ export default function MessagesPage() {
 
       <TableContainer>
         <TableToolbar>
-          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("common.search")} className="max-w-xs" />
+          <SearchInput
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder={t("common.search")}
+            className="max-w-xs"
+          />
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "الرسائل" : "Messages"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<MessageRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<MessageRow[]>>("/messages", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((m) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(m)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
         </TableToolbar>
         <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>{isAr ? "من" : "From"}</Th>
-              <Th>{isAr ? "إلى" : "To"}</Th>
-              <Th>{isAr ? "الرسالة" : "Message"}</Th>
-              <Th>{isAr ? "بواسطة" : "By"}</Th>
-              <Th>{isAr ? "إجراءات" : "Action"}</Th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
+              <Th>{t("common.actions")}</Th>
             </tr>
           </THead>
           <tbody>
             {data?.rows.map((m) => (
               <tr key={m.id} className={cn("border-b border-slate-100 last:border-0 hover:bg-slate-50/60", !m.readByMe && "bg-sky-50/60")}>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(m)}
+                  </td>
+                ))}
                 <td className="px-4 py-3">
-                  {!m.readByMe && <span className="me-1.5 inline-block h-2 w-2 rounded-full bg-sky-500" aria-hidden />}
-                  {m.fromBusinessLocation.branchName}
-                </td>
-                <td className="px-4 py-3">{m.toBusinessLocation.branchName}</td>
-                <td className="px-4 py-3">
-                  <p className={cn("text-slate-800", !m.readByMe ? "font-semibold" : "font-medium")}>{m.subject}</p>
-                  <p className="line-clamp-1 text-xs text-slate-500">{m.content}</p>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{m.createdByUser.fullNameEn}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2 text-xs">
-                    <button onClick={() => viewMutation.mutate(m.id)} className="rounded-lg px-2 py-1 font-medium text-sky-600 transition-colors hover:bg-sky-100">
-                      {isAr ? "عرض" : "Show"}
-                    </button>
-                    <button
+                  <RowActions>
+                    <RowActionButton icon={Eye} label={isAr ? "عرض" : "Show"} onClick={() => viewMutation.mutate(m.id)} />
+                    <RowActionButton
+                      icon={ReplyIcon}
+                      label={isAr ? "رد" : "Reply"}
                       onClick={() => {
                         setReplyTo(m);
                         setComposeOpen(true);
                       }}
-                      className="rounded-lg px-2 py-1 font-medium text-sky-600 transition-colors hover:bg-sky-100"
-                    >
-                      {isAr ? "رد" : "Reply"}
-                    </button>
-                    <button onClick={() => deleteMutation.mutate(m.id)} className="rounded-lg px-2 py-1 font-medium text-red-600 transition-colors hover:bg-red-100">
-                      {isAr ? "حذف" : "Delete"}
-                    </button>
-                  </div>
+                    />
+                    <RowActionButton
+                      icon={Trash2}
+                      label={isAr ? "حذف" : "Delete"}
+                      variant="danger"
+                      onClick={async () => {
+                        if (await confirmAction({ message: isAr ? "حذف هذه الرسالة؟" : "Delete this message?", danger: true })) deleteMutation.mutate(m.id);
+                      }}
+                    />
+                  </RowActions>
                 </td>
               </tr>
             ))}
             {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
@@ -162,6 +258,16 @@ export default function MessagesPage() {
         </Table>
         </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {composeOpen && (
         <ComposeModal

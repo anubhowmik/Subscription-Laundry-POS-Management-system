@@ -31,7 +31,24 @@ interface OrgSettings {
   paymentReminderAfterDays: number;
   paymentReminderIntervalDays: number;
   customerApprovalRequired: boolean;
+  contactCustomField1Label: string | null;
+  contactCustomField2Label: string | null;
+  contactCustomField3Label: string | null;
+  contactCustomField4Label: string | null;
+  contactCustomField5Label: string | null;
+  contactCustomField6Label: string | null;
+  contactCustomField7Label: string | null;
+  contactCustomField8Label: string | null;
+  contactCustomField9Label: string | null;
+  contactCustomField10Label: string | null;
+  sellCustomField1Label: string | null;
+  sellCustomField2Label: string | null;
+  sellCustomField3Label: string | null;
+  sellCustomField4Label: string | null;
 }
+
+const CUSTOM_FIELD_KEYS = Array.from({ length: 10 }, (_, i) => `contactCustomField${i + 1}Label` as keyof OrgSettings);
+const SELL_CUSTOM_FIELD_KEYS = Array.from({ length: 4 }, (_, i) => `sellCustomField${i + 1}Label` as keyof OrgSettings);
 
 export default function OrganizationSettingsPage() {
   const { i18n } = useTranslation();
@@ -258,6 +275,58 @@ export default function OrganizationSettingsPage() {
               ? "عند التفعيل، يبدأ العملاء الجدد بحالة معلّقة ولا يمكنهم الشراء حتى تتم الموافقة عليهم."
               : "When enabled, new customers start pending approval and can't check out until approved."}
           </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{isAr ? "تسميات الحقول المخصصة لجهات الاتصال" : "Contact Custom Field Labels"}</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <p className="mb-4 text-xs text-slate-400">
+            {isAr
+              ? "تُستخدم هذه التسميات لحقول الموردين والعملاء المخصصة. اتركها فارغة لاستخدام \"حقل مخصص رقم\" الافتراضي."
+              : "These labels apply to both Suppliers' and Customers' custom fields. Leave blank to use the default \"Custom Field N\"."}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {CUSTOM_FIELD_KEYS.map((key, i) => (
+              <div key={key}>
+                <label className={labelClass}>{isAr ? `حقل مخصص ${i + 1}` : `Custom Field ${i + 1}`}</label>
+                <input
+                  value={(form[key] as string | null) ?? ""}
+                  onChange={(e) => set(key, (e.target.value || null) as OrgSettings[typeof key])}
+                  placeholder={isAr ? `حقل مخصص ${i + 1}` : `Custom Field ${i + 1}`}
+                  className={inputClass}
+                />
+              </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{isAr ? "تسميات الحقول المخصصة للبيع" : "Sale Custom Field Labels"}</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <p className="mb-4 text-xs text-slate-400">
+            {isAr
+              ? "تُستخدم هذه التسميات للحقول المخصصة عند إضافة عملية بيع. اتركها فارغة لاستخدام \"حقل مخصص رقم\" الافتراضي."
+              : "These labels apply to Add Sale's custom fields. Leave blank to use the default \"Custom Field N\"."}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {SELL_CUSTOM_FIELD_KEYS.map((key, i) => (
+              <div key={key}>
+                <label className={labelClass}>{isAr ? `حقل مخصص ${i + 1}` : `Custom Field ${i + 1}`}</label>
+                <input
+                  value={(form[key] as string | null) ?? ""}
+                  onChange={(e) => set(key, (e.target.value || null) as OrgSettings[typeof key])}
+                  placeholder={isAr ? `حقل مخصص ${i + 1}` : `Custom Field ${i + 1}`}
+                  className={inputClass}
+                />
+              </div>
+            ))}
+          </div>
         </CardBody>
       </Card>
 

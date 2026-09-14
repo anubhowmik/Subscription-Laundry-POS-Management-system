@@ -11,10 +11,15 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Alert } from "../../components/ui/Alert";
 import { Modal } from "../../components/ui/Modal";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu, FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
 import { ShoppingBag, Undo2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 type ReturnReason = "DEFECTIVE" | "WRONG_ITEM" | "OVERSTOCK" | "OTHER";
 
@@ -62,21 +67,226 @@ export default function PurchasesPage() {
   const [purchaseFormOpen, setPurchaseFormOpen] = useState(false);
   const [returnFormOpen, setReturnFormOpen] = useState(false);
 
+  // Purchases tab: its own page/limit/sort state, matching SuppliersPage.tsx's list-toolbar
+  // pattern - each tab here is a genuinely separate paginated list backed by a different endpoint.
+  const [purchasePage, setPurchasePage] = useState(1);
+  const [purchaseLimit, setPurchaseLimit] = useState(25);
+  const [purchaseSortBy, setPurchaseSortBy] = useState("purchaseDate");
+  const [purchaseSortOrder, setPurchaseSortOrder] = useState<"asc" | "desc">("desc");
+  function handlePurchaseSort(field: string) {
+    if (purchaseSortBy === field) setPurchaseSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setPurchaseSortBy(field);
+      setPurchaseSortOrder("asc");
+    }
+  }
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState("");
+  const [purchaseStatus, setPurchaseStatus] = useState<"" | "RECEIVED" | "CANCELLED">("");
+  const [purchasePaymentStatus, setPurchasePaymentStatus] = useState<"" | "PAID" | "PARTIAL" | "DUE">("");
+  const [purchaseFromDate, setPurchaseFromDate] = useState("");
+  const [purchaseToDate, setPurchaseToDate] = useState("");
+  const purchaseActiveFilterCount =
+    (purchaseSupplierId ? 1 : 0) + (purchaseStatus ? 1 : 0) + (purchasePaymentStatus ? 1 : 0) + (purchaseFromDate ? 1 : 0) + (purchaseToDate ? 1 : 0);
+  function clearPurchaseFilters() {
+    setPurchaseSupplierId("");
+    setPurchaseStatus("");
+    setPurchasePaymentStatus("");
+    setPurchaseFromDate("");
+    setPurchaseToDate("");
+    setPurchasePage(1);
+  }
+
+  // Returns tab: separate page/limit/sort state - see purchase.service.ts's listReturns() for the
+  // backend side (its own SORTABLE_FIELDS whitelist, independent of the purchases list).
+  const [returnPage, setReturnPage] = useState(1);
+  const [returnLimit, setReturnLimit] = useState(25);
+  const [returnSortBy, setReturnSortBy] = useState("returnDate");
+  const [returnSortOrder, setReturnSortOrder] = useState<"asc" | "desc">("desc");
+  function handleReturnSort(field: string) {
+    if (returnSortBy === field) setReturnSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setReturnSortBy(field);
+      setReturnSortOrder("asc");
+    }
+  }
+  const [returnSupplierId, setReturnSupplierId] = useState("");
+  const [returnFromDate, setReturnFromDate] = useState("");
+  const [returnToDate, setReturnToDate] = useState("");
+  const returnActiveFilterCount = (returnSupplierId ? 1 : 0) + (returnFromDate ? 1 : 0) + (returnToDate ? 1 : 0);
+  function clearReturnFilters() {
+    setReturnSupplierId("");
+    setReturnFromDate("");
+    setReturnToDate("");
+    setReturnPage(1);
+  }
+
+  const { data: supplierOptions } = useQuery({
+    queryKey: ["suppliers", "all"],
+    queryFn: async () => (await api.get<ApiSuccess<Supplier[]>>("/suppliers", { params: { limit: 100 } })).data.data,
+  });
+
+  // Shared with each tab's "export all matching rows" fetch below - keep every filter param here
+  // so export always reflects exactly what's currently on screen, just without the page cap.
+  const purchaseFilterParams = {
+    sortBy: purchaseSortBy,
+    sortOrder: purchaseSortOrder,
+    ...(purchaseSupplierId ? { supplierId: purchaseSupplierId } : {}),
+    ...(purchaseStatus ? { status: purchaseStatus } : {}),
+    ...(purchasePaymentStatus ? { paymentStatus: purchasePaymentStatus } : {}),
+    ...(purchaseFromDate ? { from: purchaseFromDate } : {}),
+    ...(purchaseToDate ? { to: purchaseToDate } : {}),
+  };
+  const returnFilterParams = {
+    sortBy: returnSortBy,
+    sortOrder: returnSortOrder,
+    ...(returnSupplierId ? { supplierId: returnSupplierId } : {}),
+    ...(returnFromDate ? { from: returnFromDate } : {}),
+    ...(returnToDate ? { to: returnToDate } : {}),
+  };
+
   const { data: purchases } = useQuery({
-    queryKey: ["purchases"],
+    queryKey: ["purchases", purchasePage, purchaseLimit, purchaseFilterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<PurchaseRow[]>>("/purchases", { params: { limit: 50 } });
+      const res = await api.get<ApiSuccess<PurchaseRow[]>>("/purchases", {
+        params: { ...purchaseFilterParams, page: purchasePage, limit: purchaseLimit },
+      });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
 
   const { data: returns } = useQuery({
-    queryKey: ["purchase-returns"],
+    queryKey: ["purchase-returns", returnPage, returnLimit, returnFilterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<PurchaseReturnRow[]>>("/purchases/returns", { params: { limit: 50 } });
+      const res = await api.get<ApiSuccess<PurchaseReturnRow[]>>("/purchases/returns", {
+        params: { ...returnFilterParams, page: returnPage, limit: returnLimit },
+      });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
+
+  const purchaseColumns: { key: string; label: string; sortField?: string; render: (p: PurchaseRow) => ReactNode; exportValue: (p: PurchaseRow) => string | number | null }[] = [
+    {
+      key: "purchaseDate",
+      label: isAr ? "التاريخ" : "Date",
+      sortField: "purchaseDate",
+      render: (p) => <span className="ltr-nums">{new Date(p.purchaseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (p) => new Date(p.purchaseDate).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "referenceNumber",
+      label: isAr ? "المرجع" : "Reference",
+      sortField: "referenceNumber",
+      render: (p) => <span className="ltr-nums">{p.referenceNumber}</span>,
+      exportValue: (p) => p.referenceNumber,
+    },
+    {
+      key: "supplier",
+      label: isAr ? "المورد" : "Supplier",
+      render: (p) => (isAr ? p.supplier.nameAr || p.supplier.nameEn : p.supplier.nameEn),
+      exportValue: (p) => (isAr ? p.supplier.nameAr || p.supplier.nameEn : p.supplier.nameEn),
+    },
+    {
+      key: "items",
+      label: isAr ? "الأصناف" : "Items",
+      render: (p) => (
+        <>
+          {p.items.map((item) => (
+            <div key={item.id} className="text-xs text-slate-600">
+              {isAr ? item.product.nameAr || item.product.nameEn : item.product.nameEn}
+              <span className="ltr-nums text-slate-400"> × {item.quantity}</span>
+            </div>
+          ))}
+        </>
+      ),
+      exportValue: (p) => p.items.map((item) => `${isAr ? item.product.nameAr || item.product.nameEn : item.product.nameEn} x${item.quantity}`).join("; "),
+    },
+    {
+      key: "totalAmount",
+      label: isAr ? "الإجمالي" : "Total",
+      sortField: "totalAmount",
+      render: (p) => <span className="ltr-nums">{formatMoney(p.totalAmount, currency, locale)}</span>,
+      exportValue: (p) => Number(p.totalAmount),
+    },
+    {
+      key: "paidAmount",
+      label: isAr ? "المدفوع" : "Paid",
+      render: (p) => <span className="ltr-nums">{formatMoney(p.paidAmount, currency, locale)}</span>,
+      exportValue: (p) => Number(p.paidAmount),
+    },
+    {
+      key: "createdByUser",
+      label: isAr ? "بواسطة" : "By",
+      render: (p) => p.createdByUser.fullNameEn,
+      exportValue: (p) => p.createdByUser.fullNameEn,
+    },
+  ];
+  const purchaseColumnVisibility = useColumnVisibility("purchases", purchaseColumns.map((c) => c.key));
+  const visiblePurchaseColumns = purchaseColumns.filter((c) => purchaseColumnVisibility.isVisible(c.key));
+
+  const returnColumns: { key: string; label: string; sortField?: string; render: (r: PurchaseReturnRow) => ReactNode; exportValue: (r: PurchaseReturnRow) => string | number | null }[] = [
+    {
+      key: "returnDate",
+      label: isAr ? "التاريخ" : "Date",
+      sortField: "returnDate",
+      render: (r) => <span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (r) => new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "purchaseRef",
+      label: isAr ? "مرجع الشراء" : "Purchase Ref",
+      render: (r) => <span className="ltr-nums">{r.purchase.referenceNumber}</span>,
+      exportValue: (r) => r.purchase.referenceNumber,
+    },
+    {
+      key: "supplier",
+      label: isAr ? "المورد" : "Supplier",
+      render: (r) => (isAr ? r.supplier.nameAr || r.supplier.nameEn : r.supplier.nameEn),
+      exportValue: (r) => (isAr ? r.supplier.nameAr || r.supplier.nameEn : r.supplier.nameEn),
+    },
+    {
+      key: "items",
+      label: isAr ? "الأصناف" : "Items",
+      render: (r) => (
+        <>
+          {r.items.map((item) => (
+            <div key={item.id} className="text-xs text-slate-600">
+              {isAr ? item.purchaseItem.product.nameAr || item.purchaseItem.product.nameEn : item.purchaseItem.product.nameEn}
+              <span className="ltr-nums text-slate-400"> × {item.quantity}</span> —{" "}
+              <span className="text-slate-400">{isAr ? REASON_LABEL[item.reason].ar : REASON_LABEL[item.reason].en}</span>
+            </div>
+          ))}
+        </>
+      ),
+      exportValue: (r) =>
+        r.items
+          .map(
+            (item) =>
+              `${isAr ? item.purchaseItem.product.nameAr || item.purchaseItem.product.nameEn : item.purchaseItem.product.nameEn} x${item.quantity} (${isAr ? REASON_LABEL[item.reason].ar : REASON_LABEL[item.reason].en})`,
+          )
+          .join("; "),
+    },
+    {
+      key: "totalAmount",
+      label: isAr ? "الإجمالي" : "Total",
+      sortField: "totalAmount",
+      render: (r) => <span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span>,
+      exportValue: (r) => Number(r.totalAmount),
+    },
+    {
+      key: "refundedAmount",
+      label: isAr ? "المسترد" : "Refunded",
+      render: (r) => <span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span>,
+      exportValue: (r) => Number(r.refundedAmount),
+    },
+    {
+      key: "createdByUser",
+      label: isAr ? "بواسطة" : "By",
+      render: (r) => r.createdByUser.fullNameEn,
+      exportValue: (r) => r.createdByUser.fullNameEn,
+    },
+  ];
+  const returnColumnVisibility = useColumnVisibility("purchase-returns", returnColumns.map((c) => c.key));
+  const visibleReturnColumns = returnColumns.filter((c) => returnColumnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -137,94 +347,286 @@ export default function PurchasesPage() {
       </div>
 
       {tab === "PURCHASES" && (
-        <TableContainer>
-          <Table>
-            <THead>
-              <tr>
-                <Th>{isAr ? "التاريخ" : "Date"}</Th>
-                <Th>{isAr ? "المرجع" : "Reference"}</Th>
-                <Th>{isAr ? "المورد" : "Supplier"}</Th>
-                <Th>{isAr ? "الأصناف" : "Items"}</Th>
-                <Th>{isAr ? "الإجمالي" : "Total"}</Th>
-                <Th>{isAr ? "المدفوع" : "Paid"}</Th>
-                <Th>{isAr ? "بواسطة" : "By"}</Th>
-              </tr>
-            </THead>
-            <tbody>
-              {purchases?.rows.map((p) => (
-                <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                  <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(p.purchaseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                  <td className="px-4 py-3 font-medium"><span className="ltr-nums">{p.referenceNumber}</span></td>
-                  <td className="px-4 py-3">{isAr ? p.supplier.nameAr || p.supplier.nameEn : p.supplier.nameEn}</td>
-                  <td className="px-4 py-3">
-                    {p.items.map((item) => (
-                      <div key={item.id} className="text-xs text-slate-600">
-                        {isAr ? item.product.nameAr || item.product.nameEn : item.product.nameEn}
-                        <span className="ltr-nums text-slate-400"> × {item.quantity}</span>
-                      </div>
+        <>
+          <TableContainer>
+            <TableToolbar>
+              <FiltersMenu activeCount={purchaseActiveFilterCount} onClear={clearPurchaseFilters} isAr={isAr}>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المورد" : "Supplier"}</label>
+                  <select
+                    value={purchaseSupplierId}
+                    onChange={(e) => {
+                      setPurchaseSupplierId(e.target.value);
+                      setPurchasePage(1);
+                    }}
+                    className={cn(selectClass, "w-full")}
+                  >
+                    <option value="">{isAr ? "الكل" : "All"}</option>
+                    {supplierOptions?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {isAr ? s.nameAr || s.nameEn : s.nameEn}
+                      </option>
                     ))}
-                  </td>
-                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.totalAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.paidAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-3 text-slate-500">{p.createdByUser.fullNameEn}</td>
-                </tr>
-              ))}
-              {purchases?.rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    {t("common.noResults")}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </Table>
-        </TableContainer>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "حالة الشراء" : "Purchase Status"}</label>
+                  <select
+                    value={purchaseStatus}
+                    onChange={(e) => {
+                      setPurchaseStatus(e.target.value as typeof purchaseStatus);
+                      setPurchasePage(1);
+                    }}
+                    className={cn(selectClass, "w-full")}
+                  >
+                    <option value="">{isAr ? "الكل" : "All"}</option>
+                    <option value="RECEIVED">{isAr ? "مستلم" : "Received"}</option>
+                    <option value="CANCELLED">{isAr ? "ملغى" : "Cancelled"}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "حالة الدفع" : "Payment Status"}</label>
+                  <select
+                    value={purchasePaymentStatus}
+                    onChange={(e) => {
+                      setPurchasePaymentStatus(e.target.value as typeof purchasePaymentStatus);
+                      setPurchasePage(1);
+                    }}
+                    className={cn(selectClass, "w-full")}
+                  >
+                    <option value="">{isAr ? "الكل" : "All"}</option>
+                    <option value="PAID">{isAr ? "مدفوع" : "Paid"}</option>
+                    <option value="PARTIAL">{isAr ? "مدفوع جزئيًا" : "Partial"}</option>
+                    <option value="DUE">{isAr ? "مستحق" : "Due"}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من" : "From"}</label>
+                  <input
+                    type="date"
+                    value={purchaseFromDate}
+                    onChange={(e) => {
+                      setPurchaseFromDate(e.target.value);
+                      setPurchasePage(1);
+                    }}
+                    className={cn(inputClass, "w-full ltr-nums")}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى" : "To"}</label>
+                  <input
+                    type="date"
+                    value={purchaseToDate}
+                    onChange={(e) => {
+                      setPurchaseToDate(e.target.value);
+                      setPurchasePage(1);
+                    }}
+                    className={cn(inputClass, "w-full ltr-nums")}
+                  />
+                </div>
+              </FiltersMenu>
+              <div className="ms-auto flex items-center gap-1.5">
+                <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+                <PageSizeSelect
+                  value={purchaseLimit}
+                  onChange={(n) => {
+                    setPurchaseLimit(n);
+                    setPurchasePage(1);
+                  }}
+                />
+                <ColumnVisibilityMenu
+                  columns={purchaseColumns.map((c) => ({ key: c.key, label: c.label }))}
+                  isVisible={purchaseColumnVisibility.isVisible}
+                  onToggle={purchaseColumnVisibility.toggle}
+                  isAr={isAr}
+                />
+                <TableExportButtons
+                  title={isAr ? "المشتريات" : "Purchases"}
+                  columns={visiblePurchaseColumns.map((c) => ({ key: c.key, label: c.label }))}
+                  getRows={async () => {
+                    const all = await fetchAllRows<PurchaseRow>(async (p, l) => {
+                      const res = await api.get<ApiSuccess<PurchaseRow[]>>("/purchases", { params: { ...purchaseFilterParams, page: p, limit: l } });
+                      return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                    });
+                    return all.map((p) => Object.fromEntries(visiblePurchaseColumns.map((c) => [c.key, c.exportValue(p)])));
+                  }}
+                  isAr={isAr}
+                />
+              </div>
+            </TableToolbar>
+            <TableScroll>
+              <Table>
+                <THead>
+                  <tr>
+                    {visiblePurchaseColumns.map((c) =>
+                      c.sortField ? (
+                        <SortableTh key={c.key} field={c.sortField} sortBy={purchaseSortBy} sortOrder={purchaseSortOrder} onSort={handlePurchaseSort}>
+                          {c.label}
+                        </SortableTh>
+                      ) : (
+                        <Th key={c.key}>{c.label}</Th>
+                      ),
+                    )}
+                  </tr>
+                </THead>
+                <tbody>
+                  {purchases?.rows.map((p) => (
+                    <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                      {visiblePurchaseColumns.map((c) => (
+                        <td key={c.key} className="px-4 py-3">
+                          {c.render(p)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {purchases?.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={visiblePurchaseColumns.length} className="px-4 py-8 text-center text-slate-400">
+                        {t("common.noResults")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </TableScroll>
+          </TableContainer>
+
+          {purchases?.meta && purchases.meta.totalPages > 1 && (
+            <Pagination
+              page={purchasePage}
+              totalPages={purchases.meta.totalPages}
+              onPrev={() => setPurchasePage((p) => p - 1)}
+              onNext={() => setPurchasePage((p) => p + 1)}
+              label={`${t("common.page")} ${purchasePage} ${t("common.of")} ${purchases.meta.totalPages}`}
+            />
+          )}
+        </>
       )}
 
       {tab === "RETURNS" && (
-        <TableContainer>
-          <Table>
-            <THead>
-              <tr>
-                <Th>{isAr ? "التاريخ" : "Date"}</Th>
-                <Th>{isAr ? "مرجع الشراء" : "Purchase Ref"}</Th>
-                <Th>{isAr ? "المورد" : "Supplier"}</Th>
-                <Th>{isAr ? "الأصناف" : "Items"}</Th>
-                <Th>{isAr ? "الإجمالي" : "Total"}</Th>
-                <Th>{isAr ? "المسترد" : "Refunded"}</Th>
-                <Th>{isAr ? "بواسطة" : "By"}</Th>
-              </tr>
-            </THead>
-            <tbody>
-              {returns?.rows.map((r) => (
-                <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                  <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.returnDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                  <td className="px-4 py-3 font-medium"><span className="ltr-nums">{r.purchase.referenceNumber}</span></td>
-                  <td className="px-4 py-3">{isAr ? r.supplier.nameAr || r.supplier.nameEn : r.supplier.nameEn}</td>
-                  <td className="px-4 py-3">
-                    {r.items.map((item) => (
-                      <div key={item.id} className="text-xs text-slate-600">
-                        {isAr ? item.purchaseItem.product.nameAr || item.purchaseItem.product.nameEn : item.purchaseItem.product.nameEn}
-                        <span className="ltr-nums text-slate-400"> × {item.quantity}</span> —{" "}
-                        <span className="text-slate-400">{isAr ? REASON_LABEL[item.reason].ar : REASON_LABEL[item.reason].en}</span>
-                      </div>
+        <>
+          <TableContainer>
+            <TableToolbar>
+              <FiltersMenu activeCount={returnActiveFilterCount} onClear={clearReturnFilters} isAr={isAr}>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "المورد" : "Supplier"}</label>
+                  <select
+                    value={returnSupplierId}
+                    onChange={(e) => {
+                      setReturnSupplierId(e.target.value);
+                      setReturnPage(1);
+                    }}
+                    className={cn(selectClass, "w-full")}
+                  >
+                    <option value="">{isAr ? "الكل" : "All"}</option>
+                    {supplierOptions?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {isAr ? s.nameAr || s.nameEn : s.nameEn}
+                      </option>
                     ))}
-                  </td>
-                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.totalAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(r.refundedAmount, currency, locale)}</span></td>
-                  <td className="px-4 py-3 text-slate-500">{r.createdByUser.fullNameEn}</td>
-                </tr>
-              ))}
-              {returns?.rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    {t("common.noResults")}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </Table>
-        </TableContainer>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من" : "From"}</label>
+                  <input
+                    type="date"
+                    value={returnFromDate}
+                    onChange={(e) => {
+                      setReturnFromDate(e.target.value);
+                      setReturnPage(1);
+                    }}
+                    className={cn(inputClass, "w-full ltr-nums")}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى" : "To"}</label>
+                  <input
+                    type="date"
+                    value={returnToDate}
+                    onChange={(e) => {
+                      setReturnToDate(e.target.value);
+                      setReturnPage(1);
+                    }}
+                    className={cn(inputClass, "w-full ltr-nums")}
+                  />
+                </div>
+              </FiltersMenu>
+              <div className="ms-auto flex items-center gap-1.5">
+                <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+                <PageSizeSelect
+                  value={returnLimit}
+                  onChange={(n) => {
+                    setReturnLimit(n);
+                    setReturnPage(1);
+                  }}
+                />
+                <ColumnVisibilityMenu
+                  columns={returnColumns.map((c) => ({ key: c.key, label: c.label }))}
+                  isVisible={returnColumnVisibility.isVisible}
+                  onToggle={returnColumnVisibility.toggle}
+                  isAr={isAr}
+                />
+                <TableExportButtons
+                  title={isAr ? "مرتجعات الشراء" : "Purchase Returns"}
+                  columns={visibleReturnColumns.map((c) => ({ key: c.key, label: c.label }))}
+                  getRows={async () => {
+                    const all = await fetchAllRows<PurchaseReturnRow>(async (p, l) => {
+                      const res = await api.get<ApiSuccess<PurchaseReturnRow[]>>("/purchases/returns", { params: { ...returnFilterParams, page: p, limit: l } });
+                      return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                    });
+                    return all.map((r) => Object.fromEntries(visibleReturnColumns.map((c) => [c.key, c.exportValue(r)])));
+                  }}
+                  isAr={isAr}
+                />
+              </div>
+            </TableToolbar>
+            <TableScroll>
+              <Table>
+                <THead>
+                  <tr>
+                    {visibleReturnColumns.map((c) =>
+                      c.sortField ? (
+                        <SortableTh key={c.key} field={c.sortField} sortBy={returnSortBy} sortOrder={returnSortOrder} onSort={handleReturnSort}>
+                          {c.label}
+                        </SortableTh>
+                      ) : (
+                        <Th key={c.key}>{c.label}</Th>
+                      ),
+                    )}
+                  </tr>
+                </THead>
+                <tbody>
+                  {returns?.rows.map((r) => (
+                    <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                      {visibleReturnColumns.map((c) => (
+                        <td key={c.key} className="px-4 py-3">
+                          {c.render(r)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {returns?.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={visibleReturnColumns.length} className="px-4 py-8 text-center text-slate-400">
+                        {t("common.noResults")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </TableScroll>
+          </TableContainer>
+
+          {returns?.meta && returns.meta.totalPages > 1 && (
+            <Pagination
+              page={returnPage}
+              totalPages={returns.meta.totalPages}
+              onPrev={() => setReturnPage((p) => p - 1)}
+              onNext={() => setReturnPage((p) => p + 1)}
+              label={`${t("common.page")} ${returnPage} ${t("common.of")} ${returns.meta.totalPages}`}
+            />
+          )}
+        </>
       )}
 
       {purchaseFormOpen && (

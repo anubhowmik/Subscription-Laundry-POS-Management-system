@@ -5,15 +5,21 @@ import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
+import { confirmAction } from "../../stores/confirmStore";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { Megaphone } from "lucide-react";
+import { Megaphone, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface AnnouncementRow {
   id: string;
@@ -32,11 +38,29 @@ export default function AnnouncementsPage() {
   const qc = useQueryClient();
 
   const [formOpen, setFormOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+
+  // Sortable column headers - backend whitelists these fields (announcement.service.ts's
+  // SORTABLE_FIELDS).
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { sortBy, sortOrder };
 
   const { data } = useQuery({
-    queryKey: ["announcements"],
+    queryKey: ["announcements", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<AnnouncementRow[]>>("/announcements", { params: { limit: 50 } });
+      const res = await api.get<ApiSuccess<AnnouncementRow[]>>("/announcements", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
@@ -45,6 +69,42 @@ export default function AnnouncementsPage() {
     mutationFn: async (id: string) => api.delete(`/announcements/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["announcements"] }),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (a: AnnouncementRow) => ReactNode; exportValue: (a: AnnouncementRow) => string | number | null }[] = [
+    {
+      key: "fromDate",
+      label: isAr ? "من تاريخ" : "From Date",
+      sortField: "fromDate",
+      render: (a) => <span className="ltr-nums">{new Date(a.fromDate).toLocaleDateString(locale)}</span>,
+      exportValue: (a) => new Date(a.fromDate).toLocaleDateString(locale),
+    },
+    {
+      key: "toDate",
+      label: isAr ? "إلى تاريخ" : "To Date",
+      sortField: "toDate",
+      render: (a) => <span className="ltr-nums">{new Date(a.toDate).toLocaleDateString(locale)}</span>,
+      exportValue: (a) => new Date(a.toDate).toLocaleDateString(locale),
+    },
+    {
+      key: "locations",
+      label: isAr ? "الفرع" : "Branch",
+      render: (a) => (a.locations.length === 0 ? (isAr ? "كل الفروع" : "All locations") : a.locations.map((l) => l.businessLocation.branchName).join(", ")),
+      exportValue: (a) => (a.locations.length === 0 ? "All locations" : a.locations.map((l) => l.businessLocation.branchName).join(", ")),
+    },
+    { key: "content", label: isAr ? "الإعلان" : "Announcement", render: (a) => <span className="block max-w-xs truncate">{a.content}</span>, exportValue: (a) => a.content },
+    {
+      key: "isPublished",
+      label: t("common.status"),
+      render: (a) => <Badge variant={a.isPublished ? "success" : "neutral"}>{a.isPublished ? (isAr ? "منشور" : "Published") : isAr ? "مسودة" : "Draft"}</Badge>,
+      exportValue: (a) => (a.isPublished ? (isAr ? "منشور" : "Published") : isAr ? "مسودة" : "Draft"),
+    },
+  ];
+
+  const columnVisibility = useColumnVisibility(
+    "announcements",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -68,52 +128,95 @@ export default function AnnouncementsPage() {
       )}
 
       <TableContainer>
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "الإعلانات" : "Announcements"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<AnnouncementRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<AnnouncementRow[]>>("/announcements", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((a) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(a)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>{isAr ? "من تاريخ" : "From Date"}</Th>
-              <Th>{isAr ? "إلى تاريخ" : "To Date"}</Th>
-              <Th>{isAr ? "الفرع" : "Branch"}</Th>
-              <Th>{isAr ? "الإعلان" : "Announcement"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{isAr ? "إجراءات" : "Action"}</Th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
+              <Th>{t("common.actions")}</Th>
             </tr>
           </THead>
           <tbody>
             {data?.rows.map((a) => (
               <tr key={a.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3"><span className="ltr-nums">{new Date(a.fromDate).toLocaleDateString(locale)}</span></td>
-                <td className="px-4 py-3"><span className="ltr-nums">{new Date(a.toDate).toLocaleDateString(locale)}</span></td>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(a)}
+                  </td>
+                ))}
                 <td className="px-4 py-3">
-                  {a.locations.length === 0
-                    ? isAr
-                      ? "كل الفروع"
-                      : "All locations"
-                    : a.locations.map((l) => l.businessLocation.branchName).join(", ")}
-                </td>
-                <td className="max-w-xs truncate px-4 py-3">{a.content}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={a.isPublished ? "success" : "neutral"}>
-                    {a.isPublished ? (isAr ? "منشور" : "Published") : (isAr ? "مسودة" : "Draft")}
-                  </Badge>
-                </td>
-                <td className="px-4 py-3">
-                  <button onClick={() => deleteMutation.mutate(a.id)} className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100">
-                    {isAr ? "حذف" : "Delete"}
-                  </button>
+                  <RowActions>
+                    <RowActionButton
+                      icon={Trash2}
+                      label={isAr ? "حذف" : "Delete"}
+                      variant="danger"
+                      onClick={async () => {
+                        if (await confirmAction({ message: isAr ? "حذف هذا الإعلان؟" : "Delete this announcement?", danger: true })) deleteMutation.mutate(a.id);
+                      }}
+                    />
+                  </RowActions>
                 </td>
               </tr>
             ))}
             {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
             )}
           </tbody>
         </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && (
         <AnnouncementFormModal

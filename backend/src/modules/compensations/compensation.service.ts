@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
 import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { adjustPoints } from "../loyalty/loyalty.service";
 import { adjustCashback } from "../cashback/cashback.service";
@@ -77,6 +77,10 @@ interface ViewScope {
   userId: string;
 }
 
+// Claims accumulate indefinitely (every damaged/lost-item dispute files a new one) - genuinely
+// unbounded, so the list page gets real sortable columns, not just a fixed createdAt order.
+const SORTABLE_FIELDS = ["claimedAmount", "approvedAmount", "status", "createdAt"];
+
 export async function list(
   query: Record<string, unknown>,
   organizationId: string,
@@ -84,6 +88,7 @@ export async function list(
   scope: ViewScope,
 ) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "createdAt");
   const where: Prisma.CompensationWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
@@ -94,7 +99,7 @@ export async function list(
   };
 
   const [data, total] = await Promise.all([
-    prisma.compensation.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: limit, include: COMPENSATION_INCLUDE }),
+    prisma.compensation.findMany({ where, orderBy, skip, take: limit, include: COMPENSATION_INCLUDE }),
     prisma.compensation.count({ where }),
   ]);
 

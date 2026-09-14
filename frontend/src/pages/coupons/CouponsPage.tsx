@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
 import { confirmAction } from "../../stores/confirmStore";
-import type { ApiSuccess } from "../../types/api";
+import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useCoupons, useCustomers, type CouponRow } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
+import { fetchAllRows } from "../../lib/tableExport";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
@@ -13,9 +14,13 @@ import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { Pagination } from "../../components/ui/Pagination";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { Ticket } from "lucide-react";
+import { Ticket, Power } from "lucide-react";
+import type { ReactNode } from "react";
 
 export default function CouponsPage() {
   const { t, i18n } = useTranslation();
@@ -25,13 +30,73 @@ export default function CouponsPage() {
   const locale = isAr ? "ar-SA" : "en-US";
   const qc = useQueryClient();
 
-  const { data: coupons } = useCoupons();
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  // Coupon codes accumulate indefinitely (one per campaign) - a genuinely unbounded, growable
+  // list, so it gets real server-side pagination/sorting (see coupon.service.ts's SORTABLE_FIELDS)
+  // rather than a client-side-only sort.
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { sortBy, sortOrder };
+
+  const { data } = useCoupons({ ...filterParams, page, limit });
   const [formOpen, setFormOpen] = useState(false);
 
   const deactivateMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/coupons/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["coupons"] }),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (c: CouponRow) => ReactNode; exportValue: (c: CouponRow) => string | number | null }[] = [
+    { key: "code", label: isAr ? "الكود" : "Code", sortField: "code", render: (c) => <span className="ltr-nums">{c.code}</span>, exportValue: (c) => c.code },
+    {
+      key: "discount",
+      label: isAr ? "الخصم" : "Discount",
+      sortField: "discountValue",
+      render: (c) => <span className="ltr-nums">{c.discountMode === "PERCENT" ? `${c.discountValue}%` : formatMoney(c.discountValue, currency, locale)}</span>,
+      exportValue: (c) => (c.discountMode === "PERCENT" ? `${c.discountValue}%` : c.discountValue),
+    },
+    {
+      key: "minPurchaseAmount",
+      label: isAr ? "الحد الأدنى" : "Min Purchase",
+      sortField: "minPurchaseAmount",
+      render: (c) => <span className="ltr-nums">{formatMoney(c.minPurchaseAmount, currency, locale)}</span>,
+      exportValue: (c) => Number(c.minPurchaseAmount),
+    },
+    {
+      key: "usage",
+      label: isAr ? "الاستخدام" : "Usage",
+      sortField: "usedCount",
+      render: (c) => (
+        <span className="ltr-nums">
+          {c.usedCount}
+          {c.maxUses ? ` / ${c.maxUses}` : ""}
+        </span>
+      ),
+      exportValue: (c) => `${c.usedCount}${c.maxUses ? ` / ${c.maxUses}` : ""}`,
+    },
+    {
+      key: "status",
+      label: t("common.status"),
+      render: (c) => <Badge variant={c.isActive ? "success" : "neutral"}>{c.isActive ? t("common.active") : t("common.inactive")}</Badge>,
+      exportValue: (c) => (c.isActive ? t("common.active") : t("common.inactive")),
+    },
+  ];
+  const columnVisibility = useColumnVisibility(
+    "coupons",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -42,74 +107,112 @@ export default function CouponsPage() {
 
       {formOpen && <CouponFormModal isAr={isAr} onClose={() => setFormOpen(false)} onSaved={() => setFormOpen(false)} />}
 
-      <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
-        <StatCard
-          icon={Ticket}
-          cardBg="bg-app-pos-500"
-          iconBg="bg-white/20"
-          iconColor="text-white"
-          highlight
-          label={isAr ? "الكوبونات" : "Coupons"}
-          value={String(coupons?.length ?? 0)}
-        />
-      </div>
+      {data?.meta && (
+        <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
+          <StatCard
+            icon={Ticket}
+            cardBg="bg-app-pos-500"
+            iconBg="bg-white/20"
+            iconColor="text-white"
+            highlight
+            label={isAr ? "الكوبونات" : "Coupons"}
+            value={String(data.meta.total)}
+          />
+        </div>
+      )}
 
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>{isAr ? "الكود" : "Code"}</Th>
-              <Th>{isAr ? "الخصم" : "Discount"}</Th>
-              <Th>{isAr ? "الحد الأدنى" : "Min Purchase"}</Th>
-              <Th>{isAr ? "الاستخدام" : "Usage"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{t("common.actions")}</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {coupons?.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 font-medium"><span className="ltr-nums">{c.code}</span></td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">
-                    {c.discountMode === "PERCENT" ? `${c.discountValue}%` : formatMoney(c.discountValue, currency, locale)}
-                  </span>
-                </td>
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(c.minPurchaseAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">
-                    {c.usedCount}
-                    {c.maxUses ? ` / ${c.maxUses}` : ""}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <Badge variant={c.isActive ? "success" : "neutral"}>{c.isActive ? t("common.active") : t("common.inactive")}</Badge>
-                </td>
-                <td className="px-4 py-3 text-end">
-                  {c.isActive && (
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={async () => {
-                        if (await confirmAction({ message: isAr ? `تعطيل "${c.code}"؟` : `Deactivate "${c.code}"?`, danger: true })) deactivateMutation.mutate(c.id);
-                      }}
-                    >
-                      {isAr ? "تعطيل" : "Deactivate"}
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {coupons?.length === 0 && (
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "الكوبونات" : "Coupons"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<CouponRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<CouponRow[]>>("/coupons", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((c) => Object.fromEntries(visibleColumns.map((col) => [col.key, col.exportValue(c)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                  {t("common.noResults")}
-                </td>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
+                <Th>{t("common.actions")}</Th>
               </tr>
-            )}
-          </tbody>
-        </Table>
+            </THead>
+            <tbody>
+              {data?.rows.map((c) => (
+                <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {visibleColumns.map((col) => (
+                    <td key={col.key} className="px-4 py-3">
+                      {col.render(c)}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 text-end">
+                    <RowActions>
+                      {c.isActive && (
+                        <RowActionButton
+                          icon={Power}
+                          label={isAr ? "تعطيل" : "Deactivate"}
+                          variant="danger"
+                          onClick={async () => {
+                            if (await confirmAction({ message: isAr ? `تعطيل "${c.code}"؟` : `Deactivate "${c.code}"?`, danger: true })) deactivateMutation.mutate(c.id);
+                          }}
+                        />
+                      )}
+                    </RowActions>
+                  </td>
+                </tr>
+              ))}
+              {data?.rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
+                    {t("common.noResults")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
     </div>
   );
 }

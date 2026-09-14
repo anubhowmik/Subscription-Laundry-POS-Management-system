@@ -16,6 +16,8 @@ import PosPage from "./pages/pos/PosPage";
 import QuotesPage from "./pages/quotes/QuotesPage";
 import SalesPage from "./pages/sales/SalesPage";
 import OrdersPage from "./pages/orders/OrdersPage";
+import ShipmentsPage from "./pages/shipments/ShipmentsPage";
+import ImportSalesPage from "./pages/importSales/ImportSalesPage";
 import CustomersPage from "./pages/customers/CustomersPage";
 import ProductsPage from "./pages/products/ProductsPage";
 import ServicesPage from "./pages/services/ServicesPage";
@@ -28,6 +30,7 @@ import BusinessLocationsPage from "./pages/businessLocations/BusinessLocationsPa
 import CouponsPage from "./pages/coupons/CouponsPage";
 import PriceListsPage from "./pages/priceLists/PriceListsPage";
 import CustomerGroupsPage from "./pages/customerGroups/CustomerGroupsPage";
+import ImportContactsPage from "./pages/importContacts/ImportContactsPage";
 import ReportsPage from "./pages/reports/ReportsPage";
 import InventoryPage from "./pages/inventory/InventoryPage";
 import CompensationsPage from "./pages/compensations/CompensationsPage";
@@ -43,7 +46,13 @@ import RegisterSessionsPage from "./pages/registerSessions/RegisterSessionsPage"
 import MessagesPage from "./pages/messages/MessagesPage";
 import AnnouncementsPage from "./pages/announcements/AnnouncementsPage";
 import InvoicePage from "./pages/invoices/InvoicePage";
+import SellReturnReceiptPage from "./pages/sellReturns/SellReturnReceiptPage";
+import ChartOfAccountsPage from "./pages/accounting/ChartOfAccountsPage";
+import JournalEntriesPage from "./pages/accounting/JournalEntriesPage";
+import AccountingReportsPage from "./pages/accounting/AccountingReportsPage";
+import InvoiceLayoutsPage from "./pages/settings/InvoiceLayoutsPage";
 import ZatcaPage from "./pages/zatca/ZatcaPage";
+import PublicQuotePage from "./pages/publicQuote/PublicQuotePage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { ConfirmDialogHost } from "./components/ui/ConfirmDialogHost";
 
@@ -57,6 +66,10 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterOrganizationPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+
+      {/* Reference's own public "View Quote URL" link - no login, entirely outside
+          ProtectedRoute/PermissionRoute (see backend routes/index.ts's matching ungated mount). */}
+      <Route path="/q/:token" element={<PublicQuotePage />} />
 
       {/* Platform operator console - its own auth provider, entirely outside the company app. */}
       <Route
@@ -86,6 +99,12 @@ export default function App() {
           <Route path="/invoices/:saleId" element={<InvoicePage />} />
         </Route>
 
+        {/* Print action's own destination (SellReturnsPage's row action) - sits outside AppLayout
+            for the same print-friendly, sidebar-free reasons as /invoices/:saleId above. */}
+        <Route element={<PermissionRoute anyOf={["sales.return"]} />}>
+          <Route path="/sell-returns/:id/print" element={<SellReturnReceiptPage />} />
+        </Route>
+
         <Route element={<AppLayout />}>
           {/* --- Pages shared by POS Laundry, Service POS, and Product POS ------------------- */}
           {/* Reachable from any of the three "laundry business" apps - channel-agnostic (a
@@ -98,18 +117,41 @@ export default function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route element={<PermissionRoute anyOf={["sales.view"]} />}>
               <Route path="sales" element={<SalesPage />} />
+              {/* The reference's own "List POS" (`SellPosController@index`) - the exact same
+                  Sales list/columns as "All Sales" above, just scoped to sales rung up through
+                  the POS screen (see schema.prisma's SaleChannel comment) - not a separate page
+                  or dataset, hence reusing SalesPage itself rather than a new component. */}
+              <Route path="sales/list-pos" element={<SalesPage key="list-pos" channel="POS" />} />
+            </Route>
+            {/* The reference's "Add Sale" (`sell/create.blade.php`) - a table/row-entry alternative
+                to the touch-optimized POS grid, posting to the exact same checkout endpoint (see
+                PosPage's `layout` prop and SaleLineTable's own comment) - not a separate feature. */}
+            <Route element={<PermissionRoute anyOf={["sales.create"]} />}>
+              <Route path="sales/create" element={<PosPage key="add-sale" layout="table" />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["sales.quote"]} />}>
               <Route path="quotes" element={<QuotesPage />} />
+              {/* Reference's own "Add Delivery"/"List Deliveries" - the same DRAFT-sale list
+                  page as Quotes, just isQuotation=false (see QuotesPage's own `kind` prop
+                  comment) - not a separate page, matching the List POS precedent. */}
+              <Route path="deliveries" element={<QuotesPage key="deliveries" kind="delivery" />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["sales.return"]} />}>
               <Route path="sell-returns" element={<SellReturnsPage />} />
+            </Route>
+            {/* Reference's own "Import Sales" (ImportSalesController) - reuses "sales.create"
+                like Add Sale, matching the reference's own `sell.create` gate. */}
+            <Route element={<PermissionRoute anyOf={["sales.create"]} />}>
+              <Route path="import-sales" element={<ImportSalesPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["customers.view"]} />}>
               <Route path="customers" element={<CustomersPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["customer_groups.view"]} />}>
               <Route path="customer-groups" element={<CustomerGroupsPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["customers.create", "suppliers.manage"]} />}>
+              <Route path="import-contacts" element={<ImportContactsPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["expenses.view"]} />}>
               <Route path="expenses" element={<ExpensesPage />} />
@@ -147,9 +189,15 @@ export default function App() {
             <Route element={<PermissionRoute anyOf={["settings.manage"]} />}>
               <Route path="notifications" element={<NotificationSettingsPage />} />
               <Route path="organization-settings" element={<OrganizationSettingsPage />} />
+              <Route path="invoice-layouts" element={<InvoiceLayoutsPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["bnpl.manage"]} />}>
               <Route path="bnpl-settings" element={<BnplSettingsPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["accounting.view"]} />}>
+              <Route path="accounting/chart-of-accounts" element={<ChartOfAccountsPage />} />
+              <Route path="accounting/journal-entries" element={<JournalEntriesPage />} />
+              <Route path="accounting/reports" element={<AccountingReportsPage />} />
             </Route>
           </Route>
 
@@ -165,6 +213,9 @@ export default function App() {
                 concept - meaningless for a pure product sale - not just a generic order list. */}
             <Route element={<PermissionRoute anyOf={["sales.view"]} />}>
               <Route path="orders" element={<OrdersPage />} />
+              {/* Reference's own "Shipments" list (SellController@shipments) - see
+                  sale.service.ts's listShipments/computeShippingStatus. */}
+              <Route path="shipments" element={<ShipmentsPage />} />
             </Route>
           </Route>
 

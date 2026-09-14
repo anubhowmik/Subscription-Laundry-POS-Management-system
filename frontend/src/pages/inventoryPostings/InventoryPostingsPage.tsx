@@ -12,10 +12,15 @@ import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Alert } from "../../components/ui/Alert";
 import { Modal } from "../../components/ui/Modal";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
 import { ClipboardCheck } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface PostingRow {
   id: string;
@@ -42,13 +47,100 @@ export default function InventoryPostingsPage() {
 
   const [formOpen, setFormOpen] = useState(false);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("postingDate");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { sortBy, sortOrder };
+
   const { data } = useQuery({
-    queryKey: ["inventory-postings"],
+    queryKey: ["inventory-postings", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<PostingRow[]>>("/inventory-postings", { params: { limit: 50 } });
+      const res = await api.get<ApiSuccess<PostingRow[]>>("/inventory-postings", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (p: PostingRow) => ReactNode; exportValue: (p: PostingRow) => string | number | null }[] = [
+    {
+      key: "postingDate",
+      label: isAr ? "التاريخ" : "Date",
+      sortField: "postingDate",
+      render: (p) => <span className="ltr-nums">{new Date(p.postingDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (p) => new Date(p.postingDate).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "businessLocation",
+      label: isAr ? "الفرع" : "Branch",
+      render: (p) => p.businessLocation.branchName,
+      exportValue: (p) => p.businessLocation.branchName,
+    },
+    {
+      key: "inStock",
+      label: isAr ? "في المتجر" : "In Stock",
+      render: (p) => (
+        <span className="ltr-nums">
+          {p.inStockCount} <span className="text-slate-400">({formatMoney(p.inStockTotal, currency, locale)})</span>
+        </span>
+      ),
+      exportValue: (p) => `${p.inStockCount} (${formatMoney(p.inStockTotal, currency, locale)})`,
+    },
+    {
+      key: "inWarehouse",
+      label: isAr ? "في المستودع" : "In Warehouse",
+      render: (p) => (
+        <span className="ltr-nums">
+          {p.inWarehouseCount} <span className="text-slate-400">({formatMoney(p.inWarehouseTotal, currency, locale)})</span>
+        </span>
+      ),
+      exportValue: (p) => `${p.inWarehouseCount} (${formatMoney(p.inWarehouseTotal, currency, locale)})`,
+    },
+    {
+      key: "outStock",
+      label: isAr ? "تم التسليم" : "Out Stock",
+      render: (p) => (
+        <span className="ltr-nums">
+          {p.outStockCount} <span className="text-slate-400">({formatMoney(p.outStockTotal, currency, locale)})</span>
+        </span>
+      ),
+      exportValue: (p) => `${p.outStockCount} (${formatMoney(p.outStockTotal, currency, locale)})`,
+    },
+    {
+      key: "cashInDrawer",
+      label: isAr ? "النقد بالدرج" : "Cash in Drawer",
+      sortField: "cashInDrawer",
+      render: (p) => <span className="ltr-nums">{formatMoney(p.cashInDrawer, currency, locale)}</span>,
+      exportValue: (p) => Number(p.cashInDrawer),
+    },
+    {
+      key: "status",
+      label: t("common.status"),
+      render: (p) => (
+        <Badge variant={p.status === "CONFIRMED" ? "success" : "warning"}>
+          {p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معلق" : "Pending"}
+        </Badge>
+      ),
+      exportValue: (p) => (p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معلق" : "Pending"),
+    },
+    {
+      key: "createdByUser",
+      label: isAr ? "بواسطة" : "By",
+      render: (p) => p.createdByUser.fullNameEn,
+      exportValue: (p) => p.createdByUser.fullNameEn,
+    },
+  ];
+  const columnVisibility = useColumnVisibility("inventory-postings", columns.map((c) => c.key));
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -76,52 +168,82 @@ export default function InventoryPostingsPage() {
       )}
 
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>{isAr ? "التاريخ" : "Date"}</Th>
-              <Th>{isAr ? "الفرع" : "Branch"}</Th>
-              <Th>{isAr ? "في المتجر" : "In Stock"}</Th>
-              <Th>{isAr ? "في المستودع" : "In Warehouse"}</Th>
-              <Th>{isAr ? "تم التسليم" : "Out Stock"}</Th>
-              <Th>{isAr ? "النقد بالدرج" : "Cash in Drawer"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{isAr ? "بواسطة" : "By"}</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {data?.rows.map((p) => (
-              <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(p.postingDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-3">{p.businessLocation.branchName}</td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">{p.inStockCount} <span className="text-slate-400">({formatMoney(p.inStockTotal, currency, locale)})</span></span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">{p.inWarehouseCount} <span className="text-slate-400">({formatMoney(p.inWarehouseTotal, currency, locale)})</span></span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">{p.outStockCount} <span className="text-slate-400">({formatMoney(p.outStockTotal, currency, locale)})</span></span>
-                </td>
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(p.cashInDrawer, currency, locale)}</span></td>
-                <td className="px-4 py-3">
-                  <Badge variant={p.status === "CONFIRMED" ? "success" : "warning"}>
-                    {p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : (isAr ? "معلق" : "Pending")}
-                  </Badge>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{p.createdByUser.fullNameEn}</td>
-              </tr>
-            ))}
-            {data?.rows.length === 0 && (
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "جرد المخزون" : "Inventory Postings"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<PostingRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<PostingRow[]>>("/inventory-postings", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((p) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(p)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                  {t("common.noResults")}
-                </td>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
               </tr>
-            )}
-          </tbody>
-        </Table>
+            </THead>
+            <tbody>
+              {data?.rows.map((p) => (
+                <tr key={p.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {visibleColumns.map((c) => (
+                    <td key={c.key} className="px-4 py-3">
+                      {c.render(p)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {data?.rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-slate-400">
+                    {t("common.noResults")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && (
         <PostingFormModal

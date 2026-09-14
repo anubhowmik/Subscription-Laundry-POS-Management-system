@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
 import * as service from "./role.service";
-import { sendSuccess } from "../../utils/apiResponse";
+import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { getParam } from "../../utils/params";
 import { writeAuditLog } from "../../utils/audit";
 
 export async function list(req: Request, res: Response) {
-  const roles = await service.list(req.user!.organizationId);
-  return sendSuccess(res, roles);
+  const { data, meta } = await service.list(req.query, req.user!.organizationId);
+  return sendPaginated(res, data, meta);
 }
 
 export async function getById(req: Request, res: Response) {

@@ -9,6 +9,7 @@ import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "../../lib/cn";
+import { fetchAllRows } from "../../lib/tableExport";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Card, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
@@ -16,9 +17,12 @@ import { Badge } from "../../components/ui/Badge";
 import { Alert } from "../../components/ui/Alert";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu, FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, selectClass, inputSmClass } from "../../components/ui/formClasses";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, PackageCheck, XCircle, Undo2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface ProductPick {
   id: string;
@@ -58,14 +62,121 @@ export default function InventoryPage() {
 
   const [tab, setTab] = useState<"ADJUST" | "TRANSFER" | "GROUP_ADJUST">("ADJUST");
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+
+  // Sortable column header matching the reference's DataTable - backend only whitelists
+  // "createdAt" for this list (inventory.service.ts's listTransactions).
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  const [typeFilter, setTypeFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const activeFilterCount = (typeFilter ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
+  function clearAllFilters() {
+    setTypeFilter("");
+    setFromDate("");
+    setToDate("");
+    setPage(1);
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = {
+    sortBy,
+    sortOrder,
+    ...(typeFilter ? { type: typeFilter } : {}),
+    ...(fromDate ? { from: fromDate } : {}),
+    ...(toDate ? { to: toDate } : {}),
+  };
 
   const { data } = useQuery({
-    queryKey: ["inventory-transactions", page],
+    queryKey: ["inventory-transactions", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<TransactionRow[]>>("/inventory/transactions", { params: { page, limit: 20 } });
+      const res = await api.get<ApiSuccess<TransactionRow[]>>("/inventory/transactions", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (r: TransactionRow) => ReactNode; exportValue: (r: TransactionRow) => string | number | null }[] = [
+    {
+      key: "date",
+      label: isAr ? "التاريخ" : "Date",
+      sortField: "createdAt",
+      render: (r) => <span className="ltr-nums">{new Date(r.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (r) => new Date(r.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "type",
+      label: isAr ? "النوع" : "Type",
+      render: (r) => (
+        <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", TYPE_LABEL[r.type]?.cls ?? "bg-slate-100 text-slate-600")}>
+          {isAr ? TYPE_LABEL[r.type]?.ar ?? r.type : TYPE_LABEL[r.type]?.en ?? r.type}
+        </span>
+      ),
+      exportValue: (r) => (isAr ? TYPE_LABEL[r.type]?.ar ?? r.type : TYPE_LABEL[r.type]?.en ?? r.type),
+    },
+    {
+      key: "product",
+      label: isAr ? "المنتج" : "Product",
+      render: (r) => (
+        <>
+          {isAr ? r.product.nameAr || r.product.nameEn : r.product.nameEn} <span className="ltr-nums text-xs text-slate-400">({r.product.sku})</span>
+        </>
+      ),
+      exportValue: (r) => `${isAr ? r.product.nameAr || r.product.nameEn : r.product.nameEn} (${r.product.sku})`,
+    },
+    {
+      key: "branch",
+      label: isAr ? "الفرع" : "Branch",
+      render: (r) => r.businessLocation.branchName,
+      exportValue: (r) => r.businessLocation.branchName,
+    },
+    {
+      key: "quantity",
+      label: isAr ? "الكمية" : "Qty",
+      render: (r) => (
+        <span className={cn("font-medium", Number(r.quantity) < 0 ? "text-red-600" : "text-green-600")}>
+          <span className="ltr-nums">
+            {Number(r.quantity) > 0 ? "+" : ""}
+            {r.quantity}
+          </span>
+        </span>
+      ),
+      exportValue: (r) => Number(r.quantity),
+    },
+    {
+      key: "balanceAfter",
+      label: isAr ? "الرصيد بعد" : "Balance After",
+      render: (r) => <span className="ltr-nums">{r.balanceAfter}</span>,
+      exportValue: (r) => Number(r.balanceAfter),
+    },
+    {
+      key: "note",
+      label: isAr ? "ملاحظة" : "Note",
+      render: (r) => r.note ?? "—",
+      exportValue: (r) => r.note,
+    },
+    {
+      key: "by",
+      label: isAr ? "بواسطة" : "By",
+      render: (r) => r.createdByUser?.fullNameEn ?? "—",
+      exportValue: (r) => r.createdByUser?.fullNameEn ?? null,
+    },
+  ];
+
+  const columnVisibility = useColumnVisibility(
+    "inventory",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -165,52 +276,115 @@ export default function InventoryPage() {
       )}
 
       <TableContainer>
+        <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "النوع" : "Type"}</label>
+              <select
+                value={typeFilter}
+                onChange={(e) => {
+                  setTypeFilter(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(selectClass, "w-full")}
+              >
+                <option value="">{isAr ? "الكل" : "All"}</option>
+                {Object.entries(TYPE_LABEL).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {isAr ? label.ar : label.en}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من" : "From"}</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(inputClass, "w-full ltr-nums")}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى" : "To"}</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(inputClass, "w-full ltr-nums")}
+              />
+            </div>
+          </FiltersMenu>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "حركات المخزون" : "Inventory Transactions"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<TransactionRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<TransactionRow[]>>("/inventory/transactions", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((r) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(r)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>{isAr ? "التاريخ" : "Date"}</Th>
-              <Th>{isAr ? "النوع" : "Type"}</Th>
-              <Th>{isAr ? "المنتج" : "Product"}</Th>
-              <Th>{isAr ? "الفرع" : "Branch"}</Th>
-              <Th>{isAr ? "الكمية" : "Qty"}</Th>
-              <Th>{isAr ? "الرصيد بعد" : "Balance After"}</Th>
-              <Th>{isAr ? "ملاحظة" : "Note"}</Th>
-              <Th>{isAr ? "بواسطة" : "By"}</Th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
             </tr>
           </THead>
           <tbody>
             {data?.rows.map((r) => (
               <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(r.createdAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-3">
-                  <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", TYPE_LABEL[r.type]?.cls ?? "bg-slate-100 text-slate-600")}>
-                    {isAr ? TYPE_LABEL[r.type]?.ar ?? r.type : TYPE_LABEL[r.type]?.en ?? r.type}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  {isAr ? r.product.nameAr || r.product.nameEn : r.product.nameEn} <span className="ltr-nums text-xs text-slate-400">({r.product.sku})</span>
-                </td>
-                <td className="px-4 py-3">{r.businessLocation.branchName}</td>
-                <td className={cn("px-4 py-3 font-medium", Number(r.quantity) < 0 ? "text-red-600" : "text-green-600")}>
-                  <span className="ltr-nums">
-                    {Number(r.quantity) > 0 ? "+" : ""}
-                    {r.quantity}
-                  </span>
-                </td>
-                <td className="px-4 py-3"><span className="ltr-nums">{r.balanceAfter}</span></td>
-                <td className="px-4 py-3 text-slate-500">{r.note ?? "—"}</td>
-                <td className="px-4 py-3 text-slate-500">{r.createdByUser?.fullNameEn ?? "—"}</td>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(r)}
+                  </td>
+                ))}
               </tr>
             ))}
             {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
             )}
           </tbody>
         </Table>
+        </TableScroll>
       </TableContainer>
 
       {data?.meta && data.meta.totalPages > 1 && (
@@ -571,25 +745,20 @@ function TransferRow({
         <td className="px-4 py-3 text-slate-500">{transfer.driverName ?? "—"}</td>
         <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(transfer.shippedAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
         <td className="px-4 py-3">
-          <div className="flex gap-2">
-            {canReceive && (
-              <Button size="sm" onClick={onToggle}>
-                {isAr ? "استلام" : "Receive"}
-              </Button>
-            )}
+          <RowActions>
+            {canReceive && <RowActionButton icon={PackageCheck} label={isAr ? "استلام" : "Receive"} variant="success" onClick={onToggle} />}
             {canCancel && (
-              <Button
-                size="sm"
+              <RowActionButton
+                icon={XCircle}
+                label={isAr ? "إلغاء" : "Cancel"}
                 variant="danger"
+                disabled={cancelMutation.isPending}
                 onClick={async () => {
                   if (await confirmAction({ message: isAr ? "إلغاء هذا التحويل؟" : "Cancel this transfer?", danger: true })) cancelMutation.mutate();
                 }}
-                disabled={cancelMutation.isPending}
-              >
-                {isAr ? "إلغاء" : "Cancel"}
-              </Button>
+              />
             )}
-          </div>
+          </RowActions>
         </td>
       </tr>
       {expanded && (
@@ -871,16 +1040,17 @@ function StockAdjustmentsList({ isAr, onDone }: { isAr: boolean; onDone: () => v
                 </td>
                 <td className="px-4 py-3">
                   {a.status === "CONFIRMED" && can("inventory.reverse_adjustment") && (
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={async () => {
-                        if (await confirmAction({ message: isAr ? "عكس هذا التعديل؟" : "Reverse this adjustment?", danger: true })) reverseMutation.mutate(a.id);
-                      }}
-                      disabled={reverseMutation.isPending}
-                    >
-                      {isAr ? "عكس" : "Reverse"}
-                    </Button>
+                    <RowActions>
+                      <RowActionButton
+                        icon={Undo2}
+                        label={isAr ? "عكس" : "Reverse"}
+                        variant="danger"
+                        disabled={reverseMutation.isPending}
+                        onClick={async () => {
+                          if (await confirmAction({ message: isAr ? "عكس هذا التعديل؟" : "Reverse this adjustment?", danger: true })) reverseMutation.mutate(a.id);
+                        }}
+                      />
+                    </RowActions>
                   )}
                 </td>
               </tr>

@@ -15,9 +15,14 @@ import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { Pagination } from "../../components/ui/Pagination";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, inputSmClass } from "../../components/ui/formClasses";
-import { HandCoins } from "lucide-react";
+import { HandCoins, CheckCircle2, XCircle, Banknote, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 type Reason = "LOST" | "DAMAGED" | "DELAYED" | "OTHER";
 type Status = "PENDING" | "APPROVED" | "REJECTED" | "PAID";
@@ -92,10 +97,29 @@ export default function CompensationsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [payingCompensation, setPayingCompensation] = useState<CompensationRow | null>(null);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  // Claims accumulate indefinitely (every damaged/lost-item dispute files a new one) - genuinely
+  // unbounded, so this gets real server-side pagination/sorting (see compensation.service.ts's
+  // SORTABLE_FIELDS) rather than a client-side-only sort.
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { status: statusFilter || undefined, sortBy, sortOrder };
+
   const { data } = useQuery({
-    queryKey: ["compensations", statusFilter],
+    queryKey: ["compensations", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<CompensationRow[]>>("/compensations", { params: { status: statusFilter || undefined, limit: 50 } });
+      const res = await api.get<ApiSuccess<CompensationRow[]>>("/compensations", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
@@ -119,6 +143,65 @@ export default function CompensationsPage() {
     mutationFn: async (id: string) => api.delete(`/compensations/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["compensations"] }),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (c: CompensationRow) => ReactNode; exportValue: (c: CompensationRow) => string | number | null }[] = [
+    {
+      key: "invoice",
+      label: isAr ? "الفاتورة" : "Invoice",
+      render: (c) => <span className="ltr-nums">{c.sale.invoiceNumber}</span>,
+      exportValue: (c) => c.sale.invoiceNumber,
+    },
+    {
+      key: "customer",
+      label: isAr ? "العميل" : "Customer",
+      render: (c) => (isAr ? c.customer.nameAr || c.customer.nameEn : c.customer.nameEn),
+      exportValue: (c) => (isAr ? c.customer.nameAr || c.customer.nameEn : c.customer.nameEn),
+    },
+    {
+      key: "items",
+      label: isAr ? "الأصناف" : "Items",
+      render: (c) => (
+        <div className="text-xs text-slate-500">
+          {c.items.map((it) => (
+            <div key={it.id}>
+              {isAr ? it.saleItem.descriptionAr || it.saleItem.descriptionEn : it.saleItem.descriptionEn}{" "}
+              <span className="text-slate-400">({isAr ? REASON_LABEL[it.reason].ar : REASON_LABEL[it.reason].en})</span>
+            </div>
+          ))}
+        </div>
+      ),
+      exportValue: (c) =>
+        c.items
+          .map((it) => `${isAr ? it.saleItem.descriptionAr || it.saleItem.descriptionEn : it.saleItem.descriptionEn} (${isAr ? REASON_LABEL[it.reason].ar : REASON_LABEL[it.reason].en})`)
+          .join("; "),
+    },
+    {
+      key: "claimedAmount",
+      label: isAr ? "المطالب به" : "Claimed",
+      sortField: "claimedAmount",
+      render: (c) => <span className="ltr-nums">{formatMoney(c.claimedAmount, currency, locale)}</span>,
+      exportValue: (c) => Number(c.claimedAmount),
+    },
+    {
+      key: "approvedAmount",
+      label: isAr ? "الموافق عليه" : "Approved",
+      sortField: "approvedAmount",
+      render: (c) => <span className="ltr-nums">{c.approvedAmount !== null ? formatMoney(c.approvedAmount, currency, locale) : "—"}</span>,
+      exportValue: (c) => (c.approvedAmount !== null ? Number(c.approvedAmount) : null),
+    },
+    {
+      key: "status",
+      label: t("common.status"),
+      sortField: "status",
+      render: (c) => <Badge variant={STATUS_VARIANT[c.status]}>{isAr ? STATUS_LABEL[c.status].ar : STATUS_LABEL[c.status].en}</Badge>,
+      exportValue: (c) => (isAr ? STATUS_LABEL[c.status].ar : STATUS_LABEL[c.status].en),
+    },
+  ];
+  const columnVisibility = useColumnVisibility(
+    "compensations",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -145,97 +228,138 @@ export default function CompensationsPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {(["", "PENDING", "APPROVED", "REJECTED", "PAID"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-              statusFilter === s ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            {s === "" ? (isAr ? "الكل" : "All") : isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
-          </button>
-        ))}
-      </div>
-
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>{isAr ? "الفاتورة" : "Invoice"}</Th>
-              <Th>{isAr ? "العميل" : "Customer"}</Th>
-              <Th>{isAr ? "الأصناف" : "Items"}</Th>
-              <Th>{isAr ? "المطالب به" : "Claimed"}</Th>
-              <Th>{isAr ? "الموافق عليه" : "Approved"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{t("common.actions")}</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {data?.rows.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 font-medium"><span className="ltr-nums">{c.sale.invoiceNumber}</span></td>
-                <td className="px-4 py-3">{isAr ? c.customer.nameAr || c.customer.nameEn : c.customer.nameEn}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">
-                  {c.items.map((it) => (
-                    <div key={it.id}>
-                      {isAr ? it.saleItem.descriptionAr || it.saleItem.descriptionEn : it.saleItem.descriptionEn}{" "}
-                      <span className="text-slate-400">({isAr ? REASON_LABEL[it.reason].ar : REASON_LABEL[it.reason].en})</span>
-                    </div>
-                  ))}
-                </td>
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(c.claimedAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3"><span className="ltr-nums">{c.approvedAmount !== null ? formatMoney(c.approvedAmount, currency, locale) : "—"}</span></td>
-                <td className="px-4 py-3">
-                  <Badge variant={STATUS_VARIANT[c.status]}>{isAr ? STATUS_LABEL[c.status].ar : STATUS_LABEL[c.status].en}</Badge>
-                </td>
-                <td className="px-4 py-3 text-end">
-                  {c.status === "PENDING" && can("compensations.approve") && (
-                    <div className="flex justify-end gap-1.5">
-                      <Button size="sm" onClick={() => resolveMutation.mutate({ id: c.id, status: "APPROVED" })}>
-                        {isAr ? "موافقة" : "Approve"}
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={() => resolveMutation.mutate({ id: c.id, status: "REJECTED" })}>
-                        {isAr ? "رفض" : "Reject"}
-                      </Button>
-                    </div>
-                  )}
-                  {c.status === "APPROVED" && can("compensations.pay") && (
-                    <Button size="sm" onClick={() => setPayingCompensation(c)}>
-                      {isAr ? "تحديد كمدفوع" : "Mark Paid"}
-                    </Button>
-                  )}
-                  {c.status === "PAID" && c.resolutionCoupon && (
-                    <Badge variant="success" className="ltr-nums">
-                      {c.resolutionCoupon.code}
-                    </Badge>
-                  )}
-                  {c.status !== "PAID" && (can("compensations.file") || can("compensations.approve")) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ms-1.5"
-                      onClick={async () => {
-                        if (await confirmAction({ message: isAr ? "حذف هذه المطالبة؟" : "Delete this claim?", danger: true })) deleteMutation.mutate(c.id);
-                      }}
-                    >
-                      {isAr ? "حذف" : "Delete"}
-                    </Button>
-                  )}
-                </td>
-              </tr>
+        <TableToolbar>
+          <div className="flex flex-wrap gap-2">
+            {(["", "PENDING", "APPROVED", "REJECTED", "PAID"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => {
+                  setStatusFilter(s);
+                  setPage(1);
+                }}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  statusFilter === s ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {s === "" ? (isAr ? "الكل" : "All") : isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
+              </button>
             ))}
-            {data?.rows.length === 0 && (
+          </div>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "التعويضات" : "Compensations"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<CompensationRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<CompensationRow[]>>("/compensations", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((c) => Object.fromEntries(visibleColumns.map((col) => [col.key, col.exportValue(c)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                  {t("common.noResults")}
-                </td>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
+                <Th>{t("common.actions")}</Th>
               </tr>
-            )}
-          </tbody>
-        </Table>
+            </THead>
+            <tbody>
+              {data?.rows.map((c) => (
+                <tr key={c.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {visibleColumns.map((col) => (
+                    <td key={col.key} className="px-4 py-3">
+                      {col.render(c)}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 text-end">
+                    <RowActions>
+                      {c.status === "PENDING" && can("compensations.approve") && (
+                        <>
+                          <RowActionButton
+                            icon={CheckCircle2}
+                            label={isAr ? "موافقة" : "Approve"}
+                            variant="success"
+                            onClick={() => resolveMutation.mutate({ id: c.id, status: "APPROVED" })}
+                          />
+                          <RowActionButton
+                            icon={XCircle}
+                            label={isAr ? "رفض" : "Reject"}
+                            variant="danger"
+                            onClick={() => resolveMutation.mutate({ id: c.id, status: "REJECTED" })}
+                          />
+                        </>
+                      )}
+                      {c.status === "APPROVED" && can("compensations.pay") && (
+                        <RowActionButton icon={Banknote} label={isAr ? "تحديد كمدفوع" : "Mark Paid"} variant="success" onClick={() => setPayingCompensation(c)} />
+                      )}
+                      {c.status === "PAID" && c.resolutionCoupon && (
+                        <Badge variant="success" className="ltr-nums">
+                          {c.resolutionCoupon.code}
+                        </Badge>
+                      )}
+                      {c.status !== "PAID" && (can("compensations.file") || can("compensations.approve")) && (
+                        <RowActionButton
+                          icon={Trash2}
+                          label={isAr ? "حذف" : "Delete"}
+                          variant="danger"
+                          onClick={async () => {
+                            if (await confirmAction({ message: isAr ? "حذف هذه المطالبة؟" : "Delete this claim?", danger: true })) deleteMutation.mutate(c.id);
+                          }}
+                        />
+                      )}
+                    </RowActions>
+                  </td>
+                </tr>
+              ))}
+              {data?.rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
+                    {t("common.noResults")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && <ClaimFormModal isAr={isAr} onClose={() => setFormOpen(false)} onSaved={() => setFormOpen(false)} />}
 

@@ -2,16 +2,21 @@ import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
-import type { ApiSuccess } from "../../types/api";
+import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import type { RegisterLedgerRow, RegisterSessionRow } from "../../api/posApi";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Badge } from "../../components/ui/Badge";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { Archive } from "lucide-react";
+import type { ReactNode } from "react";
 
 export default function RegisterSessionsPage() {
   const { t, i18n } = useTranslation();
@@ -21,13 +26,95 @@ export default function RegisterSessionsPage() {
   const currency = currentLocation?.currency ?? "SAR";
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  // Backend whitelist (registerSession.service.ts's REGISTER_SESSION_SORTABLE_FIELDS) only
+  // covers openedAt/closedAt/cashDifference - the other columns below stay unsortable.
+  const [sortBy, setSortBy] = useState("openedAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = {
+    businessLocationId: currentLocationId,
+    sortBy,
+    sortOrder,
+  };
+
   const { data } = useQuery({
-    queryKey: ["register-sessions", currentLocationId],
-    queryFn: async () =>
-      (await api.get<ApiSuccess<RegisterSessionRow[]>>("/register-sessions", { params: { businessLocationId: currentLocationId, limit: 50 } })).data
-        .data,
+    queryKey: ["register-sessions", page, limit, filterParams],
+    queryFn: async () => {
+      const res = await api.get<ApiSuccess<RegisterSessionRow[]>>("/register-sessions", {
+        params: { ...filterParams, page, limit },
+      });
+      return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
+    },
     enabled: Boolean(currentLocationId),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (s: RegisterSessionRow) => ReactNode; exportValue: (s: RegisterSessionRow) => string | number | null }[] = [
+    {
+      key: "openedAt",
+      label: isAr ? "الفتح" : "Opened",
+      sortField: "openedAt",
+      render: (s) => <span className="ltr-nums">{new Date(s.openedAt).toLocaleString(locale)}</span>,
+      exportValue: (s) => new Date(s.openedAt).toLocaleString(locale),
+    },
+    {
+      key: "closedAt",
+      label: isAr ? "الإغلاق" : "Closed",
+      sortField: "closedAt",
+      render: (s) => <span className="ltr-nums">{s.closedAt ? new Date(s.closedAt).toLocaleString(locale) : "-"}</span>,
+      exportValue: (s) => (s.closedAt ? new Date(s.closedAt).toLocaleString(locale) : null),
+    },
+    {
+      key: "openingCashAmount",
+      label: isAr ? "الافتتاحي" : "Opening",
+      render: (s) => <span className="ltr-nums">{formatMoney(s.openingCashAmount, currency, locale)}</span>,
+      exportValue: (s) => Number(s.openingCashAmount),
+    },
+    {
+      key: "expectedCashAmount",
+      label: isAr ? "المتوقع" : "Expected",
+      render: (s) => <span className="ltr-nums">{s.expectedCashAmount !== null ? formatMoney(s.expectedCashAmount, currency, locale) : "-"}</span>,
+      exportValue: (s) => (s.expectedCashAmount !== null ? Number(s.expectedCashAmount) : null),
+    },
+    {
+      key: "countedCashAmount",
+      label: isAr ? "المعدود" : "Counted",
+      render: (s) => <span className="ltr-nums">{s.countedCashAmount !== null ? formatMoney(s.countedCashAmount, currency, locale) : "-"}</span>,
+      exportValue: (s) => (s.countedCashAmount !== null ? Number(s.countedCashAmount) : null),
+    },
+    {
+      key: "cashDifference",
+      label: isAr ? "الفرق" : "Difference",
+      sortField: "cashDifference",
+      render: (s) => {
+        const diff = s.cashDifference !== null ? Number(s.cashDifference) : null;
+        return (
+          <span className={cn("font-medium", diff === null ? "" : diff === 0 ? "text-green-600" : diff > 0 ? "text-sky-600" : "text-red-600")}>
+            <span className="ltr-nums">{diff !== null ? formatMoney(diff, currency, locale) : "-"}</span>
+          </span>
+        );
+      },
+      exportValue: (s) => (s.cashDifference !== null ? Number(s.cashDifference) : null),
+    },
+    {
+      key: "status",
+      label: t("common.status"),
+      render: (s) => <Badge variant={s.status === "OPEN" ? "success" : "neutral"}>{s.status === "OPEN" ? (isAr ? "مفتوح" : "Open") : isAr ? "مغلق" : "Closed"}</Badge>,
+      exportValue: (s) => (s.status === "OPEN" ? (isAr ? "مفتوح" : "Open") : isAr ? "مغلق" : "Closed"),
+    },
+  ];
+  const columnVisibility = useColumnVisibility("register-sessions", columns.map((c) => c.key));
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -41,78 +128,101 @@ export default function RegisterSessionsPage() {
           iconColor="text-white"
           highlight
           label={isAr ? "جلسات الصندوق" : "Register Sessions"}
-          value={String(data?.length ?? 0)}
+          value={String(data?.meta.total ?? 0)}
         />
       </div>
 
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>{isAr ? "الفتح" : "Opened"}</Th>
-              <Th>{isAr ? "الإغلاق" : "Closed"}</Th>
-              <Th>{isAr ? "الافتتاحي" : "Opening"}</Th>
-              <Th>{isAr ? "المتوقع" : "Expected"}</Th>
-              <Th>{isAr ? "المعدود" : "Counted"}</Th>
-              <Th>{isAr ? "الفرق" : "Difference"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th></Th>
-            </tr>
-          </THead>
-          <tbody>
-            {data?.map((s) => {
-              const diff = s.cashDifference !== null ? Number(s.cashDifference) : null;
-              return (
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "جلسات الصندوق" : "Register Sessions"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<RegisterSessionRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<RegisterSessionRow[]>>("/register-sessions", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((s) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(s)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
+              <tr>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
+                <Th></Th>
+              </tr>
+            </THead>
+            <tbody>
+              {data?.rows.map((s) => (
                 <Fragment key={s.id}>
                   <tr
                     className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
                     onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
                   >
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      <span className="ltr-nums">{new Date(s.openedAt).toLocaleString(locale)}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      <span className="ltr-nums">{s.closedAt ? new Date(s.closedAt).toLocaleString(locale) : "-"}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="ltr-nums">{formatMoney(s.openingCashAmount, currency, locale)}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="ltr-nums">{s.expectedCashAmount !== null ? formatMoney(s.expectedCashAmount, currency, locale) : "-"}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="ltr-nums">{s.countedCashAmount !== null ? formatMoney(s.countedCashAmount, currency, locale) : "-"}</span>
-                    </td>
-                    <td className={cn("px-4 py-3 font-medium", diff === null ? "" : diff === 0 ? "text-green-600" : diff > 0 ? "text-sky-600" : "text-red-600")}>
-                      <span className="ltr-nums">{diff !== null ? formatMoney(diff, currency, locale) : "-"}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={s.status === "OPEN" ? "success" : "neutral"}>
-                        {s.status === "OPEN" ? (isAr ? "مفتوح" : "Open") : isAr ? "مغلق" : "Closed"}
-                      </Badge>
-                    </td>
+                    {visibleColumns.map((c) => (
+                      <td key={c.key} className="px-4 py-3">
+                        {c.render(s)}
+                      </td>
+                    ))}
                     <td className="px-4 py-3 text-xs text-sky-600">{expandedId === s.id ? (isAr ? "إخفاء" : "Hide") : isAr ? "التفاصيل" : "Details"}</td>
                   </tr>
                   {expandedId === s.id && (
                     <tr className="border-b border-slate-100 bg-slate-50/60">
-                      <td colSpan={8} className="px-4 py-3">
+                      <td colSpan={visibleColumns.length + 1} className="px-4 py-3">
                         <LedgerDrilldown sessionId={s.id} currency={currency} locale={locale} isAr={isAr} />
                       </td>
                     </tr>
                   )}
                 </Fragment>
-              );
-            })}
-            {data?.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                  {t("common.noResults")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </Table>
+              ))}
+              {data?.rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
+                    {t("common.noResults")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
     </div>
   );
 }

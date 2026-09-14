@@ -6,6 +6,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PERMISSIONS } from "../src/config/permissions";
 import { PLAN_DEFS } from "../src/config/plans";
+import { seedGeography } from "./seedGeography";
 
 const prisma = new PrismaClient();
 
@@ -53,6 +54,8 @@ async function main() {
     data: { isActive: false },
   });
   if (retired.count > 0) console.log(`Deactivated ${retired.count} plan(s) no longer in the catalog.`);
+
+  await seedGeography(prisma);
 
   console.log("Global seed complete. Register an organization via POST /api/organizations/register to create a tenant.");
 }

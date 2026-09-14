@@ -17,8 +17,14 @@ export const createPurchaseSchema = z.object({
 export const listPurchaseQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.string().optional(),
   businessLocationId: z.string().uuid().optional(),
   supplierId: z.string().uuid().optional(),
+  status: z.enum(["RECEIVED", "CANCELLED"]).optional(),
+  paymentStatus: z.enum(["PAID", "PARTIAL", "DUE"]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });
 
 const purchaseReturnLineSchema = z.object({
@@ -38,6 +44,10 @@ export const createPurchaseReturnSchema = z.object({
 export const listPurchaseReturnQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.string().optional(),
   businessLocationId: z.string().uuid().optional(),
   supplierId: z.string().uuid().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });

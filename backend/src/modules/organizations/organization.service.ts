@@ -8,6 +8,7 @@ import { PERMISSIONS } from "../../config/permissions";
 import { PLAN_DEFS } from "../../config/plans";
 import { generateVerificationCode } from "../auth/auth.service";
 import { NOTIFICATION_TEMPLATE_DEFS } from "../../config/notificationTemplates";
+import { seedDefaultChartOfAccounts } from "../accounting/account.service";
 import { RegisterOrganizationInput } from "./organization.validators";
 
 const SETTINGS_SELECT = {
@@ -31,10 +32,63 @@ const SETTINGS_SELECT = {
   paymentReminderAfterDays: true,
   paymentReminderIntervalDays: true,
   customerApprovalRequired: true,
+  contactCustomField1Label: true,
+  contactCustomField2Label: true,
+  contactCustomField3Label: true,
+  contactCustomField4Label: true,
+  contactCustomField5Label: true,
+  contactCustomField6Label: true,
+  contactCustomField7Label: true,
+  contactCustomField8Label: true,
+  contactCustomField9Label: true,
+  contactCustomField10Label: true,
+  sellCustomField1Label: true,
+  sellCustomField2Label: true,
+  sellCustomField3Label: true,
+  sellCustomField4Label: true,
 } satisfies Prisma.OrganizationSelect;
 
 export async function getSettings(organizationId: string) {
   const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: SETTINGS_SELECT });
+  if (!org) throw new NotFoundError("Organization not found");
+  return org;
+}
+
+// Lighter-weight than getSettings() and gated only by authentication (not "settings.manage") -
+// any user who can see a Supplier/Customer form needs these labels to render its custom fields,
+// regardless of whether they're allowed to edit organization settings.
+export async function getContactCustomFieldLabels(organizationId: string) {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      contactCustomField1Label: true,
+      contactCustomField2Label: true,
+      contactCustomField3Label: true,
+      contactCustomField4Label: true,
+      contactCustomField5Label: true,
+      contactCustomField6Label: true,
+      contactCustomField7Label: true,
+      contactCustomField8Label: true,
+      contactCustomField9Label: true,
+      contactCustomField10Label: true,
+    },
+  });
+  if (!org) throw new NotFoundError("Organization not found");
+  return org;
+}
+
+// Same rationale as getContactCustomFieldLabels above, for the separate sell-level custom field
+// config (reference's own `custom_labels['sell']` - 4 slots, distinct from the contact one).
+export async function getSellCustomFieldLabels(organizationId: string) {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      sellCustomField1Label: true,
+      sellCustomField2Label: true,
+      sellCustomField3Label: true,
+      sellCustomField4Label: true,
+    },
+  });
   if (!org) throw new NotFoundError("Organization not found");
   return org;
 }
@@ -63,12 +117,13 @@ async function generateUniqueSlug(nameEn: string): Promise<string> {
   return `${base}-${Date.now()}`;
 }
 
-/** Ensures the global Permission and Plan catalogs exist. Idempotent - safe to call every time. */
+/** Ensures the global Permission and Plan catalogs exist. Idempotent - safe to call every time.
+ *  Always runs (not just when the table is empty) so a permission code added to PERMISSIONS after
+ *  the first-ever registration still gets backfilled into the catalog - otherwise it can never be
+ *  granted to any role, old or new, since registerOrganization() below only assigns permission IDs
+ *  that already exist in this table. */
 async function ensureGlobalCatalogsSeeded() {
-  const permissionCount = await prisma.permission.count();
-  if (permissionCount === 0) {
-    await prisma.permission.createMany({ data: PERMISSIONS, skipDuplicates: true });
-  }
+  await prisma.permission.createMany({ data: PERMISSIONS, skipDuplicates: true });
   const planCount = await prisma.plan.count();
   if (planCount === 0) {
     await prisma.plan.createMany({
@@ -192,6 +247,8 @@ export async function registerOrganization(input: RegisterOrganizationInput) {
     await tx.notificationTemplate.createMany({
       data: NOTIFICATION_TEMPLATE_DEFS.map((def) => ({ organizationId: organization.id, ...def })),
     });
+
+    await seedDefaultChartOfAccounts(tx, organization.id);
 
     return { organization, adminUser };
   });

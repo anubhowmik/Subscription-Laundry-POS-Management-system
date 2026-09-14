@@ -6,16 +6,22 @@ import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta, Supplier } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
+import { fetchAllRows } from "../../lib/tableExport";
+import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
-import { labelClass, inputClass, inputSmClass } from "../../components/ui/formClasses";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu, FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
+import { labelClass, inputClass, inputSmClass, selectClass } from "../../components/ui/formClasses";
 import { Wallet } from "lucide-react";
 import { useCurrentApp } from "../../components/layout/Sidebar";
+import type { ReactNode } from "react";
 
 type PaymentStatus = "PAID" | "PARTIAL" | "DUE" | "OVERPAID";
 
@@ -66,13 +72,131 @@ export default function ExpensesPage() {
 
   const [formOpen, setFormOpen] = useState(false);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("expenseDate");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<"" | PaymentStatus>("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const activeFilterCount = (categoryFilter ? 1 : 0) + (paymentStatusFilter ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0);
+  function clearAllFilters() {
+    setCategoryFilter("");
+    setPaymentStatusFilter("");
+    setFromDate("");
+    setToDate("");
+    setPage(1);
+  }
+
+  const { data: filterCategories } = useQuery({
+    queryKey: ["expense-categories"],
+    queryFn: async () => (await api.get<ApiSuccess<ExpenseCategoryRow[]>>("/expenses/categories")).data.data,
+  });
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = {
+    sortBy,
+    sortOrder,
+    ...(categoryFilter ? { categoryId: categoryFilter } : {}),
+    ...(paymentStatusFilter ? { paymentStatus: paymentStatusFilter } : {}),
+    ...(fromDate ? { from: fromDate } : {}),
+    ...(toDate ? { to: toDate } : {}),
+  };
+
   const { data: expenses } = useQuery({
-    queryKey: ["expenses"],
+    queryKey: ["expenses", page, limit, filterParams],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<ExpenseRow[]>>("/expenses", { params: { limit: 50 } });
+      const res = await api.get<ApiSuccess<ExpenseRow[]>>("/expenses", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (e: ExpenseRow) => ReactNode; exportValue: (e: ExpenseRow) => string | number | null }[] = [
+    {
+      key: "expenseDate",
+      label: isAr ? "التاريخ" : "Date",
+      sortField: "expenseDate",
+      render: (e) => <span className="ltr-nums">{new Date(e.expenseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (e) => new Date(e.expenseDate).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "expenseNumber",
+      label: isAr ? "الرقم" : "Number",
+      sortField: "expenseNumber",
+      render: (e) => (
+        <>
+          <span className="ltr-nums">{e.expenseNumber ?? "-"}</span>
+          {e.isRecurring && (
+            <Badge variant="neutral" className="ms-1.5">
+              {isAr ? "متكرر" : "recurring"}
+            </Badge>
+          )}
+        </>
+      ),
+      exportValue: (e) => e.expenseNumber,
+    },
+    {
+      key: "category",
+      label: isAr ? "الفئة" : "Category",
+      render: (e) => (isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn),
+      exportValue: (e) => (isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn),
+    },
+    ...(hideSupplier
+      ? []
+      : [
+          {
+            key: "supplier",
+            label: isAr ? "المورد" : "Supplier",
+            render: (e: ExpenseRow) => (e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"),
+            exportValue: (e: ExpenseRow) => (e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : null),
+          },
+        ]),
+    {
+      key: "totalAmount",
+      label: isAr ? "الإجمالي" : "Total",
+      sortField: "totalAmount",
+      render: (e) => <span className="ltr-nums">{formatMoney(e.totalAmount, currency, locale)}</span>,
+      exportValue: (e) => Number(e.totalAmount),
+    },
+    {
+      key: "paidAmount",
+      label: isAr ? "المدفوع" : "Paid",
+      sortField: "paidAmount",
+      render: (e) => <span className="ltr-nums">{formatMoney(e.paidAmount, currency, locale)}</span>,
+      exportValue: (e) => Number(e.paidAmount),
+    },
+    {
+      key: "dueAmount",
+      label: isAr ? "المستحق" : "Due",
+      sortField: "dueAmount",
+      render: (e) => <span className="ltr-nums">{formatMoney(e.dueAmount, currency, locale)}</span>,
+      exportValue: (e) => Number(e.dueAmount),
+    },
+    {
+      key: "paymentStatus",
+      label: t("common.status"),
+      render: (e) => <Badge variant={STATUS_VARIANT[e.paymentStatus]}>{e.paymentStatus}</Badge>,
+      exportValue: (e) => e.paymentStatus,
+    },
+    {
+      key: "createdByUser",
+      label: isAr ? "بواسطة" : "By",
+      render: (e) => e.createdByUser.fullNameEn,
+      exportValue: (e) => e.createdByUser.fullNameEn,
+    },
+  ];
+  const columnVisibility = useColumnVisibility("expenses", columns.map((c) => c.key));
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -96,55 +220,143 @@ export default function ExpensesPage() {
       )}
 
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>{isAr ? "التاريخ" : "Date"}</Th>
-              <Th>{isAr ? "الرقم" : "Number"}</Th>
-              <Th>{isAr ? "الفئة" : "Category"}</Th>
-              {!hideSupplier && <Th>{isAr ? "المورد" : "Supplier"}</Th>}
-              <Th>{isAr ? "الإجمالي" : "Total"}</Th>
-              <Th>{isAr ? "المدفوع" : "Paid"}</Th>
-              <Th>{isAr ? "المستحق" : "Due"}</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{isAr ? "بواسطة" : "By"}</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {expenses?.rows.map((e) => (
-              <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 text-xs text-slate-500"><span className="ltr-nums">{new Date(e.expenseDate).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-3 font-medium">
-                  <span className="ltr-nums">{e.expenseNumber ?? "-"}</span>
-                  {e.isRecurring && (
-                    <Badge variant="neutral" className="ms-1.5">
-                      {isAr ? "متكرر" : "recurring"}
-                    </Badge>
-                  )}
-                </td>
-                <td className="px-4 py-3">{isAr ? e.category.nameAr || e.category.nameEn : e.category.nameEn}</td>
-                {!hideSupplier && (
-                  <td className="px-4 py-3 text-slate-500">{e.supplier ? (isAr ? e.supplier.nameAr || e.supplier.nameEn : e.supplier.nameEn) : "-"}</td>
-                )}
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.totalAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.paidAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3"><span className="ltr-nums">{formatMoney(e.dueAmount, currency, locale)}</span></td>
-                <td className="px-4 py-3">
-                  <Badge variant={STATUS_VARIANT[e.paymentStatus]}>{e.paymentStatus}</Badge>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{e.createdByUser.fullNameEn}</td>
-              </tr>
-            ))}
-            {expenses?.rows.length === 0 && (
+        <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفئة" : "Category"}</label>
+              <select
+                value={categoryFilter}
+                onChange={(e) => {
+                  setCategoryFilter(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(selectClass, "w-full")}
+              >
+                <option value="">{isAr ? "الكل" : "All"}</option>
+                {filterCategories?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {isAr ? c.nameAr || c.nameEn : c.nameEn}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "حالة الدفع" : "Payment Status"}</label>
+              <select
+                value={paymentStatusFilter}
+                onChange={(e) => {
+                  setPaymentStatusFilter(e.target.value as typeof paymentStatusFilter);
+                  setPage(1);
+                }}
+                className={cn(selectClass, "w-full")}
+              >
+                <option value="">{isAr ? "الكل" : "All"}</option>
+                <option value="PAID">{isAr ? "مدفوع" : "Paid"}</option>
+                <option value="PARTIAL">{isAr ? "مدفوع جزئيًا" : "Partial"}</option>
+                <option value="DUE">{isAr ? "مستحق" : "Due"}</option>
+                <option value="OVERPAID">{isAr ? "مدفوع زيادة" : "Overpaid"}</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "من" : "From"}</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(inputClass, "w-full ltr-nums")}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "إلى" : "To"}</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(inputClass, "w-full ltr-nums")}
+              />
+            </div>
+          </FiltersMenu>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "المصروفات" : "Expenses"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<ExpenseRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<ExpenseRow[]>>("/expenses", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((e) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(e)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
               <tr>
-                <td colSpan={hideSupplier ? 8 : 9} className="px-4 py-8 text-center text-slate-400">
-                  {t("common.noResults")}
-                </td>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
               </tr>
-            )}
-          </tbody>
-        </Table>
+            </THead>
+            <tbody>
+              {expenses?.rows.map((e) => (
+                <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {visibleColumns.map((c) => (
+                    <td key={c.key} className="px-4 py-3">
+                      {c.render(e)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {expenses?.rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-slate-400">
+                    {t("common.noResults")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
+
+      {expenses?.meta && expenses.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={expenses.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${expenses.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && (
         <ExpenseFormModal

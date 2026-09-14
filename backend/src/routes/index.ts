@@ -12,7 +12,9 @@ import productRoutes from "../modules/products/product.routes";
 import serviceRoutes from "../modules/services/service.routes";
 import serviceCategoryRoutes from "../modules/serviceCategories/serviceCategory.routes";
 import saleRoutes from "../modules/sales/sale.routes";
+import importSalesRoutes from "../modules/importSales/importSales.routes";
 import posRoutes from "../modules/pos/pos.routes";
+import publicQuoteRoutes from "../modules/pos/publicQuote.routes";
 import bnplRoutes from "../modules/bnpl/bnpl.routes";
 import registerSessionRoutes from "../modules/registerSessions/registerSession.routes";
 import couponRoutes from "../modules/coupons/coupon.routes";
@@ -38,6 +40,10 @@ import permissionRoutes from "../modules/permissions/permission.routes";
 import paymentMethodRoutes from "../modules/paymentMethods/paymentMethod.routes";
 import zatcaCertificateRoutes from "../modules/zatca/certificate.routes";
 import organizationRoutes from "../modules/organizations/organization.routes";
+import exportRoutes from "../modules/exports/export.routes";
+import geoRoutes from "../modules/geo/geo.routes";
+import accountingRoutes from "../modules/accounting/accounting.routes";
+import invoiceLayoutRoutes from "../modules/invoiceLayouts/invoiceLayout.routes";
 import platformRoutes from "../modules/platform/platform.routes";
 import billingRoutes from "../modules/billing/billing.routes";
 import { authenticate } from "../middleware/authenticate";
@@ -59,6 +65,12 @@ router.use("/platform", platformRoutes);
 // to subscribe. It enforces its own auth internally.
 router.use("/billing", billingRoutes);
 
+// Reference's own public "View Quote URL" link (Util::getInvoiceUrl() -> show_quote route) - a
+// customer opens this with no login at all, so it must sit outside both the auth and paywall
+// gates. Scoped to a random per-sale token (never the org/sale id directly), so this is the only
+// ungated route in the whole app that returns tenant business data - see publicQuote.routes.ts.
+router.use("/public/quotes", publicQuoteRoutes);
+
 // --- Paywall -----------------------------------------------------------------------------
 // Everything mounted below requires an authenticated user whose organization has an active
 // trial or paid subscription. Feature routers still mount `authenticate` themselves; it is
@@ -77,6 +89,7 @@ router.use("/products", productRoutes);
 router.use("/services", serviceRoutes);
 router.use("/service-categories", serviceCategoryRoutes);
 router.use("/sales", saleRoutes);
+router.use("/import-sales", importSalesRoutes);
 router.use("/pos", posRoutes);
 router.use("/bnpl", bnplRoutes);
 router.use("/register-sessions", registerSessionRoutes);
@@ -102,5 +115,9 @@ router.use("/roles", roleRoutes);
 router.use("/permissions", permissionRoutes);
 router.use("/payment-methods", paymentMethodRoutes);
 router.use("/zatca/certificates", zatcaCertificateRoutes);
+router.use("/exports", exportRoutes);
+router.use("/geo", geoRoutes);
+router.use("/accounting", accountingRoutes);
+router.use("/invoice-layouts", invoiceLayoutRoutes);
 
 export default router;

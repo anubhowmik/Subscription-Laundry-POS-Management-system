@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
 import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
+
+const PURCHASE_SORTABLE_FIELDS = ["purchaseDate", "createdAt", "totalAmount", "referenceNumber"];
+const PURCHASE_RETURN_SORTABLE_FIELDS = ["returnDate", "createdAt", "totalAmount"];
 
 async function generatePurchaseReference(organizationId: string): Promise<string> {
   const count = await prisma.purchase.count({ where: { organizationId } });
@@ -131,31 +134,56 @@ export async function create(
   });
 }
 
+/** Purchases has no stored payment-status field (unlike Sale/Expense) - just `paidAmount`/
+ * `totalAmount` - so "Paid"/"Partial"/"Due" can't be pushed into a Prisma WHERE clause without raw
+ * SQL comparing two columns. Matches the reference's own `purchase_list_filter_payment_status`. */
+function computedPurchasePaymentStatus(p: { totalAmount: Prisma.Decimal | number | string; paidAmount: Prisma.Decimal | number | string }): "PAID" | "PARTIAL" | "DUE" {
+  const total = Number(p.totalAmount);
+  const paid = Number(p.paidAmount);
+  if (paid <= 0) return "DUE";
+  if (paid >= total) return "PAID";
+  return "PARTIAL";
+}
+
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, PURCHASE_SORTABLE_FIELDS, "createdAt");
   const where: Prisma.PurchaseWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.supplierId ? { supplierId: String(query.supplierId) } : {}),
+    ...(query.status ? { status: query.status as "RECEIVED" | "CANCELLED" } : {}),
+    ...(query.from || query.to
+      ? {
+          purchaseDate: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
-  const [data, total] = await Promise.all([
-    prisma.purchase.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
-      include: {
-        supplier: { select: { nameEn: true, nameAr: true } },
-        businessLocation: { select: { branchName: true } },
-        createdByUser: { select: { fullNameEn: true } },
-        items: { include: { product: { select: { nameEn: true, nameAr: true } } } },
-      },
-    }),
-    prisma.purchase.count({ where }),
-  ]);
+  const include = {
+    supplier: { select: { nameEn: true, nameAr: true } },
+    businessLocation: { select: { branchName: true } },
+    createdByUser: { select: { fullNameEn: true } },
+    items: { include: { product: { select: { nameEn: true, nameAr: true } } } },
+  } satisfies Prisma.PurchaseInclude;
 
-  return { data, meta: { page, limit, total } };
+  if (!query.paymentStatus) {
+    const [data, total] = await Promise.all([
+      prisma.purchase.findMany({ where, orderBy, skip, take: limit, include }),
+      prisma.purchase.count({ where }),
+    ]);
+    return { data, meta: { page, limit, total } };
+  }
+
+  // Payment status is computed, not stored, so it can't be paginated in SQL - fetch every matching
+  // purchase, compute, filter, THEN paginate in memory (same escape hatch as the due/balance
+  // filters on Suppliers/Customers).
+  const all = await prisma.purchase.findMany({ where, orderBy, include });
+  const filtered = all.filter((p) => computedPurchasePaymentStatus(p) === query.paymentStatus);
+  return { data: filtered.slice(skip, skip + limit), meta: { page, limit, total: filtered.length } };
 }
 
 export async function getById(id: string, organizationId: string, allowedLocationIds: string[] | null) {
@@ -331,16 +359,25 @@ export async function createReturn(input: CreatePurchaseReturnInput, organizatio
 
 export async function listReturns(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, PURCHASE_RETURN_SORTABLE_FIELDS, "createdAt");
   const where: Prisma.PurchaseReturnWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.supplierId ? { supplierId: String(query.supplierId) } : {}),
+    ...(query.from || query.to
+      ? {
+          returnDate: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
   const [data, total] = await Promise.all([
     prisma.purchaseReturn.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: {

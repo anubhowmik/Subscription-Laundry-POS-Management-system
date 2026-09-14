@@ -29,6 +29,14 @@ export async function getSettings(req: Request, res: Response) {
   return sendSuccess(res, await service.getSettings(req.user!.organizationId));
 }
 
+export async function getContactCustomFieldLabels(req: Request, res: Response) {
+  return sendSuccess(res, await service.getContactCustomFieldLabels(req.user!.organizationId));
+}
+
+export async function getSellCustomFieldLabels(req: Request, res: Response) {
+  return sendSuccess(res, await service.getSellCustomFieldLabels(req.user!.organizationId));
+}
+
 export async function updateSettings(req: Request, res: Response) {
   const before = await service.getSettings(req.user!.organizationId);
   const settings = await service.updateSettings(req.body, req.user!.organizationId);

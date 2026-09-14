@@ -1,4 +1,4 @@
-import { useEffect, type ElementType } from "react";
+import { useEffect, useState, type ElementType } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +39,18 @@ import {
   Settings,
   CreditCard,
   Banknote,
+  Handshake,
+  Upload,
+  BookOpen,
+  ScrollText,
+  Scale,
+  LayoutTemplate,
+  ChevronDown,
   X,
+  PlusCircle,
+  List,
+  PackageCheck,
+  Send,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "../../api/client";
@@ -67,6 +78,15 @@ export interface NavItem {
 export interface NavSection {
   labelKey: string;
   items: NavItem[];
+  /** Renders as a collapsible dropdown (icon + label + chevron, matching the EJADA reference
+   * site's menu pattern) instead of an always-expanded flat list under a static caption. Starts
+   * open automatically if one of its own items is the active route, otherwise starts closed.
+   * Sections are converted to this one at a time as requested, not all at once - most sections
+   * still use the plain always-expanded style below. */
+  collapsible?: true;
+  /** Required when `collapsible` is set - the dropdown header needs its own icon since it's a
+   * real clickable row now, not just a caption. */
+  icon?: LucideIcon;
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -82,28 +102,81 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    // Quick link into Service POS from right inside POS Laundry - without it there's no way to
+    // reach that selling screen without first going back to Home. Its own standalone section
+    // (not nested inside Sales A/R below) so it reads as a primary destination, not a sales
+    // sub-item. Tagged "laundry" so deriveModeSections() never pulls it into Service POS's/Product
+    // POS's own derived sidebars, where it'd duplicate that app's own screen link (already
+    // prepended into its Overview section) - so this section only ever renders inside POS Laundry.
+    labelKey: "nav.section.servicePos",
+    items: [{ to: "/pos/service", labelKey: "nav.posService", permissions: ["pos.access.service"], icon: ShoppingCart, only: "laundry" }],
+  },
+  {
+    // Same as Service POS above, for the Product POS quick link.
+    labelKey: "nav.section.productPos",
+    items: [{ to: "/pos/product", labelKey: "nav.posProduct", permissions: ["pos.access.product"], icon: ShoppingBasket, only: "laundry" }],
+  },
+  {
+    // Matches the EJADA reference site's "Sales A/R" dropdown exactly (its own sidebar labels
+    // this section "Sales A/R" too, not just "Sales") - converted to the same collapsible-dropdown
+    // format as Business Partners now that this section is actively growing (Round 25+ of the
+    // ongoing Sales A/R cross-check adds List POS/POS/Add Delivery/List Deliveries/Add Quotation/
+    // List Quotations/Shipments/Import Sales one at a time), rather than letting a flat list get
+    // increasingly cluttered.
     labelKey: "nav.section.sales",
+    collapsible: true,
+    icon: Banknote,
     items: [
-      // Quick links into Service POS/Product POS from right inside POS Laundry - without these
-      // there's no way to reach either selling screen without first going back to Home. Tagged
-      // "laundry" so deriveModeSections() never pulls them into Service POS's/Product POS's own
-      // derived sidebars, where they'd duplicate that app's own screen link (already prepended
-      // into its Overview section).
-      { to: "/pos/service", labelKey: "nav.posService", permissions: ["pos.access.service"], icon: ShoppingCart, only: "laundry" },
-      { to: "/pos/product", labelKey: "nav.posProduct", permissions: ["pos.access.product"], icon: ShoppingBasket, only: "laundry" },
       { to: "/sales", labelKey: "nav.sales", permissions: ["sales.view"], icon: Receipt },
-      { to: "/orders", labelKey: "nav.orders", permissions: ["sales.view"], icon: Package, only: "service" },
+      { to: "/sales/create", labelKey: "nav.addSale", permissions: ["sales.create"], icon: PlusCircle },
+      { to: "/sales/list-pos", labelKey: "nav.listPos", permissions: ["sales.view"], icon: List },
+      // The reference's own `sale.pos_sale` sidebar item - a direct link to the touch-grid POS
+      // screen itself, reusing the SAME icon as "Add Sale" (`fa-plus-circle` both times in the
+      // reference - not a mismatch, the reference genuinely repeats it). "/pos" only exists under
+      // the POS Laundry app (Service POS/Product POS use their own scoped /pos/service /
+      // /pos/product screens instead), hence "laundry"-only like the quick links above.
+      { to: "/pos", labelKey: "nav.posSale", permissions: ["pos.access"], icon: PlusCircle, only: "laundry" },
+      // Reference's own "List Deliveries" (`lang_v1.list_drafts`) - the laundry intake/drop-off
+      // ticket workflow (same DRAFT-sale mechanism as Quotes, see QuotesPage.tsx's `kind` prop).
+      // No separate "Add Delivery" nav entry, matching Quotes' own precedent - "Save as Delivery"
+      // is a button on Add Sale, not a distinct creation screen.
+      { to: "/deliveries", labelKey: "nav.deliveries", permissions: ["sales.quote"], icon: PackageCheck },
       { to: "/quotes", labelKey: "nav.quotes", permissions: ["sales.quote"], icon: FileText },
       { to: "/sell-returns", labelKey: "nav.sellReturns", permissions: ["sales.return"], icon: Undo2 },
-      { to: "/bookings", labelKey: "nav.bookings", permissions: ["bookings.manage"], icon: CalendarClock, only: "service" },
+      // Reference's own "Shipments" list (SellController@shipments) - unlike Orders/Bookings
+      // above, the reference keeps this one nested inside its own Sales A/R menu, so this stays
+      // here rather than becoming a standalone section.
+      { to: "/shipments", labelKey: "nav.shipments", permissions: ["sales.view"], icon: Send, only: "service" },
+      // Reference's own "Import Sales" (ImportSalesController) - last item in its Sales A/R menu.
+      { to: "/import-sales", labelKey: "nav.importSales", permissions: ["sales.create"], icon: Upload },
     ],
   },
   {
-    labelKey: "nav.section.customers",
+    // Matches the EJADA reference site's "Business Partners" module exactly: Suppliers,
+    // Customers, Customer Groups, Import Contacts as one dropdown (that reference groups
+    // suppliers with customers here, not under Products - see the memory note on this rebuild).
+    labelKey: "nav.section.businessPartners",
+    collapsible: true,
+    icon: Handshake,
     items: [
+      { to: "/suppliers", labelKey: "nav.suppliers", permissions: ["suppliers.manage"], icon: Truck, only: "product" },
       { to: "/customers", labelKey: "nav.customers", permissions: ["customers.view"], icon: Users },
       { to: "/customer-groups", labelKey: "nav.customerGroups", permissions: ["customer_groups.view"], icon: UsersRound },
+      { to: "/import-contacts", labelKey: "nav.importContacts", permissions: ["customers.create", "suppliers.manage"], icon: Upload },
     ],
+  },
+  {
+    // Reference's own "Orders" list - kept as its own standalone section right below Business
+    // Partners rather than nested inside Sales A/R, matching Service POS's/Product POS's own
+    // independence above.
+    labelKey: "nav.section.orders",
+    items: [{ to: "/orders", labelKey: "nav.orders", permissions: ["sales.view"], icon: Package, only: "service" }],
+  },
+  {
+    // Reference's own "Bookings" list - pulled out of Sales A/R the same way Orders was above,
+    // right after it.
+    labelKey: "nav.section.bookings",
+    items: [{ to: "/bookings", labelKey: "nav.bookings", permissions: ["bookings.manage"], icon: CalendarClock, only: "service" }],
   },
   {
     labelKey: "nav.section.catalogInventory",
@@ -111,7 +184,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/products", labelKey: "nav.products", permissions: ["products.view"], icon: ShoppingBasket, only: "product" },
       { to: "/services", labelKey: "nav.services", permissions: ["services.view"], icon: WashingMachine, only: "service" },
       { to: "/inventory", labelKey: "nav.inventory", permissions: ["inventory.view", "inventory.adjust", "inventory.transfer"], icon: ClipboardList, only: "product" },
-      { to: "/suppliers", labelKey: "nav.suppliers", permissions: ["suppliers.manage"], icon: Truck, only: "product" },
       { to: "/purchases", labelKey: "nav.purchases", permissions: ["purchases.manage"], icon: ShoppingBag, only: "product" },
       { to: "/inventory-postings", labelKey: "nav.inventoryPostings", permissions: ["inventory_postings.manage"], icon: ClipboardCheck, only: "product" },
     ],
@@ -125,6 +197,9 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/price-lists", labelKey: "nav.priceLists", permissions: ["price-lists.manage"], icon: Tags },
       { to: "/register-sessions", labelKey: "nav.registerSessions", permissions: ["pos.register.manage"], icon: Archive },
       { to: "/reports", labelKey: "nav.reports", permissions: ["reports.sales", "reports.inventory"], icon: BarChart3 },
+      { to: "/accounting/chart-of-accounts", labelKey: "nav.chartOfAccounts", permissions: ["accounting.view"], icon: BookOpen },
+      { to: "/accounting/journal-entries", labelKey: "nav.journalEntries", permissions: ["accounting.view"], icon: ScrollText },
+      { to: "/accounting/reports", labelKey: "nav.accountingReports", permissions: ["accounting.view"], icon: Scale },
     ],
   },
   {
@@ -140,6 +215,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/business-locations", labelKey: "nav.businessLocations", permissions: ["business_locations.update"], icon: Building2 },
       { to: "/notifications", labelKey: "nav.notifications", permissions: ["settings.manage"], icon: Bell },
       { to: "/bnpl-settings", labelKey: "nav.bnpl", permissions: ["bnpl.manage"], icon: Banknote },
+      { to: "/invoice-layouts", labelKey: "nav.invoiceLayouts", permissions: ["settings.manage"], icon: LayoutTemplate },
       { to: "/organization-settings", labelKey: "nav.organizationSettings", permissions: ["settings.manage"], icon: Settings },
     ],
   },
@@ -344,9 +420,48 @@ function SidebarHeader({ currentApp, onClose }: { currentApp: AppDef | undefined
   );
 }
 
+function NavItemLink({
+  item,
+  currentApp,
+  unreadCount,
+  onNavigate,
+}: {
+  item: NavItem;
+  currentApp: AppDef | undefined;
+  unreadCount: number | undefined;
+  onNavigate?: () => void;
+}) {
+  const { t } = useTranslation();
+  const Icon = item.icon;
+  return (
+    <NavLink
+      to={item.to}
+      end
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        cn(
+          "flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+          isActive ? (currentApp?.activeNavClasses ?? "bg-sky-50 text-sky-700") : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+        )
+      }
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} aria-hidden />
+      <span className="flex-1 truncate">{t(item.labelKey)}</span>
+      {item.to === "/messages" && Boolean(unreadCount) && (
+        <span className="rounded-full bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{unreadCount}</span>
+      )}
+    </NavLink>
+  );
+}
+
 function SidebarNav({ currentApp, onNavigate }: { currentApp: AppDef | undefined; onNavigate?: () => void }) {
   const { t } = useTranslation();
   const { can } = useAuth();
+  const { pathname } = useLocation();
+  // Only tracks sections the user has explicitly toggled - a section with no override here still
+  // auto-opens whenever it's the active one (see isOpen below), it just isn't PINNED open once you
+  // navigate away from it.
+  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
   const { data: unreadCount } = useQuery({
     queryKey: ["messages-unread-count"],
@@ -354,6 +469,8 @@ function SidebarNav({ currentApp, onNavigate }: { currentApp: AppDef | undefined
     enabled: can("messages.manage"),
     refetchInterval: 60_000,
   });
+
+  const cleanPath = pathname.replace(/^\//, "");
 
   return (
     <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
@@ -369,35 +486,48 @@ function SidebarNav({ currentApp, onNavigate }: { currentApp: AppDef | undefined
       {(currentApp?.sections ?? []).map((section) => {
         const items = section.items.filter((item) => !item.permissions || can(...item.permissions));
         if (items.length === 0) return null;
+
+        if (!section.collapsible) {
+          return (
+            <div key={section.labelKey}>
+              <p className="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {t(section.labelKey)}
+              </p>
+              <div className="space-y-0.5">
+                {items.map((item) => (
+                  <NavItemLink key={item.to} item={item} currentApp={currentApp} unreadCount={unreadCount} onNavigate={onNavigate} />
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        const isActiveSection = items.some((item) => {
+          const itemPath = item.to.slice(1);
+          return cleanPath === itemPath || cleanPath.startsWith(`${itemPath}/`);
+        });
+        const isOpen = openOverrides[section.labelKey] ?? isActiveSection;
+        const SectionIcon = section.icon ?? LayoutGrid;
+
         return (
           <div key={section.labelKey}>
-            <p className="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {t(section.labelKey)}
-            </p>
-            <div className="space-y-0.5">
-              {items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    onClick={onNavigate}
-                    className={({ isActive }) =>
-                      cn(
-                        "flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
-                        isActive ? (currentApp?.activeNavClasses ?? "bg-sky-50 text-sky-700") : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                      )
-                    }
-                  >
-                    <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} aria-hidden />
-                    <span className="flex-1 truncate">{t(item.labelKey)}</span>
-                    {item.to === "/messages" && Boolean(unreadCount) && (
-                      <span className="rounded-full bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{unreadCount}</span>
-                    )}
-                  </NavLink>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => setOpenOverrides((prev) => ({ ...prev, [section.labelKey]: !isOpen }))}
+              aria-expanded={isOpen}
+              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            >
+              <SectionIcon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} aria-hidden />
+              <span className="flex-1 truncate text-start">{t(section.labelKey)}</span>
+              <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isOpen && "rotate-180")} aria-hidden />
+            </button>
+            {isOpen && (
+              <div className="mt-0.5 space-y-0.5 ps-4">
+                {items.map((item) => (
+                  <NavItemLink key={item.to} item={item} currentApp={currentApp} unreadCount={unreadCount} onNavigate={onNavigate} />
+                ))}
+              </div>
+            )}
           </div>
         );
       })}

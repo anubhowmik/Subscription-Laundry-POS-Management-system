@@ -12,6 +12,7 @@ import { Button } from "../../components/ui/Button";
 import { StatCard } from "../../components/ui/StatCard";
 import { LoadingState } from "../../components/ui/Spinner";
 import { selectClass, inputClass } from "../../components/ui/formClasses";
+import { FiltersMenu } from "../../components/ui/TableToolbarControls";
 import { cn } from "../../lib/cn";
 
 type ItemFulfillmentStatus = "PENDING" | "IN_PROGRESS" | "READY" | "DELIVERED" | "CANCELLED";
@@ -85,6 +86,10 @@ export default function OrdersPage() {
 
   const [search, setSearch] = useState("");
   const [locationScope, setLocationScope] = useState<"current" | "all">("current");
+  const activeFilterCount = locationScope === "all" ? 1 : 0;
+  function clearAllFilters() {
+    setLocationScope("current");
+  }
 
   const params = {
     search: search || undefined,
@@ -114,20 +119,25 @@ export default function OrdersPage() {
         title={isAr ? "الطلبات" : "Orders"}
         actions={
           <>
-            <select
-              value={locationScope}
-              onChange={(e) => setLocationScope(e.target.value as "current" | "all")}
-              className={cn(selectClass, "!w-auto")}
-            >
-              <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
-              <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
-            </select>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={isAr ? "بحث برقم الفاتورة أو العميل" : "Search invoice or customer"}
               className={cn(inputClass, "!w-64")}
             />
+            <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Branch"}</label>
+                <select
+                  value={locationScope}
+                  onChange={(e) => setLocationScope(e.target.value as "current" | "all")}
+                  className={cn(selectClass, "w-full")}
+                >
+                  <option value="current">{isAr ? "هذا الفرع" : "This branch"}</option>
+                  <option value="all">{isAr ? "كل الفروع" : "All branches"}</option>
+                </select>
+              </div>
+            </FiltersMenu>
           </>
         }
       />

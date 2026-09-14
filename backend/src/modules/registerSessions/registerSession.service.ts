@@ -5,6 +5,8 @@ import { assertLocationAllowed } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
 
+export const REGISTER_SESSION_SORTABLE_FIELDS = ["openedAt", "closedAt", "cashDifference"];
+
 export async function openSession(
   businessLocationId: string,
   openingCashAmount: number,
@@ -111,13 +113,14 @@ export async function listSessions(
   page: number,
   limit: number,
   allowedLocationIds: string[] | null,
+  orderBy: Record<string, "asc" | "desc"> = { openedAt: "desc" },
 ) {
   assertLocationAllowed(businessLocationId, allowedLocationIds);
   const skip = (page - 1) * limit;
   const [data, total] = await Promise.all([
     prisma.registerSession.findMany({
       where: { businessLocationId, organizationId },
-      orderBy: { openedAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: {

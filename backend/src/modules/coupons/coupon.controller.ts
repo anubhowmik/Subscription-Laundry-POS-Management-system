@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import * as service from "./coupon.service";
-import { sendSuccess } from "../../utils/apiResponse";
+import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { getParam } from "../../utils/params";
 
 export async function list(req: Request, res: Response) {
-  return sendSuccess(res, await service.list(req.user!.organizationId));
+  const { data, meta } = await service.list(req.query, req.user!.organizationId);
+  return sendPaginated(res, data, meta);
 }
 
 export async function create(req: Request, res: Response) {

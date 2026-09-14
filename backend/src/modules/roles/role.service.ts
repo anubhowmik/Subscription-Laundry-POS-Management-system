@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
+import { parsePagination, parseSort } from "../../utils/pagination";
 import { ConflictError, NotFoundError, ValidationError } from "../../utils/AppError";
 
 interface RoleInput {
@@ -9,12 +10,24 @@ interface RoleInput {
   permissionCodes: string[];
 }
 
-export async function list(organizationId: string) {
-  return prisma.role.findMany({
-    where: { organizationId },
-    orderBy: { nameEn: "asc" },
-    include: { _count: { select: { users: true } } },
-  });
+const SORTABLE_FIELDS = ["nameEn", "createdAt"];
+
+export async function list(query: Record<string, unknown>, organizationId: string) {
+  const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "nameEn");
+
+  const [rows, total] = await Promise.all([
+    prisma.role.findMany({
+      where: { organizationId },
+      orderBy,
+      skip,
+      take: limit,
+      include: { _count: { select: { users: true } } },
+    }),
+    prisma.role.count({ where: { organizationId } }),
+  ]);
+
+  return { data: rows, meta: { page, limit, total } };
 }
 
 export async function getById(id: string, organizationId: string) {

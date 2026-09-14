@@ -3,18 +3,23 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
-import type { ApiSuccess } from "../../types/api";
+import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { inputClass, selectClass, labelClass } from "../../components/ui/formClasses";
 import { cn } from "../../lib/cn";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, CheckCircle2, CheckCheck, XCircle } from "lucide-react";
+import type { ReactNode } from "react";
 
 type BookingType = "PICKUP" | "DELIVERY";
 type BookingStatus = "REQUESTED" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
@@ -44,16 +49,83 @@ export default function BookingsPage() {
 
   const [statusFilter, setStatusFilter] = useState<BookingStatus | "">("");
   const [formOpen, setFormOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+
+  // Sortable column headers - backend whitelists these fields (booking.service.ts's
+  // SORTABLE_FIELDS).
+  const [sortBy, setSortBy] = useState("scheduledAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = { status: statusFilter || undefined, sortBy, sortOrder };
 
   const { data } = useQuery({
-    queryKey: ["bookings", statusFilter],
-    queryFn: async () => (await api.get<ApiSuccess<BookingRow[]>>("/bookings", { params: { status: statusFilter || undefined } })).data.data,
+    queryKey: ["bookings", page, limit, filterParams],
+    queryFn: async () => {
+      const res = await api.get<ApiSuccess<BookingRow[]>>("/bookings", { params: { ...filterParams, page, limit } });
+      return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
+    },
   });
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: BookingStatus }) => api.put(`/bookings/${id}/status`, { status }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["bookings"] }),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (b: BookingRow) => ReactNode; exportValue: (b: BookingRow) => string | number | null }[] = [
+    {
+      key: "scheduledAt",
+      label: isAr ? "الموعد" : "Scheduled",
+      sortField: "scheduledAt",
+      render: (b) => <span className="ltr-nums">{new Date(b.scheduledAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span>,
+      exportValue: (b) => new Date(b.scheduledAt).toLocaleString(isAr ? "ar-SA" : "en-US"),
+    },
+    {
+      key: "type",
+      label: isAr ? "النوع" : "Type",
+      sortField: "type",
+      render: (b) => (
+        <Badge variant={b.type === "PICKUP" ? "warning" : "info"} className={b.type === "DELIVERY" ? "!bg-teal-100 !text-teal-700 !ring-teal-200" : ""}>
+          {b.type === "PICKUP" ? (isAr ? "استلام" : "Pickup") : isAr ? "توصيل" : "Delivery"}
+        </Badge>
+      ),
+      exportValue: (b) => (b.type === "PICKUP" ? "Pickup" : "Delivery"),
+    },
+    {
+      key: "customer",
+      label: isAr ? "العميل" : "Customer",
+      render: (b) => (
+        <>
+          {isAr ? b.customer.nameAr || b.customer.nameEn : b.customer.nameEn} <span className="ltr-nums text-xs text-slate-400">({b.customer.phone})</span>
+        </>
+      ),
+      exportValue: (b) => (isAr ? b.customer.nameAr || b.customer.nameEn : b.customer.nameEn),
+    },
+    { key: "address", label: isAr ? "العنوان" : "Address", render: (b) => <span className="block max-w-[200px] truncate text-slate-500">{b.address ?? "—"}</span>, exportValue: (b) => b.address },
+    { key: "businessLocation", label: isAr ? "الفرع" : "Branch", render: (b) => b.businessLocation.branchName, exportValue: (b) => b.businessLocation.branchName },
+    {
+      key: "status",
+      label: t("common.status"),
+      sortField: "status",
+      render: (b) => <Badge variant={STATUS_LABEL[b.status].variant}>{isAr ? STATUS_LABEL[b.status].ar : STATUS_LABEL[b.status].en}</Badge>,
+      exportValue: (b) => (isAr ? STATUS_LABEL[b.status].ar : STATUS_LABEL[b.status].en),
+    },
+  ];
+
+  const columnVisibility = useColumnVisibility(
+    "bookings",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -70,101 +142,133 @@ export default function BookingsPage() {
           iconColor="text-white"
           highlight
           label={isAr ? "الحجوزات" : "Bookings"}
-          value={String(data?.length ?? 0)}
+          value={String(data?.meta.total ?? 0)}
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(["", "REQUESTED", "CONFIRMED", "COMPLETED", "CANCELLED"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={cn(
-              "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-              statusFilter === s ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
-            )}
-          >
-            {s === "" ? (isAr ? "الكل" : "All") : isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
-          </button>
-        ))}
-      </div>
-
       <TableContainer>
+        <TableToolbar>
+          <div className="flex flex-wrap gap-2">
+            {(["", "REQUESTED", "CONFIRMED", "COMPLETED", "CANCELLED"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => {
+                  setStatusFilter(s);
+                  setPage(1);
+                }}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                  statusFilter === s ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+                )}
+              >
+                {s === "" ? (isAr ? "الكل" : "All") : isAr ? STATUS_LABEL[s].ar : STATUS_LABEL[s].en}
+              </button>
+            ))}
+          </div>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "الحجوزات" : "Bookings"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<BookingRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<BookingRow[]>>("/bookings", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((b) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(b)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>{isAr ? "الموعد" : "Scheduled"}</Th>
-              <Th>{isAr ? "النوع" : "Type"}</Th>
-              <Th>{isAr ? "العميل" : "Customer"}</Th>
-              <Th>{isAr ? "العنوان" : "Address"}</Th>
-              <Th>{isAr ? "الفرع" : "Branch"}</Th>
-              <Th>{t("common.status")}</Th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
               <Th className="!text-end">{t("common.actions")}</Th>
             </tr>
           </THead>
           <tbody>
-            {data?.map((b) => (
+            {data?.rows.map((b) => (
               <tr key={b.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3"><span className="ltr-nums">{new Date(b.scheduledAt).toLocaleString(isAr ? "ar-SA" : "en-US")}</span></td>
-                <td className="px-4 py-3">
-                  <Badge variant={b.type === "PICKUP" ? "warning" : "info"} className={b.type === "DELIVERY" ? "!bg-teal-100 !text-teal-700 !ring-teal-200" : ""}>
-                    {b.type === "PICKUP" ? (isAr ? "استلام" : "Pickup") : isAr ? "توصيل" : "Delivery"}
-                  </Badge>
-                </td>
-                <td className="px-4 py-3">
-                  {isAr ? b.customer.nameAr || b.customer.nameEn : b.customer.nameEn} <span className="ltr-nums text-xs text-slate-400">({b.customer.phone})</span>
-                </td>
-                <td className="max-w-[200px] truncate px-4 py-3 text-slate-500">{b.address ?? "—"}</td>
-                <td className="px-4 py-3">{b.businessLocation.branchName}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={STATUS_LABEL[b.status].variant}>{isAr ? STATUS_LABEL[b.status].ar : STATUS_LABEL[b.status].en}</Badge>
-                </td>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(b)}
+                  </td>
+                ))}
                 <td className="px-4 py-3 text-end">
-                  <div className="flex justify-end gap-1.5">
+                  <RowActions>
                     {b.status === "REQUESTED" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="!border-sky-200 !text-sky-700 hover:!bg-sky-50"
+                      <RowActionButton
+                        icon={CheckCircle2}
+                        label={isAr ? "تأكيد" : "Confirm"}
+                        variant="success"
                         onClick={() => statusMutation.mutate({ id: b.id, status: "CONFIRMED" })}
-                      >
-                        {isAr ? "تأكيد" : "Confirm"}
-                      </Button>
+                      />
                     )}
                     {b.status === "CONFIRMED" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="!border-green-200 !text-green-700 hover:!bg-green-50"
+                      <RowActionButton
+                        icon={CheckCheck}
+                        label={isAr ? "إتمام" : "Complete"}
+                        variant="success"
                         onClick={() => statusMutation.mutate({ id: b.id, status: "COMPLETED" })}
-                      >
-                        {isAr ? "إتمام" : "Complete"}
-                      </Button>
+                      />
                     )}
                     {(b.status === "REQUESTED" || b.status === "CONFIRMED") && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="!border-red-200 !text-red-600 hover:!bg-red-50"
+                      <RowActionButton
+                        icon={XCircle}
+                        label={isAr ? "إلغاء" : "Cancel"}
+                        variant="danger"
                         onClick={() => statusMutation.mutate({ id: b.id, status: "CANCELLED" })}
-                      >
-                        {isAr ? "إلغاء" : "Cancel"}
-                      </Button>
+                      />
                     )}
-                  </div>
+                  </RowActions>
                 </td>
               </tr>
             ))}
-            {data?.length === 0 && (
+            {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
                   {t("common.noResults")}
                 </td>
               </tr>
             )}
           </tbody>
         </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && <BookingFormModal isAr={isAr} onClose={() => setFormOpen(false)} onSaved={() => setFormOpen(false)} />}
     </div>

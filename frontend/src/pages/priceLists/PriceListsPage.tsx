@@ -18,9 +18,9 @@ import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, Table, THead, Th, RowActions, RowActionButton } from "../../components/ui/Table";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { Tags } from "lucide-react";
+import { Tags, Trash2 } from "lucide-react";
 import { useCurrentApp } from "../../components/layout/Sidebar";
 
 interface PickerResult {
@@ -243,9 +243,9 @@ function PriceListDetailPanel({ id, isAr, onDeactivate }: { id: string; isAr: bo
                 <td className="px-4 py-3">{item.product?.nameEn ?? item.service?.nameEn ?? "—"}</td>
                 <td className="px-4 py-3"><span className="ltr-nums">{item.price}</span></td>
                 <td className="px-4 py-3">
-                  <Button variant="ghost" size="sm" onClick={() => removeItem(item)}>
-                    {isAr ? "إزالة" : "Remove"}
-                  </Button>
+                  <RowActions>
+                    <RowActionButton icon={Trash2} label={isAr ? "إزالة" : "Remove"} variant="danger" onClick={() => removeItem(item)} />
+                  </RowActions>
                 </td>
               </tr>
             ))}

@@ -7,17 +7,22 @@ import { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
-import type { ApiSuccess, BusinessLocation, Customer, CustomerGroup } from "../../types/api";
+import type { ApiSuccess, BusinessLocation, Customer, CustomerGroup, PaginationMeta } from "../../types/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, selectClass, errorTextClass } from "../../components/ui/formClasses";
 import { Users, UserCheck, KeyRound, Ticket } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface Role {
   id: string;
@@ -81,9 +86,33 @@ export default function UsersPage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState(false);
 
-  const { data: users } = useQuery({
-    queryKey: ["users"],
-    queryFn: async () => (await api.get<ApiSuccess<UserRow[]>>("/users", { params: { limit: 50 } })).data.data,
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  // Sortable column headers - backend already whitelists these fields (user.service.ts's
+  // SORTABLE_FIELDS).
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = {
+    sortBy,
+    sortOrder,
+  };
+
+  const { data } = useQuery({
+    queryKey: ["users", page, limit, filterParams],
+    queryFn: async () => {
+      const res = await api.get<ApiSuccess<UserRow[]>>("/users", { params: { ...filterParams, page, limit } });
+      return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
+    },
   });
 
   // Informational only (unlike branches, not every user counts - a non-login reference-only
@@ -98,9 +127,19 @@ export default function UsersPage() {
       (await api.get<ApiSuccess<{ purchasedUserSeats: number; usedUserSeats: number; availableUserSeats: number }>>("/billing/seats")).data.data,
   });
 
+  // Active-users count needs its own lightweight query (limit:1, just reading meta.total) rather
+  // than filtering the current page's rows client-side - now that the table is properly paginated,
+  // `data.rows` only ever holds one page, not every user.
+  const { data: activeUsersMeta } = useQuery({
+    queryKey: ["users-active-count"],
+    queryFn: async () => (await api.get<ApiSuccess<UserRow[]>>("/users", { params: { limit: 1, status: "ACTIVE" } })).data.meta as PaginationMeta,
+  });
+
   const { data: roles } = useQuery({
     queryKey: ["roles"],
-    queryFn: async () => (await api.get<ApiSuccess<Role[]>>("/roles")).data.data,
+    // limit:100 - this feeds the "Role" select in the add-user form, so it must not be truncated
+    // by /roles' default page size now that role.service.ts's list() is paginated.
+    queryFn: async () => (await api.get<ApiSuccess<Role[]>>("/roles", { params: { limit: 100 } })).data.data,
   });
 
   const { data: locations } = useQuery({
@@ -150,6 +189,7 @@ export default function UsersPage() {
     mutationFn: async (values: CreateFormValues) => (await api.post("/users", values)).data.data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["users-active-count"] });
       setShowForm(false);
       reset();
       setServerError(null);
@@ -198,6 +238,46 @@ export default function UsersPage() {
     resetResetForm();
   }
 
+  const columns: { key: string; label: string; sortField?: string; render: (u: UserRow) => ReactNode; exportValue: (u: UserRow) => string | number | null }[] = [
+    {
+      key: "username",
+      label: "Username",
+      sortField: "username",
+      render: (u) => (
+        <>
+          {u.username ?? <span className="text-slate-400">—</span>}
+          {u.isSystemAdmin && (
+            <Badge variant="info" className="ms-2">System Admin</Badge>
+          )}
+          {!u.allowLogin && (
+            <Badge variant="neutral" className="ms-2">No login</Badge>
+          )}
+        </>
+      ),
+      exportValue: (u) => u.username,
+    },
+    {
+      key: "fullNameEn",
+      label: t("common.name"),
+      sortField: "fullNameEn",
+      render: (u) => u.fullNameEn,
+      exportValue: (u) => u.fullNameEn,
+    },
+    { key: "email", label: t("common.email"), render: (u) => u.email, exportValue: (u) => u.email },
+    { key: "role", label: "Role", render: (u) => (isAr ? u.role.nameAr : u.role.nameEn), exportValue: (u) => (isAr ? u.role.nameAr : u.role.nameEn) },
+    {
+      key: "status",
+      label: t("common.status"),
+      render: (u) => <Badge variant={u.status === "ACTIVE" ? "success" : "neutral"}>{u.status === "ACTIVE" ? t("common.active") : t("common.inactive")}</Badge>,
+      exportValue: (u) => (u.status === "ACTIVE" ? t("common.active") : t("common.inactive")),
+    },
+  ];
+  const columnVisibility = useColumnVisibility(
+    "users",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -217,7 +297,7 @@ export default function UsersPage() {
           iconColor="text-white"
           highlight
           label={t("nav.users")}
-          value={String(users?.length ?? 0)}
+          value={String(data?.meta?.total ?? 0)}
         />
         <StatCard
           icon={UserCheck}
@@ -225,7 +305,7 @@ export default function UsersPage() {
           iconBg="bg-emerald-500"
           iconColor="text-white"
           label={isAr ? "المستخدمون النشطون" : "Active Users"}
-          value={String(users?.filter((u) => u.status === "ACTIVE").length ?? 0)}
+          value={String(activeUsersMeta?.total ?? 0)}
         />
         {seatSummary && (
           <>
@@ -265,52 +345,90 @@ export default function UsersPage() {
       )}
 
       <TableContainer>
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={t("nav.users")}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => {
+                const all = await fetchAllRows<UserRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<UserRow[]>>("/users", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((u) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(u)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>Username</Th>
-              <Th>{t("common.name")}</Th>
-              <Th>{t("common.email")}</Th>
-              <Th>Role</Th>
-              <Th>{t("common.status")}</Th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
               <Th>{t("common.actions")}</Th>
             </tr>
           </THead>
           <tbody>
-            {users?.map((u) => (
+            {data?.rows.map((u) => (
               <tr key={u.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3">
-                  {u.username ?? <span className="text-slate-400">—</span>}
-                  {u.isSystemAdmin && (
-                    <Badge variant="info" className="ms-2">System Admin</Badge>
-                  )}
-                  {!u.allowLogin && (
-                    <Badge variant="neutral" className="ms-2">No login</Badge>
-                  )}
-                </td>
-                <td className="px-4 py-3">{u.fullNameEn}</td>
-                <td className="px-4 py-3">{u.email}</td>
-                <td className="px-4 py-3">{isAr ? u.role.nameAr : u.role.nameEn}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={u.status === "ACTIVE" ? "success" : "neutral"}>
-                    {u.status === "ACTIVE" ? t("common.active") : t("common.inactive")}
-                  </Badge>
-                </td>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(u)}
+                  </td>
+                ))}
                 <td className="px-4 py-3">
                   {can("users.reset_password") && (
-                    <button
-                      onClick={() => setResetTarget(u)}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100"
-                    >
-                      Reset password
-                    </button>
+                    <RowActions>
+                      <RowActionButton icon={KeyRound} label="Reset password" onClick={() => setResetTarget(u)} />
+                    </RowActions>
                   )}
                 </td>
               </tr>
             ))}
+            {data?.rows.length === 0 && (
+              <tr>
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
+                  {t("common.noResults")}
+                </td>
+              </tr>
+            )}
           </tbody>
         </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
+        />
+      )}
 
       {showForm && (
         <Modal

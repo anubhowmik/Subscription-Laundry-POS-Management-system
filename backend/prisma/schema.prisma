@@ -59,6 +59,17 @@ enum SaleType {
   MIXED
 }
 
+// Reference's own `is_direct_sale` column on `transactions` - both "POS Sale" (the touch-grid
+// screen) and "Add Sale" (the back-office table screen) hit the exact same checkout endpoint in
+// the reference (and in this app - see pos.service.ts checkout()'s "channel" comment), so this is
+// the one signal that actually distinguishes which FRONTEND a sale was rung up through. Purely
+// informational/filtering - "List POS" (POS-channel only) vs "All Sales" (unfiltered, both
+// channels) are the same underlying data, scoped differently - see sale.service.ts's list().
+enum SaleChannel {
+  POS
+  ADD_SALE
+}
+
 enum InventoryTransactionType {
   STOCK_IN
   STOCK_OUT
@@ -103,6 +114,11 @@ enum BookingStatus {
 
 enum NotificationProvider {
   UNIFONIC
+  // The email channel added for "Send Notification" (see notifications.service.ts's
+  // sendTemplatedEmail()) - logged under this value regardless of which EmailSender
+  // (mock/resend/smtp, see emailSender.ts) actually delivered it, since NotificationLog tracks
+  // which app CHANNEL was used, not the specific outbound provider config.
+  RESEND
 }
 
 enum NotificationStatus {
@@ -113,11 +129,12 @@ enum NotificationStatus {
 
 // Matches the reference site's return-reason taxonomy exactly (Not Washable, Damaged, Not
 // Found, or a generic Sell Return/Other).
+// Matches the reference's own return-reason list exactly (sell_return/add.blade.php) - it has
+// no "Other" catch-all, just these three.
 enum SellReturnReason {
   NOT_WASHABLE
   DAMAGED
   NOT_FOUND
-  OTHER
 }
 
 enum PaymentType {
@@ -196,6 +213,18 @@ enum ItemFulfillmentStatus {
   READY
   DELIVERED
   CANCELLED
+}
+
+// Chart of Accounts - Phase 1 (see project_coa_full_system_of_record memory: user wants a full
+// system of record, not the audit's lightweight-reference default). Asset/Expense are
+// debit-normal; Liability/Equity/Revenue are credit-normal - see accounting/account.service.ts's
+// getBalance() for how this sign convention is applied.
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
 }
 
 enum RegisterSessionStatus {
@@ -284,6 +313,51 @@ enum BillingPaymentPurpose {
 }
 
 // ---------------------------------------------------------------------------
+// Global geography reference data - matches the reference app's Country/State/City tables
+// (its Suppliers/Customers form uses real cascading dropdowns, not free text). Global, not
+// organization-scoped - seeded once via prisma/seed.ts from a public world dataset, read-only
+// from the app's perspective. Supplier/Customer still store the resolved NAME as plain text
+// (unchanged), not a foreign key - these tables exist purely to power the picker.
+// ---------------------------------------------------------------------------
+
+model Country {
+  id        String  @id @default(uuid())
+  code      String  @unique // ISO2, e.g. "SA"
+  nameEn    String
+  nameAr    String?
+  phoneCode String?
+  states    State[]
+
+  @@index([nameEn])
+}
+
+model State {
+  id        String  @id @default(uuid())
+  countryId String
+  nameEn    String
+  // Only populated for Arabic-speaking countries - the source dataset's "native" name is in
+  // each country's own native script (French for France, etc.), not necessarily Arabic, so it's
+  // only trustworthy as `nameAr` when the country's native language actually is Arabic.
+  nameAr    String?
+  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  cities    City[]
+
+  @@index([countryId])
+}
+
+model City {
+  id      String  @id @default(uuid())
+  stateId String
+  nameEn  String
+  // No Arabic city names in the source dataset (150k+ cities) - always null. UI falls back to
+  // nameEn the same way it already does for any other nullable nameAr field.
+  nameAr  String?
+  state   State   @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([stateId])
+}
+
+// ---------------------------------------------------------------------------
 // Multi-tenant foundation
 // ---------------------------------------------------------------------------
 
@@ -303,20 +377,20 @@ model Organization {
   purchasedUserSeats Int @default(1)
 
   // --- Org-wide settings (P6-4) ---
-  fiscalYearStartMonth Int      @default(1) // 1-12
-  dateFormat           String   @default("DD/MM/YYYY")
-  timeFormat24h        Boolean  @default(false)
+  fiscalYearStartMonth Int     @default(1) // 1-12
+  dateFormat           String  @default("DD/MM/YYYY")
+  timeFormat24h        Boolean @default(false)
   reportHeaderText     String?
   reportFooterText     String?
   logoUrl              String?
   themeColor           String? // hex accent color
-  rewardPointsEnabled  Boolean  @default(true)
-  rewardPointsName     String   @default("Points")
-  pointValueSar        Decimal  @default(0.1) @db.Decimal(6, 3) // SAR value of 1 redeemed point - replaces the old hardcoded POINT_VALUE constant
-  pointsEarnDivisor    Decimal  @default(10) @db.Decimal(6, 2) // SAR spent per point earned - replaces the old hardcoded EARN_DIVISOR constant
-  minOrderForPoints    Decimal  @default(0) @db.Decimal(12, 2)
+  rewardPointsEnabled  Boolean @default(true)
+  rewardPointsName     String  @default("Points")
+  pointValueSar        Decimal @default(0.1) @db.Decimal(6, 3) // SAR value of 1 redeemed point - replaces the old hardcoded POINT_VALUE constant
+  pointsEarnDivisor    Decimal @default(10) @db.Decimal(6, 2) // SAR spent per point earned - replaces the old hardcoded EARN_DIVISOR constant
+  minOrderForPoints    Decimal @default(0) @db.Decimal(12, 2)
   maxPointsPerOrder    Int?
-  minRedeemPoints      Int      @default(0)
+  minRedeemPoints      Int     @default(0)
   maxRedeemPoints      Int?
   pointsExpiryDays     Int?
 
@@ -329,52 +403,77 @@ model Organization {
   // from checkout until approved. Off by default so existing orgs see no behavior change. ---
   customerApprovalRequired Boolean @default(false)
 
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  // --- Contact custom field labels - shared config for both Customer and Supplier custom_field1-10,
+  // matching the reference's shared `custom_labels['contact']` config. Null means "not configured
+  // by this business" and the frontend shows the generic "Custom Field N" default. ---
+  contactCustomField1Label  String?
+  contactCustomField2Label  String?
+  contactCustomField3Label  String?
+  contactCustomField4Label  String?
+  contactCustomField5Label  String?
+  contactCustomField6Label  String?
+  contactCustomField7Label  String?
+  contactCustomField8Label  String?
+  contactCustomField9Label  String?
+  contactCustomField10Label String?
 
-  users             User[]
-  roles             Role[]
-  userGroups        UserGroup[]
-  businessLocations BusinessLocation[]
+  // --- Sale custom field labels - matching the reference's own separate `custom_labels['sell']`
+  // config (distinct from the contact one above - the reference itself keeps these as two
+  // independent label sets, only 4 slots here vs 10 for contacts). Null means "not configured by
+  // this business" and the frontend shows the generic "Custom Field N" default. ---
+  sellCustomField1Label String?
+  sellCustomField2Label String?
+  sellCustomField3Label String?
+  sellCustomField4Label String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                  User[]
+  roles                  Role[]
+  userGroups             UserGroup[]
+  businessLocations      BusinessLocation[]
   businessLocationGroups BusinessLocationGroup[]
-  customerGroups    CustomerGroup[]
-  customers         Customer[]
-  categories        Category[]
-  brands            Brand[]
-  units             Unit[]
-  taxes             Tax[]
-  products          Product[]
-  serviceCategories ServiceCategory[]
-  services          Service[]
-  paymentMethods    PaymentMethod[]
-  sales             Sale[]
-  auditLogs         AuditLog[]
-  billingPayments   BillingPayment[]
-  subscription      Subscription?
-  registerSessions  RegisterSession[]
-  heldSales         HeldSale[]
-  coupons             Coupon[]
-  priceLists          PriceList[]
-  compensations       Compensation[]
-  loyaltyTransactions LoyaltyTransaction[]
-  cashbackTransactions CashbackTransaction[]
-  bookings            Booking[]
-  notificationSettings NotificationSettings?
-  notificationLogs     NotificationLog[]
-  notificationTemplates NotificationTemplate[]
-  sellReturns          SellReturn[]
-  suppliers            Supplier[]
-  purchases            Purchase[]
-  purchaseReturns      PurchaseReturn[]
-  inventoryPostings    InventoryPosting[]
-  messages             Message[]
-  announcements        Announcement[]
-  stockTransfers       StockTransfer[]
-  expenseCategories    ExpenseCategory[]
-  expenses             Expense[]
-  stockAdjustments     StockAdjustment[]
-  bnplProviderSettings BnplProviderSettings[]
-  bnplSessions         BnplSession[]
+  customerGroups         CustomerGroup[]
+  customers              Customer[]
+  accounts               Account[]
+  journalEntries         JournalEntry[]
+  categories             Category[]
+  brands                 Brand[]
+  units                  Unit[]
+  taxes                  Tax[]
+  products               Product[]
+  serviceCategories      ServiceCategory[]
+  services               Service[]
+  paymentMethods         PaymentMethod[]
+  sales                  Sale[]
+  auditLogs              AuditLog[]
+  billingPayments        BillingPayment[]
+  subscription           Subscription?
+  registerSessions       RegisterSession[]
+  heldSales              HeldSale[]
+  coupons                Coupon[]
+  priceLists             PriceList[]
+  compensations          Compensation[]
+  loyaltyTransactions    LoyaltyTransaction[]
+  cashbackTransactions   CashbackTransaction[]
+  bookings               Booking[]
+  notificationSettings   NotificationSettings?
+  notificationLogs       NotificationLog[]
+  notificationTemplates  NotificationTemplate[]
+  sellReturns            SellReturn[]
+  suppliers              Supplier[]
+  purchases              Purchase[]
+  purchaseReturns        PurchaseReturn[]
+  inventoryPostings      InventoryPosting[]
+  messages               Message[]
+  announcements          Announcement[]
+  stockTransfers         StockTransfer[]
+  expenseCategories      ExpenseCategory[]
+  expenses               Expense[]
+  stockAdjustments       StockAdjustment[]
+  bnplProviderSettings   BnplProviderSettings[]
+  bnplSessions           BnplSession[]
 }
 
 // Billing plan catalog - global, not tenant-scoped (the plans a tenant can subscribe to).
@@ -493,24 +592,24 @@ model RolePermission {
 }
 
 model User {
-  id             String     @id @default(uuid())
-  organizationId String
-  username       String?    @unique // null for non-login staff (P8-5) - Postgres unique index permits multiple nulls
-  email          String?    @unique
-  passwordHash   String? // null when allowLogin is false - login/changePassword must guard this, never compare against null
-  fullNameEn     String
-  fullNameAr     String?
-  phone          String?
-  roleId         String
-  role           Role       @relation(fields: [roleId], references: [id])
-  status         UserStatus @default(ACTIVE)
-  isSystemAdmin  Boolean    @default(false) // full access within their OWN organization only - bypasses business-location scoping, does not cross tenant boundaries
-  allowLogin     Boolean    @default(true) // false = a staff record that exists only to be referenced (e.g. createdBy) - see (a) in P8-5
-  maxDiscountPercent Decimal? @db.Decimal(5, 2) // null = unlimited - per-cashier invoice-discount ceiling (P8-5b), never applies to isSystemAdmin
+  id                  String     @id @default(uuid())
+  organizationId      String
+  username            String?    @unique // null for non-login staff (P8-5) - Postgres unique index permits multiple nulls
+  email               String?    @unique
+  passwordHash        String? // null when allowLogin is false - login/changePassword must guard this, never compare against null
+  fullNameEn          String
+  fullNameAr          String?
+  phone               String?
+  roleId              String
+  role                Role       @relation(fields: [roleId], references: [id])
+  status              UserStatus @default(ACTIVE)
+  isSystemAdmin       Boolean    @default(false) // full access within their OWN organization only - bypasses business-location scoping, does not cross tenant boundaries
+  allowLogin          Boolean    @default(true) // false = a staff record that exists only to be referenced (e.g. createdBy) - see (a) in P8-5
+  maxDiscountPercent  Decimal?   @db.Decimal(5, 2) // null = unlimited - per-cashier invoice-discount ceiling (P8-5b), never applies to isSystemAdmin
   // Email verification gate - see auth.service.ts verifyEmailCode(). New users default to false;
   // existing users as of the migration that introduced this column are backfilled to true (they
   // predate this concept and already have working accounts).
-  emailVerified  Boolean    @default(false)
+  emailVerified       Boolean    @default(false)
   // Per-user override on top of the role's app.* permission codes - null inherits the role's
   // grant, true force-grants even if the role lacks the code, false force-revokes even if the
   // role has it. Computed into req.user.permissions by middleware/authenticate.ts. See the
@@ -518,47 +617,47 @@ model User {
   appAccessPosLaundry Boolean?
   appAccessUsersRules Boolean?
   appAccessZatca      Boolean?
-  lastLoginAt    DateTime?
-  createdBy      String?
-  updatedBy      String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  deletedAt      DateTime?
+  lastLoginAt         DateTime?
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
 
-  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocations      UserBusinessLocation[]
-  userGroups             UserUserGroup[]
-  refreshTokens          RefreshToken[]
-  loginAttempts          LoginAttempt[]
-  auditLogs              AuditLog[]
-  sales                  Sale[]
-  payments               Payment[]
-  inventoryTxns          InventoryTransaction[]
-  saleItemStatusChanges  SaleItemStatusHistory[]
-  registerSessionsOpened RegisterSession[]       @relation("RegisterSessionOpenedBy")
-  registerSessionsClosed RegisterSession[]       @relation("RegisterSessionClosedBy")
-  heldSales              HeldSale[]
-  compensationsCreated   Compensation[]          @relation("CompensationCreatedBy")
-  compensationsResolved  Compensation[]          @relation("CompensationResolvedBy")
-  loyaltyTransactions    LoyaltyTransaction[]
-  cashbackTransactions   CashbackTransaction[]
-  bookingsCreated        Booking[]
-  sellReturnsCreated     SellReturn[]
-  purchasesCreated       Purchase[]
-  purchaseReturnsCreated PurchaseReturn[]
-  inventoryPostingsCreated InventoryPosting[]
-  messagesSent             Message[]
-  messageReads             MessageRead[]
-  announcementsCreated     Announcement[]
-  stockTransfersCreated    StockTransfer[] @relation("StockTransferCreatedBy")
-  stockTransfersReceived   StockTransfer[] @relation("StockTransferReceivedBy")
-  expensesCreated          Expense[]
-  stockAdjustmentsCreated  StockAdjustment[]
-  customerRestrictions         UserCustomer[]
-  customerGroupRestrictions    UserCustomerGroup[]
+  organization                     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocations                UserBusinessLocation[]
+  userGroups                       UserUserGroup[]
+  refreshTokens                    RefreshToken[]
+  loginAttempts                    LoginAttempt[]
+  auditLogs                        AuditLog[]
+  sales                            Sale[]
+  payments                         Payment[]
+  inventoryTxns                    InventoryTransaction[]
+  saleItemStatusChanges            SaleItemStatusHistory[]
+  registerSessionsOpened           RegisterSession[]          @relation("RegisterSessionOpenedBy")
+  registerSessionsClosed           RegisterSession[]          @relation("RegisterSessionClosedBy")
+  heldSales                        HeldSale[]
+  compensationsCreated             Compensation[]             @relation("CompensationCreatedBy")
+  compensationsResolved            Compensation[]             @relation("CompensationResolvedBy")
+  loyaltyTransactions              LoyaltyTransaction[]
+  cashbackTransactions             CashbackTransaction[]
+  bookingsCreated                  Booking[]
+  sellReturnsCreated               SellReturn[]
+  purchasesCreated                 Purchase[]
+  purchaseReturnsCreated           PurchaseReturn[]
+  inventoryPostingsCreated         InventoryPosting[]
+  messagesSent                     Message[]
+  messageReads                     MessageRead[]
+  announcementsCreated             Announcement[]
+  stockTransfersCreated            StockTransfer[]            @relation("StockTransferCreatedBy")
+  stockTransfersReceived           StockTransfer[]            @relation("StockTransferReceivedBy")
+  expensesCreated                  Expense[]
+  stockAdjustmentsCreated          StockAdjustment[]
+  customerRestrictions             UserCustomer[]
+  customerGroupRestrictions        UserCustomerGroup[]
   transferFromLocationRestrictions UserTransferFromLocation[]
-  bnplSessionsCreated      BnplSession[]
-  emailVerificationCodes   EmailVerificationCode[]
+  bnplSessionsCreated              BnplSession[]
+  emailVerificationCodes           EmailVerificationCode[]
 
   @@index([status])
   @@index([organizationId])
@@ -772,59 +871,59 @@ model BusinessLocation {
   // yearly-reset event: the first number claimed of any kind after the calendar year rolls over
   // (when numberResetYearly is on) zeroes every sequence together and stamps lastNumberResetYear,
   // rather than resetting independently. ---
-  invoiceNumberPrefix String  @default("INV-")
-  lastInvoiceSeq       Int     @default(0)
-  quoteNumberPrefix    String  @default("QT-")
-  lastQuoteSeq         Int     @default(0)
-  draftNumberPrefix    String  @default("DFT-")
-  lastDraftSeq         Int     @default(0)
-  returnNumberPrefix   String  @default("CN-")
-  lastReturnSeq        Int     @default(0)
-  reissueNumberPrefix  String  @default("RE-")
-  lastReissueSeq       Int     @default(0)
-  expenseNumberPrefix  String  @default("EXP-")
-  lastExpenseSeq       Int     @default(0)
-  adjustmentNumberPrefix String @default("ADJ-")
-  lastAdjustmentSeq      Int    @default(0)
-  numberResetYearly    Boolean @default(false)
-  lastNumberResetYear  Int?
+  invoiceNumberPrefix    String  @default("INV-")
+  lastInvoiceSeq         Int     @default(0)
+  quoteNumberPrefix      String  @default("QT-")
+  lastQuoteSeq           Int     @default(0)
+  draftNumberPrefix      String  @default("DFT-")
+  lastDraftSeq           Int     @default(0)
+  returnNumberPrefix     String  @default("CN-")
+  lastReturnSeq          Int     @default(0)
+  reissueNumberPrefix    String  @default("RE-")
+  lastReissueSeq         Int     @default(0)
+  expenseNumberPrefix    String  @default("EXP-")
+  lastExpenseSeq         Int     @default(0)
+  adjustmentNumberPrefix String  @default("ADJ-")
+  lastAdjustmentSeq      Int     @default(0)
+  numberResetYearly      Boolean @default(false)
+  lastNumberResetYear    Int?
 
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  group            BusinessLocationGroup?    @relation(fields: [groupId], references: [id])
-  defaultPriceList PriceList?                @relation(fields: [defaultPriceListId], references: [id])
-  invoiceLayoutSettings InvoiceLayoutSettings?
-  users            UserBusinessLocation[]
-  userGroups       UserGroup[]
-  customers        Customer[]
-  products         ProductBusinessLocation[]
-  services         ServiceBusinessLocation[]
-  productStocks    ProductStock[]
-  sales            Sale[]
-  inventoryTxns    InventoryTransaction[]
-  payments         Payment[]
-  zatcaCertificate ZatcaDeviceCertificate?
-  registerSessions RegisterSession[]
-  heldSales        HeldSale[]
-  compensations    Compensation[]
-  bookings         Booking[]
-  sellReturns      SellReturn[]
-  suppliers        Supplier[]
-  purchases        Purchase[]
-  purchaseReturns  PurchaseReturn[]
-  inventoryPostings InventoryPosting[]
-  messagesFrom     Message[] @relation("MessageFromLocation")
-  messagesTo       Message[] @relation("MessageToLocation")
-  announcementLocations AnnouncementLocation[]
-  stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
-  stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
-  coupons            Coupon[]
-  expenses           Expense[]
-  stockAdjustments   StockAdjustment[]
+  organization                 Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group                        BusinessLocationGroup?     @relation(fields: [groupId], references: [id])
+  defaultPriceList             PriceList?                 @relation(fields: [defaultPriceListId], references: [id])
+  invoiceLayoutSettings        InvoiceLayoutSettings[]
+  users                        UserBusinessLocation[]
+  userGroups                   UserGroup[]
+  customers                    Customer[]
+  products                     ProductBusinessLocation[]
+  services                     ServiceBusinessLocation[]
+  productStocks                ProductStock[]
+  sales                        Sale[]
+  inventoryTxns                InventoryTransaction[]
+  payments                     Payment[]
+  zatcaCertificate             ZatcaDeviceCertificate?
+  registerSessions             RegisterSession[]
+  heldSales                    HeldSale[]
+  compensations                Compensation[]
+  bookings                     Booking[]
+  sellReturns                  SellReturn[]
+  suppliers                    Supplier[]
+  purchases                    Purchase[]
+  purchaseReturns              PurchaseReturn[]
+  inventoryPostings            InventoryPosting[]
+  messagesFrom                 Message[]                  @relation("MessageFromLocation")
+  messagesTo                   Message[]                  @relation("MessageToLocation")
+  announcementLocations        AnnouncementLocation[]
+  stockTransfersFrom           StockTransfer[]            @relation("StockTransferFrom")
+  stockTransfersTo             StockTransfer[]            @relation("StockTransferTo")
+  coupons                      Coupon[]
+  expenses                     Expense[]
+  stockAdjustments             StockAdjustment[]
   userTransferFromRestrictions UserTransferFromLocation[]
-  bnplSessions       BnplSession[]
+  bnplSessions                 BnplSession[]
 
   @@unique([organizationId, branchCode])
   @@index([organizationId])
@@ -832,34 +931,38 @@ model BusinessLocation {
   @@index([groupId])
 }
 
-// Per-branch invoice/receipt display config (P7-5). One row per BusinessLocation, created lazily
-// on first PUT - a location with no row here just renders the "standard" template with every
-// toggle on and every label at its hardcoded default (see InvoicePage.tsx's DEFAULT_LABELS), so
-// existing invoices render identically until an admin actually customizes something.
+// Per-branch invoice/receipt display config (P7-5), extended into a real named catalog - a
+// branch can now have SEVERAL named layouts (matches the reference's own "Invoice Layout for
+// Sale" field, which lists real named templates like "Default Invoice Layout"/"Home Services" -
+// confirmed on the live reference instance), with exactly one flagged `isDefault` per branch.
+// businessLocationId is no longer @unique - see invoiceLayouts module for the CRUD/default-flip
+// logic. A location with zero rows still renders "standard" with every toggle on, unchanged.
 model InvoiceLayoutSettings {
   id                 String  @id @default(uuid())
-  businessLocationId String  @unique
+  businessLocationId String
+  name               String  @default("Default Layout")
+  isDefault          Boolean @default(true)
   templateKey        String  @default("standard") // standard | thermal58 | thermal80 | a4Full | a5 | garmentTag
   logoUrl            String?
   accentColor        String? // hex
 
   // Show/hide toggles - all default true so an unconfigured row renders every field the original
   // single-template InvoicePage.tsx always rendered unconditionally.
-  showLogo               Boolean @default(true)
-  showBranchName         Boolean @default(true)
-  showCity               Boolean @default(true)
-  showQrCode             Boolean @default(true)
-  showVatNumber          Boolean @default(true)
-  showCrNumber           Boolean @default(true)
-  showInvoiceUuid        Boolean @default(true)
-  showIcv                Boolean @default(true)
-  showCustomerVat        Boolean @default(true)
-  showCustomerPhone      Boolean @default(true)
-  showItemSku            Boolean @default(true)
-  showDiscountLine       Boolean @default(true)
-  showPaidDue            Boolean @default(true)
-  showEstimatedReady     Boolean @default(true)
-  showRegisterSession    Boolean @default(true)
+  showLogo                 Boolean @default(true)
+  showBranchName           Boolean @default(true)
+  showCity                 Boolean @default(true)
+  showQrCode               Boolean @default(true)
+  showVatNumber            Boolean @default(true)
+  showCrNumber             Boolean @default(true)
+  showInvoiceUuid          Boolean @default(true)
+  showIcv                  Boolean @default(true)
+  showCustomerVat          Boolean @default(true)
+  showCustomerPhone        Boolean @default(true)
+  showItemSku              Boolean @default(true)
+  showDiscountLine         Boolean @default(true)
+  showPaidDue              Boolean @default(true)
+  showEstimatedReady       Boolean @default(true)
+  showRegisterSession      Boolean @default(true)
   showDigitalSignatureNote Boolean @default(true)
 
   // Sparse { [labelKey]: { en, ar } } map - a missing key falls back to the hardcoded default text
@@ -870,6 +973,9 @@ model InvoiceLayoutSettings {
   updatedAt DateTime @updatedAt
 
   businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+  customers        Customer[]
+
+  @@index([businessLocationId])
 }
 
 // Groups branches (e.g. by city/region) mainly for reporting roll-ups - mirrors the reference
@@ -914,6 +1020,45 @@ model ZatcaDeviceCertificate {
 // Customers
 // ---------------------------------------------------------------------------
 
+// Matches the EJADA reference's CustomerGroup.price_calculation_type - mutually exclusive with
+// each other (see priceListResolver.ts): PERCENTAGE applies `discountPercent` to the base price,
+// SELLING_PRICE_GROUP applies the group's `priceListId` instead. Defaults to SELLING_PRICE_GROUP
+// here (NOT the reference's own "percentage" default) specifically so a group that already had a
+// `priceListId` configured before this field existed keeps behaving exactly as before - switching
+// the default to match the reference literally would have silently stopped applying every
+// pre-existing group price list the moment this migration ran.
+enum PriceCalculationType {
+  PERCENTAGE
+  SELLING_PRICE_GROUP
+}
+
+// Matches the reference's `max_for` radio (For Customer / For Company) - whether the monthly caps
+// below are enforced per-individual-customer or across the group's combined total. Nullable/COMPANY
+// both mean "combined" (the only behavior this system had before this field existed), matching
+// pos.service.ts's checkout() cap-enforcement query.
+enum CustomerGroupCapScope {
+  CUSTOMER
+  COMPANY
+}
+
+// Matches the reference's `invoice_type` radio (Delivery Invoice / Final Invoice) - this system's
+// own DRAFT/FINAL Sale.status IS the delivery-ticket-vs-finalized-invoice distinction the reference
+// describes, so this genuinely drives checkout() defaulting a new sale to DRAFT when unset by the
+// caller (see pos.service.ts).
+enum CustomerGroupInvoiceType {
+  DELIVERY
+  FINAL
+}
+
+// Reference's `pay_term_type` (days/months) alongside `pay_term_number` - Customer/Supplier
+// previously only had a days-only paymentTermsDays (a disclosed gap since the very first Supplier
+// round). Resurfaces on Add Sale's own Pay Term field, which pre-fills from the contact's own
+// configured type - see Sale.payTermType below.
+enum PayTermType {
+  DAYS
+  MONTHS
+}
+
 model CustomerGroup {
   id               String     @id @default(uuid())
   organizationId   String
@@ -930,74 +1075,249 @@ model CustomerGroup {
 
   // --- Monthly spend/volume caps (P8-3) - all null = unrestricted, matching Coupon's established
   // all-null-unrestricted targeting convention. Enforced across the WHOLE group's combined FINAL
-  // sales in the current calendar month, checked at checkout in pos.service.ts. ---
-  maxAmountPerMonth   Decimal? @db.Decimal(12, 2)
+  // sales in the current calendar month by default (maxFor null/COMPANY), or per-individual-
+  // customer when maxFor=CUSTOMER - checked at checkout in pos.service.ts. ---
+  maxAmountPerMonth   Decimal?               @db.Decimal(12, 2)
   maxInvoicesPerMonth Int?
-  maxQtyPerMonth      Decimal? @db.Decimal(12, 3)
+  maxQtyPerMonth      Decimal?               @db.Decimal(12, 3)
+  maxFor              CustomerGroupCapScope?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  priceList    PriceList?   @relation(fields: [priceListId], references: [id])
-  customers    Customer[]
-  coupons      Coupon[]
+  // --- Reference-parity fields added when cross-checking this module against the EJADA reference
+  // (CustomerGroupController.php) - see priceListResolver.ts and pos.service.ts for where each one
+  // actually takes effect, and customer_group_full_reference_parity's migration note for defaults
+  // chosen to avoid changing behavior for any group created before this migration. ---
+  defaultAccountId     String?
+  priceCalculationType PriceCalculationType     @default(SELLING_PRICE_GROUP)
+  isCorporate          Boolean                  @default(false)
+  taxNumber            String?
+  // Default true (NOT the reference's own unchecked-by-default) - this system already sends a
+  // NEW_SALE/PAYMENT_RECEIVED SMS unconditionally for every customer regardless of group, so
+  // defaulting new groups to false would silently go quiet for every org already relying on that.
+  sendSms              Boolean                  @default(true)
+  // No "manual price override at POS" capability exists anywhere in this system yet (checkout only
+  // ever prices from the product/service's own price or a resolved price list - see priceLine() in
+  // pos.service.ts) - stored faithfully but has no enforcement point to gate until that capability
+  // is built as its own feature.
+  priceEditable        Boolean                  @default(false)
+  invoiceType          CustomerGroupInvoiceType @default(FINAL)
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  priceList        PriceList?          @relation(fields: [priceListId], references: [id])
+  defaultAccount   Account?            @relation(fields: [defaultAccountId], references: [id])
+  customers        Customer[]
+  coupons          Coupon[]
   userRestrictions UserCustomerGroup[]
 
   @@index([organizationId])
 }
 
-model Customer {
-  id                 String     @id @default(uuid())
-  organizationId     String
-  code               String
-  nameEn             String
-  nameAr             String?
-  phone              String
-  altPhone           String?
-  email              String?
-  customerGroupId    String?
-  businessLocationId String?
-  priceListId        String? // wins over the customer group's price list when both are set
-  address            String?
-  city               String?
-  district           String?
-  postalCode         String?
-  vatNumber          String?
-  crNumber           String?
-  nationalAddress    String?
-  notes              String?
-  creditLimit        Decimal    @default(0) @db.Decimal(12, 2)
-  paymentTermsDays   Int        @default(0)
-  openingBalance     Decimal    @default(0) @db.Decimal(12, 2)
-  balance            Decimal    @default(0) @db.Decimal(12, 2) // positive = customer owes us
-  rewardPoints       Int        @default(0) // loyalty points balance - see LoyaltyTransaction for the earn/redeem ledger
-  cashBack           Decimal    @default(0) @db.Decimal(12, 2) // separate from rewardPoints (P8-2) - see CashbackTransaction for the grant/redeem ledger
-  approvalStatus     CustomerApprovalStatus @default(APPROVED) // P8-3 - only ever starts PENDING when Organization.customerApprovalRequired is on
-  status             UserStatus @default(ACTIVE)
-  createdBy          String?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  deletedAt          DateTime?
+// ---------------------------------------------------------------------------
+// Chart of Accounts - Phase 1 (ledger core: accounts + a real balanced double-entry journal,
+// no automatic posting yet - see accounting module comments for the Phase 2 scope). Matches the
+// reference's Account/AccountType 2-level hierarchy, converted from EJADA's "Account" contact
+// field which routes a Customer/Supplier's transactions to a specific ledger account.
+// ---------------------------------------------------------------------------
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customerGroup    CustomerGroup?    @relation(fields: [customerGroupId], references: [id])
-  businessLocation BusinessLocation? @relation(fields: [businessLocationId], references: [id])
-  priceList        PriceList?        @relation(fields: [priceListId], references: [id])
-  sales              Sale[]
-  payments           Payment[]
-  heldSales          HeldSale[]
-  compensations      Compensation[]
-  loyaltyTransactions LoyaltyTransaction[]
+model Account {
+  id              String      @id @default(uuid())
+  organizationId  String
+  code            String // user-assigned, e.g. "1000" - unique per org
+  nameEn          String
+  nameAr          String?
+  accountType     AccountType
+  parentAccountId String?
+  // Seeded defaults (Cash, Accounts Receivable, VAT Payable, ...) created at org registration -
+  // not user-deletable, matching how PERMISSIONS/PLAN_DEFS catalogs are treated as fixed seeds.
+  isSystemAccount Boolean     @default(false)
+  openingBalance  Decimal     @default(0) @db.Decimal(14, 2)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentAccount  Account?        @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  childAccounts  Account[]       @relation("AccountHierarchy")
+  journalLines   JournalLine[]
+  customers      Customer[]
+  suppliers      Supplier[]
+  customerGroups CustomerGroup[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([parentAccountId])
+}
+
+model JournalEntry {
+  id             String    @id @default(uuid())
+  organizationId String
+  entryDate      DateTime
+  reference      String?
+  memo           String?
+  createdBy      String
+  // null = draft (editable/deletable); once set, the entry is immutable - correct it with a
+  // reversing entry via reverse(), never by editing a posted entry. This is the actual
+  // bookkeeping guarantee the "full system of record" scope decision asked for.
+  postedAt       DateTime?
+  reversalOfId   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reversalOf   JournalEntry?  @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry[] @relation("JournalReversal")
+  lines        JournalLine[]
+
+  @@index([organizationId, entryDate])
+}
+
+model JournalLine {
+  id             String  @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  // Exactly one of debit/credit is non-zero per line - enforced in journalEntry.service.ts's
+  // create(), not at the DB level (Postgres can't easily check a cross-row entry-level balance
+  // constraint declaratively).
+  debit          Decimal @default(0) @db.Decimal(14, 2)
+  credit         Decimal @default(0) @db.Decimal(14, 2)
+  memo           String?
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model Customer {
+  id                     String                 @id @default(uuid())
+  organizationId         String
+  code                   String
+  // nameEn is always populated (required everywhere else - invoices, sales, receipts) even
+  // though the reference's own `name` is genuinely blank for a "business" contact - same
+  // conversion approach as Supplier (see its schema comment): contactType/prefix/first/middle/
+  // last mirror the reference's Individual/Business radio exactly, nameEn is computed/kept in
+  // sync rather than being a second, independently-typed field.
+  nameEn                 String
+  nameAr                 String?
+  contactType            String                 @default("individual") // "individual" | "business"
+  prefix                 String? // individual-only: Mr / Mrs / Miss
+  firstName              String? // individual-only
+  middleName             String? // individual-only
+  lastName               String? // individual-only
+  dateOfBirth            DateTime? // individual-only
+  businessName           String? // business-only; nameEn mirrors this when contactType is "business"
+  phone                  String
+  altPhone               String?
+  landline               String?
+  email                  String?
+  customerGroupId        String?
+  businessLocationId     String?
+  priceListId            String? // wins over the customer group's price list when both are set
+  // The reference's "Account" contact field - routes this customer's transactions to a Chart of
+  // Accounts entry. Purely a reference/routing field in Phase 1 (no automatic posting reads it
+  // yet - see schema.prisma's JournalEntry comment for the Phase 2 scope).
+  defaultAccountId       String?
+  // The reference's "Invoice Layout for Sale" contact field - a named layout from the
+  // InvoiceLayoutSettings catalog, used instead of the business location's own isDefault layout
+  // when this customer's invoices are rendered (see sale.service.ts's getById() resolution).
+  // Customer-only in the reference - Supplier does not get this field.
+  defaultInvoiceLayoutId String?
+  address                String?
+  addressLine2           String?
+  // Reference's own genuinely SEPARATE `shipping_address` text field on Contact (not derived from
+  // the structured address fields above) - shown as its own block on Add Sale's customer header,
+  // distinct from the computed "Billing Address" display. Free text, matching the reference's own
+  // unstructured field exactly (no street/city/etc. breakdown).
+  shippingAddress        String?
+  country                String?
+  state                  String?
+  city                   String?
+  district               String?
+  postalCode             String?
+  buildingNo             String? // Saudi National Address field
+  additionalNo           String? // Saudi National Address field
+  idType                 String? // reference's "other_id": TIN/CRN/MOM/MLS/700/SAG/NAT/IQA/PAS/OTH
+  mapLocation            String? // free-text "lat,lng", no map picker built
+  vatNumber              String?
+  crNumber               String?
+  nationalAddress        String?
+  notes                  String?
+  creditLimit            Decimal                @default(0) @db.Decimal(12, 2)
+  paymentTermsDays       Int                    @default(0)
+  payTermType            PayTermType?
+  openingBalance         Decimal                @default(0) @db.Decimal(12, 2)
+  balance                Decimal                @default(0) @db.Decimal(12, 2) // positive = customer owes us
+  rewardPoints           Int                    @default(0) // loyalty points balance - see LoyaltyTransaction for the earn/redeem ledger
+  cashBack               Decimal                @default(0) @db.Decimal(12, 2) // separate from rewardPoints (P8-2) - see CashbackTransaction for the grant/redeem ledger
+  approvalStatus         CustomerApprovalStatus @default(APPROVED) // P8-3 - only ever starts PENDING when Organization.customerApprovalRequired is on
+  // Converted from the reference's checkboxes - see Supplier.globalCustomer's comment for why
+  // these are saved faithfully but currently have no downstream effect in this app.
+  globalCustomer         Boolean                @default(false)
+  allowExpeditedDiscount Boolean                @default(false)
+  // Generic per-organization custom fields, shared label config with Supplier (Organization's
+  // contactCustomFieldNLabel) - see reference's shared `custom_labels['contact']` config.
+  customField1           String?
+  customField2           String?
+  customField3           String?
+  customField4           String?
+  customField5           String?
+  customField6           String?
+  customField7           String?
+  customField8           String?
+  customField9           String?
+  customField10          String?
+  status                 UserStatus             @default(ACTIVE)
+  createdBy              String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
+
+  organization         Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerGroup        CustomerGroup?          @relation(fields: [customerGroupId], references: [id])
+  businessLocation     BusinessLocation?       @relation(fields: [businessLocationId], references: [id])
+  priceList            PriceList?              @relation(fields: [priceListId], references: [id])
+  defaultAccount       Account?                @relation(fields: [defaultAccountId], references: [id])
+  defaultInvoiceLayout InvoiceLayoutSettings?  @relation(fields: [defaultInvoiceLayoutId], references: [id])
+  contactPersons       CustomerContactPerson[]
+  sales                Sale[]
+  payments             Payment[]
+  heldSales            HeldSale[]
+  compensations        Compensation[]
+  loyaltyTransactions  LoyaltyTransaction[]
   cashbackTransactions CashbackTransaction[]
-  bookings            Booking[]
-  sellReturns         SellReturn[]
-  coupons             Coupon[]
-  userRestrictions    UserCustomer[]
-  bnplSessions        BnplSession[]
+  bookings             Booking[]
+  sellReturns          SellReturn[]
+  coupons              Coupon[]
+  userRestrictions     UserCustomer[]
+  bnplSessions         BnplSession[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([phone])
   @@index([nameEn])
   @@index([status])
+}
+
+// Mirrors SupplierContactPerson exactly - see its comment for why the reference's "Allow login"
+// portal-account fields aren't replicated (no customer/supplier self-service portal exists here).
+model CustomerContactPerson {
+  id                  String   @id @default(uuid())
+  customerId          String
+  prefix              String?
+  firstName           String
+  lastName            String?
+  email               String?
+  mobile              String?
+  altPhone            String?
+  familyContactNumber String?
+  department          String?
+  designation         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,19 +1430,19 @@ model Product {
   updatedAt           DateTime    @updatedAt
   deletedAt           DateTime?
 
-  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  brand             Brand?                    @relation(fields: [brandId], references: [id])
-  unit              Unit                      @relation(fields: [unitId], references: [id])
-  category          Category?                 @relation(fields: [categoryId], references: [id])
-  tax               Tax?                      @relation(fields: [taxId], references: [id])
-  businessLocations ProductBusinessLocation[]
-  stocks            ProductStock[]
-  saleItems         SaleItem[]
-  inventoryTxns     InventoryTransaction[]
-  heldSaleItems     HeldSaleItem[]
-  priceListItems    PriceListItem[]
-  purchaseItems     PurchaseItem[]
-  stockTransfers    StockTransfer[]
+  organization         Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand                Brand?                    @relation(fields: [brandId], references: [id])
+  unit                 Unit                      @relation(fields: [unitId], references: [id])
+  category             Category?                 @relation(fields: [categoryId], references: [id])
+  tax                  Tax?                      @relation(fields: [taxId], references: [id])
+  businessLocations    ProductBusinessLocation[]
+  stocks               ProductStock[]
+  saleItems            SaleItem[]
+  inventoryTxns        InventoryTransaction[]
+  heldSaleItems        HeldSaleItem[]
+  priceListItems       PriceListItem[]
+  purchaseItems        PurchaseItem[]
+  stockTransfers       StockTransfer[]
   stockAdjustmentItems StockAdjustmentItem[]
 
   @@unique([organizationId, sku])
@@ -1204,11 +1524,11 @@ model StockTransfer {
   receivedBy             String?
 
   organization         Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  product               Product          @relation(fields: [productId], references: [id])
-  fromBusinessLocation  BusinessLocation @relation("StockTransferFrom", fields: [fromBusinessLocationId], references: [id])
-  toBusinessLocation    BusinessLocation @relation("StockTransferTo", fields: [toBusinessLocationId], references: [id])
-  createdByUser         User             @relation("StockTransferCreatedBy", fields: [createdBy], references: [id])
-  receivedByUser        User?            @relation("StockTransferReceivedBy", fields: [receivedBy], references: [id])
+  product              Product          @relation(fields: [productId], references: [id])
+  fromBusinessLocation BusinessLocation @relation("StockTransferFrom", fields: [fromBusinessLocationId], references: [id])
+  toBusinessLocation   BusinessLocation @relation("StockTransferTo", fields: [toBusinessLocationId], references: [id])
+  createdByUser        User             @relation("StockTransferCreatedBy", fields: [createdBy], references: [id])
+  receivedByUser       User?            @relation("StockTransferReceivedBy", fields: [receivedBy], references: [id])
 
   @@index([organizationId])
   @@index([status])
@@ -1232,17 +1552,17 @@ enum StockAdjustmentStatus {
 // that writes a compensating InventoryTransaction rather than deleting anything - same "never
 // delete, only compensate" discipline as StockTransfer's cancelTransfer().
 model StockAdjustment {
-  id                   String                   @id @default(uuid())
+  id                   String                  @id @default(uuid())
   organizationId       String
   businessLocationId   String
   adjustmentNumber     String? // human-readable, e.g. ADJ-000001 - claimed from BusinessLocation.lastAdjustmentSeq
-  adjustmentDate       DateTime                 @default(now())
-  lossType             StockAdjustmentLossType  @default(NORMAL)
-  totalAmountRecovered Decimal                  @default(0) @db.Decimal(12, 2) // meaningful only when lossType is ABNORMAL
-  status               StockAdjustmentStatus    @default(CONFIRMED)
+  adjustmentDate       DateTime                @default(now())
+  lossType             StockAdjustmentLossType @default(NORMAL)
+  totalAmountRecovered Decimal                 @default(0) @db.Decimal(12, 2) // meaningful only when lossType is ABNORMAL
+  status               StockAdjustmentStatus   @default(CONFIRMED)
   notes                String?
   createdBy            String
-  createdAt            DateTime                 @default(now())
+  createdAt            DateTime                @default(now())
   reversedAt           DateTime?
 
   organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1431,6 +1751,19 @@ model Sale {
   organizationId     String
   invoiceNumber      String? // human-readable, e.g. INV-000001 - NOT the ZATCA ICV. Null on a DRAFT quote until confirmQuote() assigns it.
   quoteNumber        String? // e.g. QT-000001 - set only on a DRAFT quote (or a sale later confirmed from one); separate sequence from invoiceNumber
+  // Reference's own lazily-generated `invoice_token` (Util::getInvoiceUrl()) - powers the
+  // action-dropdown's "View Quote URL" (quotation-only, per the reference's `sub_status ==
+  // "quotation"` check): a public, unauthenticated link a customer can open with no login, built
+  // from this random token rather than the Sale's own id so the id itself never has to be exposed.
+  // Null until the first time a share link is requested (pos.service.ts's getOrCreateShareToken()).
+  publicToken        String?       @unique
+  // Reference's own `is_quotation` flag - distinguishes the SAME status=DRAFT sale between its two
+  // real sub-types: a price Quotation (isQuotation=true, numbered via quoteNumber) and a "Delivery"
+  // (isQuotation=false, numbered via deliveryNumber below) - the laundry intake/drop-off ticket the
+  // reference's own "Add Delivery" screen creates. Defaults true so every pre-existing DRAFT row
+  // (all created through the quote flow, before this field existed) keeps reading as a quote.
+  isQuotation        Boolean       @default(true)
+  deliveryNumber     String? // e.g. DFT-000001 - set only when isQuotation=false; separate sequence from quoteNumber/invoiceNumber
   businessLocationId String
   customerId         String
   saleDate           DateTime      @default(now())
@@ -1438,6 +1771,7 @@ model Sale {
   status             SaleStatus    @default(FINAL)
   paymentStatus      PaymentStatus @default(DUE)
   saleType           SaleType? // PRODUCT / SERVICE / MIXED, derived from item composition at checkout - see SaleType
+  channel            SaleChannel   @default(POS) // which frontend rang this up - POS (touch-grid) or ADD_SALE (back-office table screen) - see SaleChannel
   subtotal           Decimal       @db.Decimal(12, 2)
   discountAmount     Decimal       @default(0) @db.Decimal(12, 2)
   taxAmount          Decimal       @default(0) @db.Decimal(12, 2)
@@ -1451,11 +1785,72 @@ model Sale {
   updatedAt          DateTime      @updatedAt
   cancelledAt        DateTime?
 
-  registerSessionId   String? // which cashier session this sale was rung up under, if one was open
-  couponId            String?
-  couponDiscountAmount Decimal    @default(0) @db.Decimal(12, 2) // server-computed - never trust a client-sent discount
-  invoiceDiscountAmount Decimal  @default(0) @db.Decimal(12, 2) // server-computed manual cashier discount (fixed or %), separate from couponDiscountAmount
-  shippingAmount        Decimal  @default(0) @db.Decimal(12, 2) // flat delivery/handling charge, taxed at the invoice's effective VAT rate like the rest of subtotal
+  // Reference's own `import_batch`/`import_time` on `transactions` (ImportSalesController) - set
+  // only on a sale bulk-loaded via List/Import Sales, null for every normal POS/Add Sale checkout.
+  // Groups an import run for the history list + "revert this batch" action; a per-organization
+  // sequential counter (max(importBatch)+1), not per-location, matching the reference's own
+  // per-business numbering since one uploaded file can span multiple branches.
+  importBatch Int?
+  importedAt  DateTime?
+
+  registerSessionId     String? // which cashier session this sale was rung up under, if one was open
+  couponId              String?
+  couponDiscountAmount  Decimal @default(0) @db.Decimal(12, 2) // server-computed - never trust a client-sent discount
+  invoiceDiscountAmount Decimal @default(0) @db.Decimal(12, 2) // server-computed manual cashier discount (fixed or %), separate from couponDiscountAmount
+  shippingAmount        Decimal @default(0) @db.Decimal(12, 2) // flat delivery/handling charge, taxed at the invoice's effective VAT rate like the rest of subtotal
+
+  // --- Sale custom fields - reference's own `custom_field_1..4` on a direct sale, org-labeled via
+  // Organization.sellCustomFieldNLabel above. Free text, no downstream effect beyond display/export
+  // (same as the Contact custom fields) - purely for the business's own record-keeping. ---
+  customField1 String?
+  customField2 String?
+  customField3 String?
+  customField4 String?
+
+  // --- Additional expenses - reference's own 4 fixed named key/value expense slots (not a
+  // dynamic list - matches the reference's literal `additional_expense_key_1..4`/`_value_1..4`
+  // shape exactly). Deliberately UNTAXED flat pass-through charges added straight to totalAmount
+  // (unlike shippingAmount above, which IS taxed) - matches how this kind of ad hoc reimbursable
+  // charge (a permit fee, a rush surcharge already inclusive, ...) is normally invoiced, and keeps
+  // the existing tax-calculation pipeline (subtotal -> tax -> total) untouched. ---
+  additionalExpense1Key   String?
+  additionalExpense1Value Decimal @default(0) @db.Decimal(12, 2)
+  additionalExpense2Key   String?
+  additionalExpense2Value Decimal @default(0) @db.Decimal(12, 2)
+  additionalExpense3Key   String?
+  additionalExpense3Value Decimal @default(0) @db.Decimal(12, 2)
+  additionalExpense4Key   String?
+  additionalExpense4Value Decimal @default(0) @db.Decimal(12, 2)
+
+  // --- ZATCA tax exemption reason - only meaningful when the invoice's effective tax category is
+  // Exempt/Zero-rated (see zatca/xmlGenerator.service.ts's cac:TaxExemptionReasonCode) - one of
+  // ZATCA's own fixed VATEX-SA-* codes, stored as plain text since there's no local table of them. ---
+  taxExemptionReasonCode String?
+
+  // --- Add Sale header fields (reference's own `sell/create.blade.php`, distinct from the
+  // touch-grid POS screen - see pos.service.ts's checkout() comment on how these are resolved). ---
+  // Per-sale Selling Price Group override - recorded here (not just used transiently) so a report
+  // or a later edit can see which price list actually priced this specific invoice, same as the
+  // reference's own `selling_price_group_id` column. Null means the customer/location default was
+  // used, unchanged from every prior round's behavior.
+  priceListId  String?
+  // Pay Term entered on Add Sale (pre-filled from the customer's own configured term, but
+  // independently editable per-invoice, matching the reference's `pay_term_number`/`pay_term_type`
+  // fields) - used only to compute dueDate below; does not alter the customer's own stored term.
+  payTermNumber Int?
+  payTermType   PayTermType?
+  // Reference's own `sell_due_date` - computed client-side from payTermNumber/payTermType against
+  // saleDate and sent as one concrete date, not recomputed server-side from the two parts (matches
+  // the reference's own store()-time behavior exactly). Null when no pay term was set.
+  dueDate       DateTime?
+  // Reference's own "Attach Document" upload (`sell_document`, max 9MB, pdf/csv/zip/doc/docx/
+  // jpeg/jpg/png) - uploaded separately via POST /sales/documents BEFORE checkout (this endpoint
+  // is plain JSON, not multipart), then referenced here by the path that upload returned. See
+  // pos.service.ts checkout()'s validation that the path's org segment actually matches the
+  // caller's organizationId before it's trusted. documentOriginalName is the user's own filename,
+  // kept separately from the randomized on-disk name for a correct download filename later.
+  documentPath         String?
+  documentOriginalName String?
 
   // --- ZATCA (Fatoora) e-invoicing fields - see docs/POS-ZATCA-PLAN.md Phase A/B/C ---
   // All null on a DRAFT quote - the whole ZATCA pipeline (ICV claim, hash chain, signing) only
@@ -1473,19 +1868,20 @@ model Sale {
   zatcaSubmittedAt    DateTime? // when we last called Clearance/Reporting for this invoice (Phase D)
   zatcaResponseRaw    Json? // full raw response from ZATCA's Clearance/Reporting API, for audit
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation BusinessLocation  @relation(fields: [businessLocationId], references: [id])
-  customer         Customer          @relation(fields: [customerId], references: [id])
-  createdByUser    User              @relation(fields: [createdBy], references: [id])
-  registerSession  RegisterSession?  @relation(fields: [registerSessionId], references: [id])
-  coupon           Coupon?           @relation(fields: [couponId], references: [id])
-  items               SaleItem[]
-  payments            Payment[]
-  compensations       Compensation[]
-  loyaltyTransactions LoyaltyTransaction[]
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation     BusinessLocation      @relation(fields: [businessLocationId], references: [id])
+  customer             Customer              @relation(fields: [customerId], references: [id])
+  createdByUser        User                  @relation(fields: [createdBy], references: [id])
+  registerSession      RegisterSession?      @relation(fields: [registerSessionId], references: [id])
+  coupon               Coupon?               @relation(fields: [couponId], references: [id])
+  priceList            PriceList?            @relation(fields: [priceListId], references: [id])
+  items                SaleItem[]
+  payments             Payment[]
+  compensations        Compensation[]
+  loyaltyTransactions  LoyaltyTransaction[]
   cashbackTransactions CashbackTransaction[]
-  sellReturns         SellReturn[]
-  bnplSession         BnplSession?
+  sellReturns          SellReturn[]
+  bnplSession          BnplSession?
 
   // Scoped to the branch, not the org - invoiceNumber/quoteNumber are now claimed from a
   // per-BusinessLocation counter (P7-5), so two different branches can legitimately produce the
@@ -1499,6 +1895,7 @@ model Sale {
   @@index([saleDate])
   @@index([status])
   @@index([paymentStatus])
+  @@index([organizationId, importBatch])
 }
 
 model SaleItem {
@@ -1518,13 +1915,20 @@ model SaleItem {
   taxCategoryCode   String                @default("S") // ZATCA UBL tax category (S/Z/E/...) - persisted so confirmQuote() can rebuild the XML without re-deriving it from the product/service's current tax rate
   fulfillmentStatus ItemFulfillmentStatus @default(PENDING) // per-garment tracking, independent of the invoice's own SaleStatus
   statusUpdatedAt   DateTime?
+  // Reference's per-line edit modal (`row_edit_product_price_modal.blade.php`) - a free-text note
+  // attached to this one line (distinct from Sale.notes, which is for the whole invoice), and
+  // width/height for laundry's own dimension-based pricing (carpets/curtains priced per m² - see
+  // pos.service.ts's priceLine(), which multiplies quantity by widthM*heightM when both are set).
+  note              String?
+  widthM            Decimal?              @db.Decimal(8, 3)
+  heightM           Decimal?              @db.Decimal(8, 3)
 
-  sale             Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product          Product?                @relation(fields: [productId], references: [id])
-  service          Service?                @relation(fields: [serviceId], references: [id])
-  statusHistory    SaleItemStatusHistory[]
+  sale              Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product           Product?                @relation(fields: [productId], references: [id])
+  service           Service?                @relation(fields: [serviceId], references: [id])
+  statusHistory     SaleItemStatusHistory[]
   compensationItems CompensationItem[]
-  sellReturnItems  SellReturnItem[]
+  sellReturnItems   SellReturnItem[]
 
   @@index([saleId])
   @@index([fulfillmentStatus])
@@ -1545,9 +1949,20 @@ model SellReturn {
   creditNoteNumber   String? // human-readable, e.g. CN-000001 - claimed from BusinessLocation.lastReturnSeq (P7-5)
   returnDate         DateTime @default(now())
   subtotal           Decimal  @db.Decimal(12, 2)
+  // Return-level discount (reference's own discount_type/discount_amount on the return form),
+  // netted into `subtotal` the exact same way Sale.invoiceDiscountAmount is - stores only the
+  // resulting amount, not the fixed/percentage mode used to compute it.
+  discountAmount     Decimal  @default(0) @db.Decimal(12, 2)
   taxAmount          Decimal  @db.Decimal(12, 2)
   totalAmount        Decimal  @db.Decimal(12, 2)
   refundedAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  // Reference's own `payment_status` on a sell_return transaction (has the store actually paid
+  // the customer back yet?) - reuses the exact same PaymentStatus enum Sale already uses, computed
+  // once at create() time from refundedAmount vs totalAmount (see sellReturn.service.ts). A stored,
+  // filterable/indexable column rather than computed-on-read, matching how Sale.paymentStatus
+  // already works. OVERPAID is never actually assigned here (refundedAmount is always clamped to
+  // totalAmount at creation) but the shared enum keeps this one value technically reachable.
+  paymentStatus      PaymentStatus @default(DUE)
   notes              String?
   createdBy          String
   createdAt          DateTime @default(now())
@@ -1597,44 +2012,121 @@ model SellReturnItem {
 // ---------------------------------------------------------------------------
 
 model Supplier {
-  id                 String     @id @default(uuid())
-  organizationId     String
-  code               String
-  nameEn             String
-  nameAr             String?
-  phone              String
-  altPhone           String?
-  email              String?
-  businessLocationId String?
-  address            String?
-  city               String?
-  district           String?
-  postalCode         String?
-  vatNumber          String?
-  crNumber           String?
-  nationalAddress    String?
-  notes              String?
-  creditLimit        Decimal    @default(0) @db.Decimal(12, 2)
-  paymentTermsDays   Int        @default(0)
-  openingBalance     Decimal    @default(0) @db.Decimal(12, 2)
-  balance            Decimal    @default(0) @db.Decimal(12, 2) // positive = we owe the supplier (Purchase Due)
-  status             UserStatus @default(ACTIVE)
-  createdBy          String?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  deletedAt          DateTime?
+  id                     String     @id @default(uuid())
+  organizationId         String
+  code                   String // the reference app's "Contact ID" - auto-generated (SUP-00001) but overridable by the user at creation, see supplier.service.ts's create()
+  // nameEn is always populated (required everywhere else in the system - invoices, purchase
+  // records, ...) even though the reference's own `name` is genuinely blank for a "business"
+  // contact. Converted faithfully: contactType/prefix/firstName/middleName/lastName mirror the
+  // reference's Individual/Business radio exactly (see SuppliersPage.tsx), and nameEn is kept in
+  // sync automatically - composed from prefix+first+middle+last for "individual", mirrored from
+  // businessName for "business" - rather than being a second, independently-typed field.
+  nameEn                 String
+  nameAr                 String?
+  contactType            String     @default("individual") // "individual" | "business" - the reference's own value strings
+  prefix                 String? // individual-only: Mr / Mrs / Miss
+  firstName              String? // individual-only
+  middleName             String? // individual-only
+  lastName               String? // individual-only
+  dateOfBirth            DateTime? // individual-only
+  businessName           String? // business-only in the reference; nameEn mirrors this when contactType is "business"
+  // Both converted from the reference's checkboxes, but their real downstream effect depends on
+  // systems this app doesn't have yet - saved faithfully, not fabricated as fully working:
+  // - globalCustomer: in the reference, bypasses a per-location-group visibility restriction on
+  //   contact lists. This app has no such restriction at all (every user sees every supplier
+  //   org-wide already), so the flag has no behavioral effect yet - only meaningful if/when
+  //   location-group-scoped visibility is ever built.
+  // - allowExpeditedDiscount: in the reference, gates an early-payment discount (pay within N
+  //   days of the transaction -> automatic % off), controlled by org-wide settings
+  //   (enable_expedited_payments/days/percent) this app doesn't have either. Same status.
+  globalCustomer         Boolean    @default(false)
+  allowExpeditedDiscount Boolean    @default(false)
+  phone                  String
+  altPhone               String?
+  landline               String?
+  email                  String?
+  businessLocationId     String?
+  // The reference's "Account" contact field - same as Customer.defaultAccountId, see its comment.
+  defaultAccountId       String?
+  address                String?
+  addressLine2           String?
+  country                String?
+  state                  String?
+  city                   String?
+  district               String?
+  postalCode             String?
+  buildingNo             String? // Saudi National Address field
+  additionalNo           String? // Saudi National Address field
+  idType                 String? // reference's "other_id": TIN/CRN/MOM/MLS/700/SAG/NAT/IQA/PAS/OTH
+  mapLocation            String? // free-text "lat,lng", no map picker built
+  shippingAddress        String? // reference's own separate free-text field - see Customer.shippingAddress's comment
+  vatNumber              String?
+  crNumber               String?
+  nationalAddress        String?
+  notes                  String?
+  creditLimit            Decimal    @default(0) @db.Decimal(12, 2)
+  paymentTermsDays       Int        @default(0)
+  payTermType            PayTermType?
+  openingBalance         Decimal    @default(0) @db.Decimal(12, 2)
+  balance                Decimal    @default(0) @db.Decimal(12, 2) // positive = we owe the supplier (Purchase Due)
+  // Generic per-organization custom fields, shared label config with Customer (Organization's
+  // contactCustomFieldNLabel) - see reference's shared `custom_labels['contact']` config.
+  customField1           String?
+  customField2           String?
+  customField3           String?
+  customField4           String?
+  customField5           String?
+  customField6           String?
+  customField7           String?
+  customField8           String?
+  customField9           String?
+  customField10          String?
+  status                 UserStatus @default(ACTIVE)
+  createdBy              String?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+  deletedAt              DateTime?
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation BusinessLocation? @relation(fields: [businessLocationId], references: [id])
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation?       @relation(fields: [businessLocationId], references: [id])
+  defaultAccount   Account?                @relation(fields: [defaultAccountId], references: [id])
   purchases        Purchase[]
   purchaseReturns  PurchaseReturn[]
   expenses         Expense[]
+  contactPersons   SupplierContactPerson[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([phone])
   @@index([nameEn])
   @@index([status])
+}
+
+// The reference's "Add Contact Persons" repeatable sub-form. There, a contact person is only
+// ever persisted as a portal-login `User` row (crm_contact_id FK) and is silently discarded
+// entirely if "Allow login" isn't checked with a username/password - this system has no
+// customer/supplier self-service portal or auth for external contacts at all, so that mechanic
+// is deliberately NOT replicated. Every contact person here is just an information record,
+// always saved regardless of login fields (which don't exist). Also deliberately unlimited
+// (add/remove rows) rather than the reference's hardcoded 3-slot UI.
+model SupplierContactPerson {
+  id                  String   @id @default(uuid())
+  supplierId          String
+  prefix              String?
+  firstName           String
+  lastName            String?
+  email               String?
+  mobile              String?
+  altPhone            String?
+  familyContactNumber String?
+  department          String?
+  designation         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
 }
 
 model Purchase {
@@ -1764,20 +2256,20 @@ model Expense {
   supplierId            String?
   expenseDate           DateTime      @default(now())
   subtotal              Decimal       @db.Decimal(12, 2)
-  taxPercent             Decimal      @default(0) @db.Decimal(5, 2) // single flat rate, no line items
-  taxAmount              Decimal      @default(0) @db.Decimal(12, 2)
-  totalAmount            Decimal      @db.Decimal(12, 2)
-  paidAmount              Decimal     @default(0) @db.Decimal(12, 2)
-  dueAmount               Decimal     @default(0) @db.Decimal(12, 2)
-  paymentStatus           PaymentStatus @default(DUE)
-  isRecurring             Boolean     @default(false)
-  recurringIntervalDays   Int?
-  nextRecurrenceAt        DateTime?
-  receiptUrl              String?
-  notes                   String?
-  createdBy               String
-  createdAt               DateTime    @default(now())
-  updatedAt               DateTime    @updatedAt
+  taxPercent            Decimal       @default(0) @db.Decimal(5, 2) // single flat rate, no line items
+  taxAmount             Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount           Decimal       @db.Decimal(12, 2)
+  paidAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  dueAmount             Decimal       @default(0) @db.Decimal(12, 2)
+  paymentStatus         PaymentStatus @default(DUE)
+  isRecurring           Boolean       @default(false)
+  recurringIntervalDays Int?
+  nextRecurrenceAt      DateTime?
+  receiptUrl            String?
+  notes                 String?
+  createdBy             String
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   category         ExpenseCategory  @relation(fields: [categoryId], references: [id])
@@ -1795,22 +2287,22 @@ model Expense {
 // time from live Sale/SaleItem state (see inventoryPosting.service.ts), not entered by hand, so
 // the record is a trustworthy audit trail rather than something a cashier could fudge.
 model InventoryPosting {
-  id                 String                  @id @default(uuid())
+  id                 String                 @id @default(uuid())
   organizationId     String
   businessLocationId String
-  postingDate        DateTime                @default(now())
-  status             InventoryPostingStatus  @default(PENDING)
-  cashInDrawer       Decimal                 @default(0) @db.Decimal(12, 2)
-  inStockCount       Int                     @default(0)
-  inStockTotal       Decimal                 @default(0) @db.Decimal(12, 2)
-  inWarehouseCount   Int                     @default(0)
-  inWarehouseTotal   Decimal                 @default(0) @db.Decimal(12, 2)
-  outStockCount      Int                     @default(0)
-  outStockTotal      Decimal                 @default(0) @db.Decimal(12, 2)
+  postingDate        DateTime               @default(now())
+  status             InventoryPostingStatus @default(PENDING)
+  cashInDrawer       Decimal                @default(0) @db.Decimal(12, 2)
+  inStockCount       Int                    @default(0)
+  inStockTotal       Decimal                @default(0) @db.Decimal(12, 2)
+  inWarehouseCount   Int                    @default(0)
+  inWarehouseTotal   Decimal                @default(0) @db.Decimal(12, 2)
+  outStockCount      Int                    @default(0)
+  outStockTotal      Decimal                @default(0) @db.Decimal(12, 2)
   notes              String?
   createdBy          String
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
@@ -1821,17 +2313,17 @@ model InventoryPosting {
 }
 
 model Message {
-  id                   String   @id @default(uuid())
-  organizationId       String
+  id                     String   @id @default(uuid())
+  organizationId         String
   fromBusinessLocationId String
-  toBusinessLocationId String
-  subject              String
-  content              String   @db.Text
-  parentMessageId      String?
-  createdBy            String
-  createdAt            DateTime @default(now())
+  toBusinessLocationId   String
+  subject                String
+  content                String   @db.Text
+  parentMessageId        String?
+  createdBy              String
+  createdAt              DateTime @default(now())
 
-  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization         Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   fromBusinessLocation BusinessLocation @relation("MessageFromLocation", fields: [fromBusinessLocationId], references: [id])
   toBusinessLocation   BusinessLocation @relation("MessageToLocation", fields: [toBusinessLocationId], references: [id])
   createdByUser        User             @relation(fields: [createdBy], references: [id])
@@ -1910,15 +2402,15 @@ model Compensation {
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sale             Sale             @relation(fields: [saleId], references: [id])
-  customer         Customer         @relation(fields: [customerId], references: [id])
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  createdByUser    User             @relation("CompensationCreatedBy", fields: [createdBy], references: [id])
-  resolvedByUser   User?            @relation("CompensationResolvedBy", fields: [resolvedBy], references: [id])
-  resolutionCoupon Coupon?          @relation(fields: [resolutionCouponId], references: [id])
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale                 Sale                  @relation(fields: [saleId], references: [id])
+  customer             Customer              @relation(fields: [customerId], references: [id])
+  businessLocation     BusinessLocation      @relation(fields: [businessLocationId], references: [id])
+  createdByUser        User                  @relation("CompensationCreatedBy", fields: [createdBy], references: [id])
+  resolvedByUser       User?                 @relation("CompensationResolvedBy", fields: [resolvedBy], references: [id])
+  resolutionCoupon     Coupon?               @relation(fields: [resolutionCouponId], references: [id])
   cashbackTransactions CashbackTransaction[]
-  items            CompensationItem[]
+  items                CompensationItem[]
 
   @@index([organizationId])
   @@index([saleId])
@@ -1931,13 +2423,13 @@ model Compensation {
 // have different reasons (one lost, one damaged). Header claimedAmount/approvedAmount are the
 // sum of these rows.
 model CompensationItem {
-  id             String              @id @default(uuid())
+  id             String             @id @default(uuid())
   compensationId String
   saleItemId     String
-  quantity       Decimal             @db.Decimal(12, 3)
+  quantity       Decimal            @db.Decimal(12, 3)
   reason         CompensationReason
-  claimedAmount  Decimal             @db.Decimal(12, 2)
-  approvedAmount Decimal?            @db.Decimal(12, 2)
+  claimedAmount  Decimal            @db.Decimal(12, 2)
+  approvedAmount Decimal?           @db.Decimal(12, 2)
 
   compensation Compensation @relation(fields: [compensationId], references: [id], onDelete: Cascade)
   saleItem     SaleItem     @relation(fields: [saleItemId], references: [id])
@@ -2047,6 +2539,11 @@ enum NotificationTrigger {
   PAYMENT_RECEIVED
   PAYMENT_REMINDER
   COMPENSATION_RESOLVED
+  // Reference's action-dropdown "Send Notification" (quotation-only) - the one trigger sent
+  // on-demand from a row action rather than automatically as a side effect of some other flow.
+  // Also the first trigger sent by email, not just SMS - see notifications.service.ts's
+  // sendTemplatedEmail().
+  NEW_QUOTATION
 }
 
 // Admin-editable, bilingual, per-trigger SMS text with {placeholder} substitution - replaces the
@@ -2084,7 +2581,7 @@ model NotificationLog {
   id             String               @id @default(uuid())
   organizationId String
   toPhone        String
-  message        String                @db.Text
+  message        String               @db.Text
   status         NotificationStatus
   provider       NotificationProvider
   referenceType  String? // e.g. "SALE"
@@ -2129,25 +2626,25 @@ model Payment {
 // ---------------------------------------------------------------------------
 
 model RegisterSession {
-  id                  String                 @id @default(uuid())
-  organizationId      String
-  businessLocationId  String
-  openedBy            String
-  openedAt            DateTime               @default(now())
-  openingCashAmount   Decimal                @default(0) @db.Decimal(12, 2)
-  closedBy            String?
-  closedAt            DateTime?
-  expectedCashAmount  Decimal?               @db.Decimal(12, 2) // derived from the RegisterTransaction ledger: sum(CREDIT) - sum(DEBIT)
-  countedCashAmount   Decimal?               @db.Decimal(12, 2) // what the cashier actually counted at close
-  cashDifference      Decimal?               @db.Decimal(12, 2) // countedCashAmount - expectedCashAmount
-  denominations       Json?                  // optional bill/coin counts captured at close, e.g. {"500": 1, "100": 3, ...}
-  notes               String?
-  status              RegisterSessionStatus  @default(OPEN)
+  id                 String                @id @default(uuid())
+  organizationId     String
+  businessLocationId String
+  openedBy           String
+  openedAt           DateTime              @default(now())
+  openingCashAmount  Decimal               @default(0) @db.Decimal(12, 2)
+  closedBy           String?
+  closedAt           DateTime?
+  expectedCashAmount Decimal?              @db.Decimal(12, 2) // derived from the RegisterTransaction ledger: sum(CREDIT) - sum(DEBIT)
+  countedCashAmount  Decimal?              @db.Decimal(12, 2) // what the cashier actually counted at close
+  cashDifference     Decimal?              @db.Decimal(12, 2) // countedCashAmount - expectedCashAmount
+  denominations      Json? // optional bill/coin counts captured at close, e.g. {"500": 1, "100": 3, ...}
+  notes              String?
+  status             RegisterSessionStatus @default(OPEN)
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  openedByUser     User             @relation("RegisterSessionOpenedBy", fields: [openedBy], references: [id])
-  closedByUser     User?            @relation("RegisterSessionClosedBy", fields: [closedBy], references: [id])
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation      @relation(fields: [businessLocationId], references: [id])
+  openedByUser     User                  @relation("RegisterSessionOpenedBy", fields: [openedBy], references: [id])
+  closedByUser     User?                 @relation("RegisterSessionClosedBy", fields: [closedBy], references: [id])
   sales            Sale[]
   transactions     RegisterTransaction[]
 
@@ -2165,15 +2662,15 @@ enum RegisterTransactionType {
 // refunds - is a ledger row here. expectedCashAmount at close is derived by summing these rather
 // than reconstructed from Payment rows, so refunds (type DEBIT) are never silently missed.
 model RegisterTransaction {
-  id                String                   @id @default(uuid())
+  id                String                  @id @default(uuid())
   registerSessionId String
   type              RegisterTransactionType
-  amount            Decimal                  @db.Decimal(12, 2) // always positive; type carries the sign
+  amount            Decimal                 @db.Decimal(12, 2) // always positive; type carries the sign
   paymentMethod     String
   referenceType     String?
   referenceId       String?
   note              String?
-  createdAt         DateTime                 @default(now())
+  createdAt         DateTime                @default(now())
 
   registerSession RegisterSession @relation(fields: [registerSessionId], references: [id], onDelete: Cascade)
 
@@ -2249,11 +2746,11 @@ model Coupon {
   // Targeting - all null = unrestricted (matches the existing org-wide default). Deliberately no
   // category/product targeting here - that requires restructuring discount math from cart-level to
   // per-line, the same undertaking as the Promotion engine (Tier 3/4), not a small addition.
-  businessLocationId  String?
-  customerId          String?
-  customerGroupId     String?
-  maxUsesPerCustomer  Int? // null = unlimited (per-customer)
-  maxDiscountAmount   Decimal? @db.Decimal(12, 2) // ceiling on the computed discount - only meaningful for PERCENT mode
+  businessLocationId String?
+  customerId         String?
+  customerGroupId    String?
+  maxUsesPerCustomer Int? // null = unlimited (per-customer)
+  maxDiscountAmount  Decimal? @db.Decimal(12, 2) // ceiling on the computed discount - only meaningful for PERCENT mode
 
   organization            Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   businessLocation        BusinessLocation? @relation(fields: [businessLocationId], references: [id])
@@ -2283,11 +2780,12 @@ model PriceList {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  items          PriceListItem[]
-  customers      Customer[]
-  customerGroups CustomerGroup[]
+  organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items               PriceListItem[]
+  customers           Customer[]
+  customerGroups      CustomerGroup[]
   defaultForLocations BusinessLocation[]
+  sales               Sale[]
 
   @@unique([organizationId, nameEn])
   @@index([organizationId])

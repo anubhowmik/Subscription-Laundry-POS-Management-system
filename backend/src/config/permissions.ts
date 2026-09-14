@@ -47,6 +47,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "sales.cancel", module: "sales", description: "Cancel sales" },
   { code: "sales.return", module: "sales", description: "Process sale returns" },
   { code: "sales.quote", module: "sales", description: "Create, confirm, and void quotes" },
+  { code: "sales.delete", module: "sales", description: "Permanently delete draft quotes and deliveries" },
 
   { code: "pos.access", module: "pos", description: "Access the POS screen" },
   { code: "pos.access.service", module: "pos", description: "Access the Service POS screen" },
@@ -55,10 +56,18 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "coupons.manage", module: "pos", description: "Create and manage discount coupons" },
   { code: "price-lists.manage", module: "pos", description: "Create price lists and assign them to customers" },
   { code: "bnpl.manage", module: "pos", description: "Configure BNPL (Tamara/Tabby/MISPay) providers for the organization" },
+  // Reference's own `edit_product_price_from_sale_screen` - a per-line unit price/tax override at
+  // checkout, gated to managers by default (see defaultRoles.ts) since an unrestricted cashier
+  // could otherwise discount arbitrarily by "correcting" the price instead of using the existing
+  // (already-gated) discount field.
+  { code: "pos.editLinePrice", module: "pos", description: "Override a line's unit price and tax at checkout (POS / Add Sale)" },
 
   { code: "reports.sales", module: "reports", description: "View sales reports" },
   { code: "reports.inventory", module: "reports", description: "View inventory reports" },
   { code: "reports.accounting", module: "reports", description: "View accounting reports" },
+
+  { code: "accounting.view", module: "accounting", description: "View the Chart of Accounts and journal entries" },
+  { code: "accounting.manage", module: "accounting", description: "Create/edit accounts and post journal entries" },
 
   { code: "compensations.file", module: "sales", description: "File lost/damaged/delayed item compensation claims" },
   { code: "compensations.approve", module: "sales", description: "Approve or reject pending compensation claims" },

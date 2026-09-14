@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import { getParam } from "../../utils/params";
 import * as service from "./booking.service";
-import { sendSuccess } from "../../utils/apiResponse";
+import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
 
 export async function list(req: Request, res: Response) {
   const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
-  return sendSuccess(res, await service.list(req.query, req.user!.organizationId, allowedLocationIds));
+  const { data, meta } = await service.list(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendPaginated(res, data, meta);
 }
 
 export async function create(req: Request, res: Response) {

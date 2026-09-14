@@ -2,6 +2,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
+import { parsePagination, parseSort } from "../../utils/pagination";
+
+const SORTABLE_FIELDS = ["scheduledAt", "status", "type", "createdAt"];
 
 interface CreateBookingInput {
   businessLocationId: string;
@@ -35,6 +38,9 @@ export async function create(input: CreateBookingInput, organizationId: string, 
 }
 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
+  const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "scheduledAt");
+
   const where: Prisma.BookingWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
@@ -50,15 +56,21 @@ export async function list(query: Record<string, unknown>, organizationId: strin
       : {}),
   };
 
-  return prisma.booking.findMany({
-    where,
-    orderBy: { scheduledAt: "asc" },
-    take: 300,
-    include: {
-      customer: { select: { nameEn: true, nameAr: true, phone: true } },
-      businessLocation: { select: { branchName: true } },
-    },
-  });
+  const [data, total] = await Promise.all([
+    prisma.booking.findMany({
+      where,
+      orderBy,
+      skip,
+      take: limit,
+      include: {
+        customer: { select: { nameEn: true, nameAr: true, phone: true } },
+        businessLocation: { select: { branchName: true } },
+      },
+    }),
+    prisma.booking.count({ where }),
+  ]);
+
+  return { data, meta: { page, limit, total } };
 }
 
 export async function updateStatus(id: string, status: "REQUESTED" | "CONFIRMED" | "COMPLETED" | "CANCELLED", organizationId: string) {

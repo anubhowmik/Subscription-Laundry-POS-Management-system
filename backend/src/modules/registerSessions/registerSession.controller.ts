@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 import * as service from "./registerSession.service";
 import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { getParam } from "../../utils/params";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
+import { REGISTER_SESSION_SORTABLE_FIELDS } from "./registerSession.service";
 
 function allowedLocationIds(req: Request) {
   return req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
@@ -51,6 +52,7 @@ export async function current(req: Request, res: Response) {
 export async function list(req: Request, res: Response) {
   const businessLocationId = String(req.query.businessLocationId);
   const { page, limit } = parsePagination(req.query);
-  const { data, meta } = await service.listSessions(businessLocationId, req.user!.organizationId, page, limit, allowedLocationIds(req));
+  const orderBy = parseSort(req.query, REGISTER_SESSION_SORTABLE_FIELDS, "openedAt");
+  const { data, meta } = await service.listSessions(businessLocationId, req.user!.organizationId, page, limit, allowedLocationIds(req), orderBy);
   return sendPaginated(res, data, meta);
 }

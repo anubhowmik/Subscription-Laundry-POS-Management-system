@@ -14,6 +14,8 @@ router.post("/register", authLimiter, validate(registerOrganizationSchema), cont
 // This router is mounted outside the global auth/paywall block (registration must stay reachable
 // without a session) so these two routes gate themselves explicitly.
 router.get("/settings", authenticate, requirePermission("settings.manage"), controller.getSettings);
+router.get("/custom-field-labels", authenticate, controller.getContactCustomFieldLabels);
+router.get("/sell-custom-field-labels", authenticate, controller.getSellCustomFieldLabels);
 router.put("/settings", authenticate, requirePermission("settings.manage"), validate(updateOrganizationSettingsSchema), controller.updateSettings);
 
 export default router;

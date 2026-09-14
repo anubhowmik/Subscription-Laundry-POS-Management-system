@@ -4,17 +4,22 @@ import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
 import { api } from "../../api/client";
 import { confirmAction } from "../../stores/confirmStore";
-import type { ApiSuccess } from "../../types/api";
+import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
+import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { fetchAllRows } from "../../lib/tableExport";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { LoadingState } from "../../components/ui/Spinner";
 import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Pencil, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface Permission {
   id: string;
@@ -44,9 +49,33 @@ export default function RolesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { data: roles } = useQuery({
-    queryKey: ["roles"],
-    queryFn: async () => (await api.get<ApiSuccess<RoleRow[]>>("/roles")).data.data,
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  // Sortable column headers - backend already whitelists these fields (role.service.ts's
+  // SORTABLE_FIELDS).
+  const [sortBy, setSortBy] = useState("nameEn");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+  }
+
+  // Shared with the "export all matching rows" fetch below - keep every filter param here so
+  // export always reflects exactly what's currently on screen, just without the page cap.
+  const filterParams = {
+    sortBy,
+    sortOrder,
+  };
+
+  const { data } = useQuery({
+    queryKey: ["roles", page, limit, filterParams],
+    queryFn: async () => {
+      const res = await api.get<ApiSuccess<RoleRow[]>>("/roles", { params: { ...filterParams, page, limit } });
+      return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
+    },
   });
 
   const { data: permissions } = useQuery({
@@ -58,6 +87,39 @@ export default function RolesPage() {
     mutationFn: async (id: string) => api.delete(`/roles/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
   });
+
+  const columns: { key: string; label: string; sortField?: string; render: (r: RoleRow) => ReactNode; exportValue: (r: RoleRow) => string | number | null }[] = [
+    {
+      key: "nameEn",
+      label: isAr ? "الاسم" : "Name",
+      sortField: "nameEn",
+      render: (r) => <span className="font-medium">{isAr ? r.nameAr : r.nameEn}</span>,
+      exportValue: (r) => (isAr ? r.nameAr : r.nameEn),
+    },
+    {
+      key: "description",
+      label: isAr ? "الوصف" : "Description",
+      render: (r) => r.description ?? "-",
+      exportValue: (r) => r.description,
+    },
+    {
+      key: "users",
+      label: isAr ? "المستخدمون" : "Users",
+      render: (r) => <span className="ltr-nums">{r._count.users}</span>,
+      exportValue: (r) => r._count.users,
+    },
+    {
+      key: "isSystem",
+      label: "",
+      render: (r) => (r.isSystem ? <Badge variant="neutral">{isAr ? "نظام" : "System"}</Badge> : null),
+      exportValue: (r) => (r.isSystem ? (isAr ? "نظام" : "System") : ""),
+    },
+  ];
+  const columnVisibility = useColumnVisibility(
+    "roles",
+    columns.map((c) => c.key),
+  );
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
 
   return (
     <div className="space-y-6">
@@ -83,67 +145,110 @@ export default function RolesPage() {
           iconColor="text-white"
           highlight
           label={isAr ? "الأدوار" : "Roles"}
-          value={String(roles?.length ?? 0)}
+          value={String(data?.meta?.total ?? 0)}
         />
       </div>
 
       <TableContainer>
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
+            <PageSizeSelect
+              value={limit}
+              onChange={(n) => {
+                setLimit(n);
+                setPage(1);
+              }}
+            />
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label || (isAr ? "نظام" : "System") }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={isAr}
+            />
+            <TableExportButtons
+              title={isAr ? "الأدوار" : "Roles"}
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label || (isAr ? "نظام" : "System") }))}
+              getRows={async () => {
+                const all = await fetchAllRows<RoleRow>(async (p, l) => {
+                  const res = await api.get<ApiSuccess<RoleRow[]>>("/roles", { params: { ...filterParams, page: p, limit: l } });
+                  return { data: res.data.data, meta: res.data.meta as PaginationMeta };
+                });
+                return all.map((r) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(r)])));
+              }}
+              isAr={isAr}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
         <Table>
           <THead>
             <tr>
-              <Th>{isAr ? "الاسم" : "Name"}</Th>
-              <Th>{isAr ? "الوصف" : "Description"}</Th>
-              <Th>{isAr ? "المستخدمون" : "Users"}</Th>
-              <Th></Th>
-              <th className="px-4 py-3 text-end text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {isAr ? "إجراءات" : "Actions"}
-              </th>
+              {visibleColumns.map((c) =>
+                c.sortField ? (
+                  <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                    {c.label}
+                  </SortableTh>
+                ) : (
+                  <Th key={c.key}>{c.label}</Th>
+                ),
+              )}
+              <Th>{isAr ? "إجراءات" : "Actions"}</Th>
             </tr>
           </THead>
           <tbody>
-            {roles?.map((r) => (
+            {data?.rows.map((r) => (
               <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3 font-medium">{isAr ? r.nameAr : r.nameEn}</td>
-                <td className="px-4 py-3 text-slate-500">{r.description ?? "-"}</td>
-                <td className="px-4 py-3"><span className="ltr-nums">{r._count.users}</span></td>
-                <td className="px-4 py-3">
-                  {r.isSystem && <Badge variant="neutral">{isAr ? "نظام" : "System"}</Badge>}
-                </td>
+                {visibleColumns.map((c) => (
+                  <td key={c.key} className="px-4 py-3">
+                    {c.render(r)}
+                  </td>
+                ))}
                 <td className="px-4 py-3 text-end">
-                  <div className="flex justify-end gap-3">
-                    <button
+                  <RowActions>
+                    <RowActionButton
+                      icon={Pencil}
+                      label={isAr ? "تعديل" : "Edit"}
                       onClick={() => {
                         setEditingId(r.id);
                         setFormOpen(true);
                       }}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100"
-                    >
-                      {isAr ? "تعديل" : "Edit"}
-                    </button>
+                    />
                     {!r.isSystem && (
-                      <button
+                      <RowActionButton
+                        icon={Trash2}
+                        label={isAr ? "حذف" : "Delete"}
+                        variant="danger"
                         onClick={async () => {
                           if (await confirmAction({ message: isAr ? "حذف هذا الدور؟" : "Delete this role?", danger: true })) deleteMutation.mutate(r.id);
                         }}
-                        className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
-                      >
-                        {isAr ? "حذف" : "Delete"}
-                      </button>
+                      />
                     )}
-                  </div>
+                  </RowActions>
                 </td>
               </tr>
             ))}
-            {roles?.length === 0 && (
+            {data?.rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
                   {isAr ? "لا توجد نتائج" : "No results"}
                 </td>
               </tr>
             )}
           </tbody>
         </Table>
+        </TableScroll>
       </TableContainer>
+
+      {data?.meta && data.meta.totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={data.meta.totalPages}
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+          label={`${isAr ? "صفحة" : "Page"} ${page} ${isAr ? "من" : "of"} ${data.meta.totalPages}`}
+        />
+      )}
 
       {formOpen && (
         <RoleFormModal

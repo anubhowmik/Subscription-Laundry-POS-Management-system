@@ -37,9 +37,13 @@ export const listTransfersQuerySchema = z.object({
 export const listTransactionsQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.string().optional(),
   productId: z.string().uuid().optional(),
   businessLocationId: z.string().uuid().optional(),
   type: z.enum(["STOCK_IN", "STOCK_OUT", "SALE", "SALE_RETURN", "ADJUSTMENT", "TRANSFER_IN", "TRANSFER_OUT"]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });
 
 export const createStockAdjustmentSchema = z.object({

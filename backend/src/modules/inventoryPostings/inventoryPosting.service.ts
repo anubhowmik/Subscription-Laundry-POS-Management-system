@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
+
+const INVENTORY_POSTING_SORTABLE_FIELDS = ["postingDate", "createdAt", "cashInDrawer"];
 
 // Buckets currently-open sales into In Stock (still being processed) / In Warehouse (ready for
 // pickup) the same way the reference site's "Create Inventory Posting" screen does, plus today's
@@ -93,6 +95,7 @@ export async function create(input: CreateInventoryPostingInput, organizationId:
 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, INVENTORY_POSTING_SORTABLE_FIELDS, "createdAt");
   const where: Prisma.InventoryPostingWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
@@ -101,7 +104,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const [data, total] = await Promise.all([
     prisma.inventoryPosting.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: { businessLocation: { select: { branchName: true } }, createdByUser: { select: { fullNameEn: true } } },

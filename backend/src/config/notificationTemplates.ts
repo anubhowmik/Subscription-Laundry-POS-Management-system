@@ -3,7 +3,7 @@
 // caller documents which placeholders it actually supplies.
 
 export interface NotificationTemplateDef {
-  trigger: "ORDER_READY" | "ORDER_DELIVERED" | "NEW_SALE" | "PAYMENT_RECEIVED" | "PAYMENT_REMINDER" | "COMPENSATION_RESOLVED";
+  trigger: "ORDER_READY" | "ORDER_DELIVERED" | "NEW_SALE" | "PAYMENT_RECEIVED" | "PAYMENT_REMINDER" | "COMPENSATION_RESOLVED" | "NEW_QUOTATION";
   messageEn: string;
   messageAr: string;
 }
@@ -38,5 +38,15 @@ export const NOTIFICATION_TEMPLATE_DEFS: NotificationTemplateDef[] = [
     trigger: "COMPENSATION_RESOLVED",
     messageEn: "Your compensation claim has been resolved. {amount} has been credited to your account.",
     messageAr: "تمت تسوية مطالبة التعويض الخاصة بك. تم إضافة {amount} إلى حسابك.",
+  },
+  // Reference's own default new_quotation template (NotificationTemplate::defaultNotificationTemplates(),
+  // adapted field names: invoice_number/total_amount/quote_url -> quoteNumber/amount/quoteUrl to
+  // match this app's own placeholder naming convention elsewhere in this file). Sent on-demand by
+  // the "Send Notification" row action (pos.controller.ts's sendQuoteNotification), not
+  // automatically like every other trigger here.
+  {
+    trigger: "NEW_QUOTATION",
+    messageEn: "Dear {customerName}, your quotation number is {quoteNumber}. Total amount: {amount}. View it here: {quoteUrl}",
+    messageAr: "عزيزي {customerName}، رقم عرض السعر الخاص بك هو {quoteNumber}. الإجمالي: {amount}. اطّلع عليه هنا: {quoteUrl}",
   },
 ];

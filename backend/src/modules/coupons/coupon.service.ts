@@ -3,14 +3,34 @@ import { prisma } from "../../config/prisma";
 import { AppError, ConflictError, NotFoundError } from "../../utils/AppError";
 import { z } from "zod";
 import { createCouponSchema, updateCouponSchema } from "./coupon.validators";
+import { parsePagination, parseSort } from "../../utils/pagination";
 
 const { Decimal } = Prisma;
 
 type CreateCouponInput = z.infer<typeof createCouponSchema>;
 type UpdateCouponInput = z.infer<typeof updateCouponSchema>;
 
-export async function list(organizationId: string) {
-  return prisma.coupon.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" } });
+// Coupon codes accumulate indefinitely (one per campaign, no natural cap) - unlike price lists,
+// this list is genuinely unbounded, so it gets real DB-level pagination/sorting like
+// suppliers/journal entries rather than a client-side-only sort.
+const SORTABLE_FIELDS = ["code", "discountValue", "minPurchaseAmount", "usedCount", "createdAt"];
+
+export async function list(query: Record<string, unknown>, organizationId: string) {
+  const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "createdAt");
+
+  const where: Prisma.CouponWhereInput = {
+    organizationId,
+    ...(query.search
+      ? { code: { contains: String(query.search), mode: "insensitive" } }
+      : {}),
+  };
+
+  const [data, total] = await Promise.all([
+    prisma.coupon.findMany({ where, orderBy, skip, take: limit }),
+    prisma.coupon.count({ where }),
+  ]);
+  return { data, meta: { page, limit, total } };
 }
 
 /**

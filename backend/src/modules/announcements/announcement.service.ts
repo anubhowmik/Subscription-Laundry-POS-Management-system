@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
+
+const SORTABLE_FIELDS = ["fromDate", "toDate", "createdAt"];
 
 const locationsInclude = { locations: { include: { businessLocation: { select: { branchName: true } } } } };
 
@@ -16,6 +18,7 @@ function visibilityFilter(allowedLocationIds: string[] | null): Prisma.Announcem
 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, SORTABLE_FIELDS, "createdAt");
   const where: Prisma.AnnouncementWhereInput = {
     organizationId,
     ...visibilityFilter(allowedLocationIds),
@@ -25,7 +28,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
   const [data, total] = await Promise.all([
     prisma.announcement.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: { ...locationsInclude, createdByUser: { select: { fullNameEn: true } } },
