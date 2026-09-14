@@ -10,12 +10,16 @@ import type { InvoiceTemplateProps } from "../invoiceTypes";
 export function GarmentTagTemplate({ sale, layout, qr, isAr, locale }: InvoiceTemplateProps) {
   const label = (key: Parameters<typeof resolveLabel>[0]) => resolveLabel(key, isAr, layout);
   const show = (key: Parameters<typeof isShown>[0]) => isShown(key, layout);
+  // A garment tag is pinned to the item as soon as it's dropped off, well before an invoice
+  // exists - falls back to the quote/delivery number on a still-DRAFT sale, same resolution as
+  // InvoiceDocument.tsx's displayNumber.
+  const displayNumber = sale.invoiceNumber ?? (sale.isQuotation ? sale.quoteNumber : sale.deliveryNumber);
 
   return (
     <div className="mx-auto min-h-screen w-[260px] bg-white p-3 text-slate-900 print:p-0">
       <div className="border-2 border-dashed border-slate-400 p-3 text-center">
         {show("showBranchName") && <p className="text-xs font-semibold text-slate-500">{sale.businessLocation.branchName}</p>}
-        <p className="mt-1 text-lg font-bold ltr-nums">{sale.invoiceNumber}</p>
+        <p className="mt-1 text-lg font-bold ltr-nums">{displayNumber}</p>
 
         <div className="my-2 border-t border-dashed border-slate-300" />
 
@@ -46,7 +50,7 @@ export function GarmentTagTemplate({ sale, layout, qr, isAr, locale }: InvoiceTe
           </>
         )}
 
-        {show("showQrCode") && qr?.qrImageDataUrl && (
+        {sale.status !== "DRAFT" && show("showQrCode") && qr?.qrImageDataUrl && (
           <div className="mt-2 flex justify-center">
             <img src={qr.qrImageDataUrl} alt="Invoice QR code" className="h-20 w-20" />
           </div>

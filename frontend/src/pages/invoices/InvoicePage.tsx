@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { isAxiosError } from "axios";
+import { Paperclip } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
+import { triggerDownload } from "../../lib/tableExport";
 import type { SaleDetail, QrResponse } from "./invoiceTypes";
 import { StandardTemplate } from "./templates/StandardTemplate";
 import { Thermal58Template } from "./templates/Thermal58Template";
@@ -40,10 +42,15 @@ export default function InvoicePage() {
     enabled: Boolean(saleId),
   });
 
+  // A DRAFT quote/delivery never has real ZATCA QR data (see Sale.qrCodeBase64's schema comment -
+  // it's null until confirmQuote()/checkout() finalizes the sale) - skip the fetch entirely rather
+  // than rendering an empty/broken QR image for one. A bulk-imported historical sale (Import
+  // Sales) is FINAL but deliberately never enters the icv/hash chain either (see
+  // importSales.service.ts) - `icv` is the reliable "was this ever actually ZATCA-signed" check.
   const { data: qr } = useQuery({
     queryKey: ["invoice-qr", saleId],
     queryFn: async () => (await api.get<ApiSuccess<QrResponse>>(`/sales/${saleId}/qr`)).data.data,
-    enabled: Boolean(saleId),
+    enabled: Boolean(saleId) && sale?.status === "FINAL" && sale?.icv != null,
   });
 
   const submitMutation = useMutation({
@@ -63,14 +70,27 @@ export default function InvoicePage() {
 
   const canSubmit = Boolean(sale.digitalSignature) && !["CLEARED", "REPORTED"].includes(sale.clearanceStatus);
   const currency = sale.businessLocation.currency;
-  const layout = sale.businessLocation.invoiceLayoutSettings;
+  const layout = sale.resolvedInvoiceLayout;
   const Template = TEMPLATE_COMPONENTS[layout?.templateKey ?? "standard"];
+  const backTo = sale.status === "DRAFT" ? (sale.isQuotation ? "/quotes" : "/deliveries") : "/sales";
 
   return (
     <div>
       <div className="mx-auto flex max-w-3xl items-center justify-between p-6 pb-0 print:hidden">
-        <BackButton to="/sales" label={isAr ? "العودة" : "Back"} />
+        <BackButton to={backTo} label={isAr ? "العودة" : "Back"} />
         <div className="flex items-center gap-2">
+          {sale.documentPath && (
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const res = await api.get(`/sales/${saleId}/document`, { responseType: "blob" });
+                triggerDownload(res.data as Blob, sale.documentOriginalName ?? "document");
+              }}
+            >
+              <Paperclip className="me-1.5 h-4 w-4" strokeWidth={2} aria-hidden />
+              {isAr ? sale.documentOriginalName ?? "المستند المرفق" : sale.documentOriginalName ?? "Attached Document"}
+            </Button>
+          )}
           {canSubmit && (
             <Button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending} variant="outline">
               {submitMutation.isPending ? "Submitting..." : "Submit to ZATCA"}

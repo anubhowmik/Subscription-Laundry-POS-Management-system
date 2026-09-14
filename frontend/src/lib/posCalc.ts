@@ -12,6 +12,16 @@ export interface CartLine {
   stockOnHand?: number;
   manageStock?: boolean;
   unit: string;
+  // Reference's per-line edit modal - only ever actually applied server-side for a caller holding
+  // pos.editLinePrice (see pos.service.ts's priceLine()), but mirrored here so the preview matches
+  // what checkout will actually charge for that caller.
+  unitPriceOverride?: number;
+  taxOverridePercent?: number;
+  // Laundry's own dimension-based pricing (carpets/curtains priced per m²) - when both are set,
+  // the billed quantity is the entered quantity (pieces) scaled by the area, matching
+  // pos.service.ts's priceLine() exactly.
+  widthM?: number;
+  heightM?: number;
 }
 
 export interface LineTotals {
@@ -22,12 +32,15 @@ export interface LineTotals {
 
 /** Client-side preview only - the backend independently recalculates and is authoritative. */
 export function calcLine(line: CartLine): LineTotals {
-  const gross = line.unitPrice * line.quantity - line.discountAmount;
-  if (line.taxType === "INCLUSIVE") {
-    const subtotal = gross / (1 + line.taxPercent / 100);
+  const billedQuantity = line.widthM != null && line.heightM != null ? line.quantity * line.widthM * line.heightM : line.quantity;
+  const unitPrice = line.unitPriceOverride ?? line.unitPrice;
+  const taxPercent = line.taxOverridePercent ?? line.taxPercent;
+  const gross = unitPrice * billedQuantity - line.discountAmount;
+  if (line.taxType === "INCLUSIVE" && line.taxOverridePercent == null) {
+    const subtotal = gross / (1 + taxPercent / 100);
     return { subtotal, taxAmount: gross - subtotal, total: gross };
   }
-  const taxAmount = (gross * line.taxPercent) / 100;
+  const taxAmount = (gross * taxPercent) / 100;
   return { subtotal: gross, taxAmount, total: gross + taxAmount };
 }
 

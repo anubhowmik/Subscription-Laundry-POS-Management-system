@@ -16,8 +16,18 @@ interface SizeConfig {
  * to stay its own component - see GarmentTagTemplate.tsx.
  */
 export function InvoiceDocument({ sale, layout, qr, isAr, locale, currency, size }: InvoiceTemplateProps & { size: SizeConfig }) {
-  const invoiceTitleEn = sale.invoiceTypeCode === "STANDARD" ? "Tax Invoice" : "Simplified Tax Invoice";
-  const invoiceTitleAr = sale.invoiceTypeCode === "STANDARD" ? "فاتورة ضريبية" : "فاتورة ضريبية مبسطة";
+  // A DRAFT quote/delivery is never ZATCA-signed and has no invoiceNumber yet - render its own
+  // number/heading instead of the FINAL-sale Tax Invoice title (reference's own getReceiptDetails()
+  // does the same is_quotation/status branch - see the reference-parity research this was built
+  // from). A plain (non-quotation) DRAFT falls through to the invoice heading in the reference too,
+  // but this app's Delivery is a distinct, laundry-specific concept (the intake/drop-off ticket)
+  // that deserves its own label rather than silently reading "Tax Invoice" before it's even final.
+  const isDraft = sale.status === "DRAFT";
+  const invoiceTitleEn = isDraft ? (sale.isQuotation ? "Quotation" : "Delivery") : sale.invoiceTypeCode === "STANDARD" ? "Tax Invoice" : "Simplified Tax Invoice";
+  const invoiceTitleAr = isDraft ? (sale.isQuotation ? "عرض سعر" : "إيصال تسليم") : sale.invoiceTypeCode === "STANDARD" ? "فاتورة ضريبية" : "فاتورة ضريبية مبسطة";
+  const displayNumber = sale.invoiceNumber ?? (sale.isQuotation ? sale.quoteNumber : sale.deliveryNumber);
+  const numberLabelEn = isDraft ? (sale.isQuotation ? "Quote No." : "Delivery No.") : null;
+  const numberLabelAr = isDraft ? (sale.isQuotation ? "رقم العرض" : "رقم التسليم") : null;
   const label = (key: Parameters<typeof resolveLabel>[0]) => resolveLabel(key, isAr, layout);
   const show = (key: Parameters<typeof isShown>[0]) => isShown(key, layout);
 
@@ -34,7 +44,7 @@ export function InvoiceDocument({ sale, layout, qr, isAr, locale, currency, size
             {show("showBranchName") && <p className="mt-1 text-xs text-slate-500">{sale.businessLocation.branchName}</p>}
             {show("showCity") && sale.businessLocation.city && <p className="text-xs text-slate-500">{sale.businessLocation.city}</p>}
           </div>
-          {show("showQrCode") && qr?.qrImageDataUrl && <img src={qr.qrImageDataUrl} alt="Invoice QR code" className={size.qrSizeClass} />}
+          {!isDraft && show("showQrCode") && qr?.qrImageDataUrl && <img src={qr.qrImageDataUrl} alt="Invoice QR code" className={size.qrSizeClass} />}
         </div>
 
         {(show("showVatNumber") || show("showCrNumber")) && (
@@ -63,20 +73,20 @@ export function InvoiceDocument({ sale, layout, qr, isAr, locale, currency, size
 
         <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-1 border-y border-slate-300 py-2 text-xs">
           <div>
-            <span className="font-semibold">{label("invoiceNoLabel")}: </span>
-            <span className="ltr-nums">{sale.invoiceNumber}</span>
+            <span className="font-semibold">{isDraft ? (isAr ? numberLabelAr : numberLabelEn) : label("invoiceNoLabel")}: </span>
+            <span className="ltr-nums">{displayNumber}</span>
           </div>
           <div>
             <span className="font-semibold">{label("dateLabel")}: </span>
             <span className="ltr-nums">{formatDate(sale.saleDate, locale)}</span>
           </div>
-          {show("showInvoiceUuid") && (
+          {!isDraft && show("showInvoiceUuid") && (
             <div>
               <span className="font-semibold">{label("invoiceUuidLabel")}: </span>
               <span className="ltr-nums break-all">{sale.id}</span>
             </div>
           )}
-          {show("showIcv") && (
+          {!isDraft && show("showIcv") && (
             <div>
               <span className="font-semibold">{label("icvLabel")}: </span>
               <span className="ltr-nums">{sale.icv}</span>
@@ -166,7 +176,7 @@ export function InvoiceDocument({ sale, layout, qr, isAr, locale, currency, size
           )}
         </div>
 
-        {show("showDigitalSignatureNote") && (
+        {!isDraft && show("showDigitalSignatureNote") && (
           <p className="mt-6 text-center text-[10px] text-slate-400">
             {sale.digitalSignature ? (
               <span className="text-green-600">✓ Digitally signed (ECDSA secp256k1)</span>

@@ -1,11 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError } from "../../utils/AppError";
-import { parsePagination } from "../../utils/pagination";
+import { parsePagination, parseSort } from "../../utils/pagination";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 
 const { Decimal } = Prisma;
+
+const EXPENSE_SORTABLE_FIELDS = ["expenseDate", "createdAt", "totalAmount", "paidAmount", "dueAmount", "expenseNumber"];
 
 function computePaymentStatus(paidAmount: Prisma.Decimal, totalAmount: Prisma.Decimal): "PAID" | "PARTIAL" | "DUE" | "OVERPAID" {
   if (paidAmount.eq(0)) return "DUE";
@@ -100,17 +102,26 @@ export async function create(input: CreateExpenseInput, organizationId: string, 
 
 export async function list(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, EXPENSE_SORTABLE_FIELDS, "expenseDate");
   const where: Prisma.ExpenseWhereInput = {
     organizationId,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
     ...(query.categoryId ? { categoryId: String(query.categoryId) } : {}),
     ...(query.paymentStatus ? { paymentStatus: query.paymentStatus as "PAID" | "PARTIAL" | "DUE" | "OVERPAID" } : {}),
+    ...(query.from || query.to
+      ? {
+          expenseDate: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
   const [data, total] = await Promise.all([
     prisma.expense.findMany({
       where,
-      orderBy: { expenseDate: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: {

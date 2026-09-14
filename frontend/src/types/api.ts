@@ -59,6 +59,8 @@ export type InvoiceTemplateKey = "standard" | "thermal58" | "thermal80" | "a4Ful
 export interface InvoiceLayoutSettings {
   id: string;
   businessLocationId: string;
+  name: string;
+  isDefault: boolean;
   templateKey: InvoiceTemplateKey;
   logoUrl: string | null;
   accentColor: string | null;
@@ -94,16 +96,71 @@ export interface CustomerGroup {
   discountPercent: string;
 }
 
+export interface CustomerContactPerson {
+  id: string;
+  prefix: string | null;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  mobile: string | null;
+  altPhone: string | null;
+  familyContactNumber: string | null;
+  department: string | null;
+  designation: string | null;
+}
+
 export interface Customer {
   id: string;
   code: string;
   nameEn: string;
   nameAr: string | null;
+  contactType: string;
+  prefix: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  dateOfBirth: string | null;
+  businessName: string | null;
+  globalCustomer: boolean;
+  allowExpeditedDiscount: boolean;
   phone: string;
+  altPhone: string | null;
+  landline: string | null;
   email: string | null;
   customerGroupId: string | null;
   customerGroup?: CustomerGroup | null;
+  defaultAccountId: string | null;
+  defaultInvoiceLayoutId: string | null;
   priceListId: string | null;
+  address: string | null;
+  addressLine2: string | null;
+  shippingAddress: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  district: string | null;
+  postalCode: string | null;
+  buildingNo: string | null;
+  additionalNo: string | null;
+  idType: string | null;
+  mapLocation: string | null;
+  vatNumber: string | null;
+  crNumber: string | null;
+  nationalAddress: string | null;
+  notes: string | null;
+  customField1: string | null;
+  customField2: string | null;
+  customField3: string | null;
+  customField4: string | null;
+  customField5: string | null;
+  customField6: string | null;
+  customField7: string | null;
+  customField8: string | null;
+  customField9: string | null;
+  customField10: string | null;
+  creditLimit: string;
+  paymentTermsDays: number;
+  payTermType: "DAYS" | "MONTHS" | null;
   openingBalance: string;
   balance: string;
   rewardPoints: number;
@@ -111,6 +168,22 @@ export interface Customer {
   approvalStatus: "PENDING" | "APPROVED" | "REJECTED";
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
+  contactPersons?: CustomerContactPerson[];
+  totalSaleDue?: number;
+  totalSellReturnDue?: number;
+}
+
+export interface SupplierContactPerson {
+  id: string;
+  prefix: string | null;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  mobile: string | null;
+  altPhone: string | null;
+  familyContactNumber: string | null;
+  department: string | null;
+  designation: string | null;
 }
 
 export interface Supplier {
@@ -118,15 +191,59 @@ export interface Supplier {
   code: string;
   nameEn: string;
   nameAr: string | null;
+  contactType: string;
+  prefix: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  dateOfBirth: string | null;
+  businessName: string | null;
+  globalCustomer: boolean;
+  allowExpeditedDiscount: boolean;
+  defaultAccountId: string | null;
   phone: string;
+  altPhone: string | null;
+  landline: string | null;
   email: string | null;
+  address: string | null;
+  addressLine2: string | null;
+  shippingAddress: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  district: string | null;
+  postalCode: string | null;
+  buildingNo: string | null;
+  additionalNo: string | null;
+  idType: string | null;
+  mapLocation: string | null;
   vatNumber: string | null;
+  crNumber: string | null;
+  nationalAddress: string | null;
+  notes: string | null;
+  customField1: string | null;
+  customField2: string | null;
+  customField3: string | null;
+  customField4: string | null;
+  customField5: string | null;
+  customField6: string | null;
+  customField7: string | null;
+  customField8: string | null;
+  customField9: string | null;
+  customField10: string | null;
   creditLimit: string;
   paymentTermsDays: number;
+  payTermType: "DAYS" | "MONTHS" | null;
   openingBalance: string;
   balance: string;
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
+  /** Computed fresh from Purchase/PurchaseReturn sums, not stored - see supplier.service.ts's
+   * attachPurchaseDue(). Matches the reference app's separate "Total Purchase Due"/"Total
+   * Purchase Return Due" columns (distinct from `balance`, shown as "Advance Balance"). */
+  contactPersons?: SupplierContactPerson[];
+  totalPurchaseDue: number;
+  totalPurchaseReturnDue: number;
 }
 
 export interface Organization {
@@ -150,4 +267,89 @@ export interface AuthUser {
   businessLocations: BusinessLocation[];
   organizationId: string;
   organization: Organization;
+}
+
+export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+
+export interface Account {
+  id: string;
+  code: string;
+  nameEn: string;
+  nameAr: string | null;
+  accountType: AccountType;
+  parentAccountId: string | null;
+  isSystemAccount: boolean;
+  openingBalance: string;
+  isActive: boolean;
+  balance: number;
+  childAccounts?: Account[];
+}
+
+export interface JournalLine {
+  id: string;
+  accountId: string;
+  account: Account;
+  debit: string;
+  credit: string;
+  memo: string | null;
+}
+
+export interface JournalEntry {
+  id: string;
+  entryDate: string;
+  reference: string | null;
+  memo: string | null;
+  createdBy: string;
+  postedAt: string | null;
+  reversalOfId: string | null;
+  lines: JournalLine[];
+}
+
+export interface TrialBalanceRow {
+  accountId: string;
+  code: string;
+  nameEn: string;
+  nameAr: string | null;
+  accountType: AccountType;
+  debit: number;
+  credit: number;
+}
+
+export interface TrialBalanceReport {
+  rows: TrialBalanceRow[];
+  totalDebit: number;
+  totalCredit: number;
+}
+
+export interface BalanceSheetLine {
+  code: string;
+  nameEn: string;
+  nameAr: string | null;
+  balance: number;
+}
+
+export interface BalanceSheetReport {
+  assets: BalanceSheetLine[];
+  liabilities: BalanceSheetLine[];
+  equity: BalanceSheetLine[];
+  totalAssets: number;
+  totalLiabilities: number;
+  totalEquity: number;
+}
+
+export interface GeneralLedgerRow {
+  journalEntryId: string;
+  entryDate: string;
+  reference: string | null;
+  memo: string | null;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+}
+
+export interface GeneralLedgerReport {
+  account: { id: string; code: string; nameEn: string; nameAr: string | null; accountType: AccountType };
+  openingBalance: number;
+  rows: GeneralLedgerRow[];
+  closingBalance: number;
 }

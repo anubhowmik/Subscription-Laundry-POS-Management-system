@@ -17,10 +17,16 @@ export interface SaleItemDetail {
 
 export interface SaleDetail {
   id: string;
-  invoiceNumber: string;
+  // Null on a DRAFT quote/delivery until confirmed - see quoteNumber/deliveryNumber below, which
+  // fill in for display when this is null. See InvoiceDocument.tsx's displayNumber/displayTitle.
+  invoiceNumber: string | null;
+  quoteNumber: string | null;
+  deliveryNumber: string | null;
+  isQuotation: boolean;
+  status: "DRAFT" | "FINAL" | "CANCELLED";
   saleDate: string;
   estimatedReadyAt: string | null;
-  icv: number;
+  icv: number | null;
   invoiceHash: string;
   previousInvoiceHash: string;
   invoiceTypeCode: "STANDARD" | "SIMPLIFIED";
@@ -49,10 +55,15 @@ export interface SaleDetail {
     nationalAddress: string | null;
     city: string | null;
     currency: string;
-    invoiceLayoutSettings: InvoiceLayoutSettings | null;
   };
+  resolvedInvoiceLayout: InvoiceLayoutSettings | null;
   registerSession: { openedAt: string; openedByUser: { fullNameEn: string } } | null;
   payments: { id: string; amount: string; paymentMethod: { nameEn: string; nameAr: string } }[];
+  // Add Sale's "Attach Document" (see PosPage.tsx's AddSaleHeader) - documentPath itself is never
+  // shown/used directly here, only whether it's set; the actual download goes through the
+  // authenticated GET /sales/:id/document endpoint, not a direct file URL.
+  documentPath: string | null;
+  documentOriginalName: string | null;
 }
 
 export interface QrResponse {

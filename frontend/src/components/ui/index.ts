@@ -9,3 +9,4 @@ export { Pagination } from "./Pagination";
 export { Spinner, LoadingState } from "./Spinner";
 export { TableContainer, Table, THead, Th, Tr, Td } from "./Table";
 export { labelClass, inputClass, selectClass, textareaClass, inputSmClass, errorTextClass, helperTextClass } from "./formClasses";
+export { IconInput } from "./IconInput";

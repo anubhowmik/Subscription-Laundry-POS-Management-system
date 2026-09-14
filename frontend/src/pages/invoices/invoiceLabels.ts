@@ -40,7 +40,7 @@ export function resolveLabel(key: LabelKey, isAr: boolean, layout: InvoiceLayout
 
 /** A toggle field is "on" whenever there's no persisted row at all (branch never customized
  * anything) or the row exists but hasn't explicitly turned that field off. */
-export function isShown(key: keyof Omit<InvoiceLayoutSettings, "id" | "businessLocationId" | "templateKey" | "logoUrl" | "accentColor" | "labelOverrides">, layout: InvoiceLayoutSettings | null): boolean {
+export function isShown(key: keyof Omit<InvoiceLayoutSettings, "id" | "businessLocationId" | "name" | "isDefault" | "templateKey" | "logoUrl" | "accentColor" | "labelOverrides">, layout: InvoiceLayoutSettings | null): boolean {
   if (!layout) return true;
   return layout[key];
 }

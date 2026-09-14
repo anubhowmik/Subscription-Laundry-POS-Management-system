@@ -32,7 +32,11 @@ export const updateExpenseSchema = z.object({
 export const listExpenseQuerySchema = z.object({
   page: z.string().optional(),
   limit: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.string().optional(),
   businessLocationId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   paymentStatus: z.enum(["PAID", "PARTIAL", "DUE", "OVERPAID"]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });

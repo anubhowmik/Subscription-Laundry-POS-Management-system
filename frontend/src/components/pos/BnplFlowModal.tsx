@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { isAxiosError } from "axios";
-import { usePosStore, usePosTotals } from "../../stores/posStore";
 import { useCreateBnplSession, useBnplSessionStatus, useCaptureBnplSession, type BnplProvider, type BnplSession } from "../../api/bnplApi";
 import { formatMoney } from "../../lib/format";
 import { Modal } from "../../components/ui/Modal";
@@ -8,12 +7,26 @@ import { Button } from "../../components/ui/Button";
 import { Alert } from "../../components/ui/Alert";
 import type { PosPaymentMethod } from "../../api/posApi";
 
+interface AddedPayment {
+  paymentMethodId: string;
+  label: string;
+  amount: number;
+  referenceNumber?: string;
+  locked?: boolean;
+}
+
 interface Props {
   isAr: boolean;
   currency: string;
   locale: string;
   businessLocationId: string;
   paymentMethods: PosPaymentMethod[];
+  /** Kept generic (not read from usePosStore directly) so this modal can be reused from any
+   * checkout-shaped screen - the touch-grid POS (InvoicePanel.tsx) and the Confirm Delivery/Quote
+   * modal (QuotesPage.tsx) both pass their own customer/due/onAddPayment. */
+  customer: { id: string; phone: string } | null;
+  due: number;
+  onAddPayment: (payment: AddedPayment) => void;
   onClose: () => void;
   notify: (msg: string) => void;
 }
@@ -32,11 +45,7 @@ const PROVIDER_LABEL: Record<BnplProvider, { en: string; ar: string }> = {
  * call with no cashier click (see bnpl.service.ts for why the two-phase lifecycle still exists
  * server-side even though the frontend never exposes a manual "Capture" button).
  */
-export function BnplFlowModal({ isAr, currency, locale, businessLocationId, paymentMethods, onClose, notify }: Props) {
-  const customer = usePosStore((s) => s.customer);
-  const addPayment = usePosStore((s) => s.addPayment);
-  const totals = usePosTotals();
-
+export function BnplFlowModal({ isAr, currency, locale, businessLocationId, paymentMethods, customer, due, onAddPayment, onClose, notify }: Props) {
   const [provider, setProvider] = useState<BnplProvider | null>(null);
   const [session, setSession] = useState<BnplSession | null>(null);
   const capturedRef = useRef(false);
@@ -58,11 +67,12 @@ export function BnplFlowModal({ isAr, currency, locale, businessLocationId, paym
           notify(isAr ? "طريقة الدفع غير مُهيأة" : "Payment method not configured");
           return;
         }
-        addPayment({
+        onAddPayment({
           paymentMethodId: method.id,
           label: isAr ? PROVIDER_LABEL[captured.provider].ar : PROVIDER_LABEL[captured.provider].en,
           amount: Number(captured.amount),
           referenceNumber: captured.id,
+          locked: true,
         });
         onClose();
       },
@@ -86,7 +96,7 @@ export function BnplFlowModal({ isAr, currency, locale, businessLocationId, paym
       {
         businessLocationId,
         provider: p,
-        amount: totals.due,
+        amount: due,
         customerId: customer.id,
         customerPhone: customer.phone,
       },
@@ -106,7 +116,7 @@ export function BnplFlowModal({ isAr, currency, locale, businessLocationId, paym
       {!provider && (
         <div className="space-y-2">
           <p className="text-sm text-slate-500">
-            {isAr ? "اختر مزوّد الدفع الآجل" : "Choose a BNPL provider"} · <span className="ltr-nums font-semibold">{formatMoney(totals.due, currency, locale)}</span>
+            {isAr ? "اختر مزوّد الدفع الآجل" : "Choose a BNPL provider"} · <span className="ltr-nums font-semibold">{formatMoney(due, currency, locale)}</span>
           </p>
           <div className="grid grid-cols-1 gap-2">
             {(Object.keys(PROVIDER_LABEL) as BnplProvider[]).map((p) => (

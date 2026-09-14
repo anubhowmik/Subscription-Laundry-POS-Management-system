@@ -3,13 +3,14 @@ import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-type Size = "sm" | "md" | "lg" | "xl";
+type Size = "sm" | "md" | "lg" | "xl" | "2xl";
 
 const sizes: Record<Size, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
   xl: "max-w-2xl",
+  "2xl": "max-w-4xl",
 };
 
 interface ModalProps {

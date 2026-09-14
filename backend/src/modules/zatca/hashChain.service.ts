@@ -17,8 +17,11 @@ import { createHash } from "crypto";
  * itself doesn't care which one made a given link.
  */
 
-// base64("0") - ZATCA's defined seed value for the first invoice in a chain.
-export const GENESIS_PREVIOUS_HASH = "MA==";
+// ZATCA's defined seed value for the first invoice in a chain: base64(SHA-256("0")), NOT
+// base64("0") - confirmed against the reference implementation's own hardcoded genesis constant
+// (SellPosController.php). Getting this wrong means every location's very first invoice carries
+// an incorrect PIH, which ZATCA validates explicitly.
+export const GENESIS_PREVIOUS_HASH = "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==";
 
 export interface InvoiceHashLine {
   description: string;

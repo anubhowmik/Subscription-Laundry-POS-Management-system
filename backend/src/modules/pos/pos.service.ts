@@ -1,23 +1,95 @@
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
-import { CheckoutInput, HoldSaleInput, ConfirmQuoteInput } from "./pos.validators";
+import { CheckoutInput, HoldSaleInput, ConfirmQuoteInput, SendQuoteNotificationInput } from "./pos.validators";
 import { computeInvoiceHash, computeXmlInvoiceHash, GENESIS_PREVIOUS_HASH } from "../zatca/hashChain.service";
 import { buildQrTlvBase64, buildSignedQrTlvBase64 } from "../zatca/qrCode.service";
 import { buildInvoiceXml, UblInvoiceLine } from "../zatca/xmlGenerator.service";
 import { signInvoiceXml } from "../zatca/digitalSignature.service";
 import { decryptSecret } from "../../utils/secretBox";
-import { resolvePriceListId, getPriceOverrides } from "../priceLists/priceListResolver";
-import { parsePagination } from "../../utils/pagination";
-import { sendTemplatedSms } from "../notifications/notifications.service";
+import { resolvePriceListId, getPriceOverrides, resolveGroupDiscountPercent, applyPercentAdjustment } from "../priceLists/priceListResolver";
+import { parsePagination, parseSort } from "../../utils/pagination";
+import { sendTemplatedSms, sendTemplatedEmail } from "../notifications/notifications.service";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { adjustCashbackTx } from "../cashback/cashback.service";
 import { verifyAndConsumeSessionTx } from "../bnpl/bnpl.service";
 import { BNPL_PAYMENT_CODES } from "../bnpl/bnpl.constants";
+import { TAX_EXEMPTION_REASONS } from "../zatca/taxExemptionReasons";
+import { env } from "../../config/env";
 
 const { Decimal } = Prisma;
+
+// ZATCA's cbc:IssueDate/cbc:IssueTime (and the QR's timestamp field) must reflect the seller's
+// own local wall-clock time, not UTC - a plain `saleDate.toISOString()` silently stamped every
+// invoice with UTC instead, which is 3 hours behind Asia/Riyadh (any sale between 00:00-03:00
+// local time was even dated the wrong calendar day). Uses the location's own configured
+// `timezone` rather than hardcoding a fixed +3 offset, so this stays correct if this system is
+// ever used from a different timezone.
+function toLocationLocalParts(date: Date, timezone: string): { dateIso: string; timeIso: string } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  return {
+    dateIso: `${get("year")}-${get("month")}-${get("day")}`,
+    timeIso: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+}
+
+// Maps this app's PaymentMethod codes to ZATCA/UBL's UNCL4461 payment-means codes. CASHBACK/
+// STORE_CREDIT/BNPL_* have no real UNCL4461 instrument - "1" (Instrument not defined) is the
+// honest code for those rather than guessing a wrong specific one.
+const PAYMENT_MEANS_CODE_BY_METHOD: Record<string, string> = {
+  CASH: "10",
+  CARD: "48",
+  ONLINE: "42",
+};
+
+async function resolvePaymentMeansCodes(tx: Prisma.TransactionClient, payments: { paymentMethodId: string }[]): Promise<string[]> {
+  if (payments.length === 0) return ["1"];
+  const methods = await tx.paymentMethod.findMany({
+    where: { id: { in: payments.map((p) => p.paymentMethodId) } },
+    select: { id: true, code: true },
+  });
+  const codeById = new Map(methods.map((m) => [m.id, m.code]));
+  const means = new Set(payments.map((p) => PAYMENT_MEANS_CODE_BY_METHOD[codeById.get(p.paymentMethodId) ?? ""] ?? "1"));
+  return Array.from(means);
+}
+
+// Reference's own 4 fixed custom_field_N slots - by array index (customFields[0] -> field 1, ...).
+function buildCustomFieldsData(customFields: string[] | undefined) {
+  return {
+    customField1: customFields?.[0],
+    customField2: customFields?.[1],
+    customField3: customFields?.[2],
+    customField4: customFields?.[3],
+  };
+}
+
+// Reference's own 4 fixed additional_expense_key_N/_value_N slots - see checkout()'s comment on
+// why these are untaxed flat pass-through charges rather than part of the taxable subtotal.
+function buildAdditionalExpensesData(expenses: { key: string; value: number }[] | undefined) {
+  const e = expenses ?? [];
+  return {
+    additionalExpense1Key: e[0]?.key,
+    additionalExpense1Value: e[0]?.value ?? 0,
+    additionalExpense2Key: e[1]?.key,
+    additionalExpense2Value: e[1]?.value ?? 0,
+    additionalExpense3Key: e[2]?.key,
+    additionalExpense3Value: e[2]?.value ?? 0,
+    additionalExpense4Key: e[3]?.key,
+    additionalExpense4Value: e[3]?.value ?? 0,
+  };
+}
 
 export async function search(
   businessLocationId: string,
@@ -30,6 +102,7 @@ export async function search(
 
   const priceListId = await resolvePriceListId(prisma, customerId, organizationId, businessLocationId);
   const overrides = await getPriceOverrides(prisma, priceListId);
+  const groupDiscountPercent = await resolveGroupDiscountPercent(prisma, customerId, organizationId);
 
   const [products, services] = await Promise.all([
     mode === "SERVICE"
@@ -84,7 +157,7 @@ export async function search(
       nameAr: p.nameAr,
       sku: p.sku,
       barcode: p.barcode,
-      price: overrides.products.get(p.id) ?? p.sellingPrice,
+      price: applyPercentAdjustment(overrides.products.get(p.id) ?? p.sellingPrice, groupDiscountPercent),
       taxPercent: p.tax?.percentage ?? new Decimal(0),
       taxType: p.sellingPriceTaxType,
       unit: p.unit.shortName,
@@ -97,12 +170,24 @@ export async function search(
       nameEn: s.nameEn,
       nameAr: s.nameAr,
       code: s.code,
-      price: overrides.services.get(s.id) ?? s.price,
+      price: applyPercentAdjustment(overrides.services.get(s.id) ?? s.price, groupDiscountPercent),
       taxPercent: s.tax?.percentage ?? new Decimal(0),
       taxType: "EXCLUSIVE" as const,
       unit: s.unit.shortName,
     })),
   };
+}
+
+// Backs the per-line tax-override dropdown (reference's row_edit_product_price_modal.blade.php) -
+// deliberately not the full /taxes CRUD endpoint (gated by "taxes.view", which a Store Manager
+// holding pos.editLinePrice doesn't necessarily have) since this only exposes the same
+// name/percentage a cashier already sees on every product/service tile.
+export async function listActiveTaxes(organizationId: string) {
+  return prisma.tax.findMany({
+    where: { organizationId, isActive: true },
+    select: { id: true, nameEn: true, nameAr: true, percentage: true, categoryCode: true },
+    orderBy: { nameEn: "asc" },
+  });
 }
 
 // Enforces that every cart/held-sale item matches the POS mode the request declared itself as
@@ -139,6 +224,9 @@ interface PricedLine {
   manageStock: boolean;
   taxCategoryCode: string;
   estimatedProcessingHours?: number | null;
+  note?: string;
+  widthM?: Prisma.Decimal;
+  heightM?: Prisma.Decimal;
 }
 
 async function priceLine(
@@ -147,9 +235,25 @@ async function priceLine(
   businessLocationId: string,
   organizationId: string,
   overrides: { products: Map<string, Prisma.Decimal>; services: Map<string, Prisma.Decimal> },
+  groupDiscountPercent: Prisma.Decimal,
+  canEditLinePrice: boolean,
 ): Promise<PricedLine> {
-  const quantity = new Decimal(item.quantity);
+  // Reference's own laundry dimension-based pricing (carpets/curtains priced per m²) - when both
+  // are sent, the quantity actually billed is scaled by the area, on top of however many pieces
+  // were entered (e.g. 3 rugs at 2m x 1.5m each = 3 * 3m² = 9 billable units).
+  const hasDimensions = item.widthM != null && item.heightM != null;
+  const quantity = hasDimensions ? new Decimal(item.quantity).mul(item.widthM!).mul(item.heightM!) : new Decimal(item.quantity);
   const discountAmount = new Decimal(item.discountAmount ?? 0);
+
+  // Reference's own `edit_product_price_from_sale_screen` permission gates a per-line unit-price
+  // AND tax override (`row_edit_product_price_modal.blade.php`) - a caller without it gets these
+  // fields silently ignored rather than rejected, since the rest of a valid checkout should still
+  // go through; the override only ever WINS when both the permission and a sent value are present.
+  let taxOverride: { percentage: Prisma.Decimal; categoryCode: string } | undefined;
+  if (canEditLinePrice && item.taxId) {
+    const tax = await tx.tax.findFirst({ where: { id: item.taxId, organizationId } });
+    if (tax) taxOverride = { percentage: tax.percentage, categoryCode: tax.categoryCode };
+  }
 
   if (item.productId) {
     const product = await tx.product.findFirst({
@@ -158,12 +262,15 @@ async function priceLine(
     });
     if (!product) throw new NotFoundError(`Product not found or not available at this location: ${item.productId}`);
 
-    const unitPrice = overrides.products.get(product.id) ?? product.sellingPrice;
-    const taxPercent = product.tax?.percentage ?? new Decimal(0);
+    const unitPrice =
+      canEditLinePrice && item.unitPriceOverride != null
+        ? new Decimal(item.unitPriceOverride)
+        : applyPercentAdjustment(overrides.products.get(product.id) ?? product.sellingPrice, groupDiscountPercent);
+    const taxPercent = taxOverride?.percentage ?? product.tax?.percentage ?? new Decimal(0);
     const gross = unitPrice.mul(quantity).sub(discountAmount);
     let subtotal: Prisma.Decimal;
     let taxAmount: Prisma.Decimal;
-    if (product.sellingPriceTaxType === "INCLUSIVE") {
+    if (product.sellingPriceTaxType === "INCLUSIVE" && !taxOverride) {
       const divisor = new Decimal(1).add(taxPercent.div(100));
       subtotal = gross.div(divisor);
       taxAmount = gross.sub(subtotal);
@@ -184,7 +291,10 @@ async function priceLine(
       subtotal: subtotal.toDecimalPlaces(2),
       total: gross.toDecimalPlaces(2),
       manageStock: product.manageStock,
-      taxCategoryCode: product.tax?.categoryCode ?? "S",
+      taxCategoryCode: taxOverride?.categoryCode ?? product.tax?.categoryCode ?? "S",
+      note: item.note,
+      widthM: item.widthM != null ? new Decimal(item.widthM) : undefined,
+      heightM: item.heightM != null ? new Decimal(item.heightM) : undefined,
     };
   }
 
@@ -194,8 +304,11 @@ async function priceLine(
   });
   if (!service) throw new NotFoundError(`Service not found or not available at this location: ${item.serviceId}`);
 
-  const unitPrice = overrides.services.get(service.id) ?? service.price;
-  const taxPercent = service.tax?.percentage ?? new Decimal(0);
+  const unitPrice =
+    canEditLinePrice && item.unitPriceOverride != null
+      ? new Decimal(item.unitPriceOverride)
+      : applyPercentAdjustment(overrides.services.get(service.id) ?? service.price, groupDiscountPercent);
+  const taxPercent = taxOverride?.percentage ?? service.tax?.percentage ?? new Decimal(0);
   const subtotal = unitPrice.mul(quantity).sub(discountAmount);
   const taxAmount = subtotal.mul(taxPercent).div(100);
 
@@ -211,12 +324,26 @@ async function priceLine(
     subtotal: subtotal.toDecimalPlaces(2),
     total: subtotal.add(taxAmount).toDecimalPlaces(2),
     manageStock: false,
-    taxCategoryCode: service.tax?.categoryCode ?? "S",
+    taxCategoryCode: taxOverride?.categoryCode ?? service.tax?.categoryCode ?? "S",
     estimatedProcessingHours: service.estimatedProcessingHours,
+    note: item.note,
+    widthM: item.widthM != null ? new Decimal(item.widthM) : undefined,
+    heightM: item.heightM != null ? new Decimal(item.heightM) : undefined,
   };
 }
 
-export async function checkout(input: CheckoutInput, createdBy: string, organizationId: string) {
+export async function checkout(
+  input: CheckoutInput,
+  createdBy: string,
+  organizationId: string,
+  callerPermissions: string[] = [],
+  // Reference's own "Edit" action on a draft/quotation (SellPosController@edit -> update()) -
+  // reopens this exact same create-sale pipeline, pre-filled and resubmittable, then saves back
+  // onto the SAME transaction row instead of creating a new one. Set only by updateQuote() below.
+  // Left undefined for every other caller (real checkout, Save as Quote/Delivery), which keeps
+  // creating a fresh row exactly as before.
+  existingDraftId?: string,
+) {
   assertItemsMatchMode(input.items, input.mode);
 
   const sale = await prisma.$transaction(async (tx) => {
@@ -226,6 +353,16 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     if (customer.approvalStatus === "PENDING") {
       throw new AppError(400, "Customer is pending approval");
     }
+
+    // Fetched once, reused for the invoiceType default below and the monthly-cap check further
+    // down - avoids querying the same group twice.
+    const customerGroup = customer.customerGroupId ? await tx.customerGroup.findUnique({ where: { id: customer.customerGroupId } }) : null;
+
+    // A group set to "Delivery Invoice" (EJADA reference's invoice_type) means every new sale for
+    // its customers starts as this system's own DRAFT status by default - our DRAFT/FINAL Sale
+    // distinction IS the delivery-ticket-vs-finalized-invoice distinction the reference describes.
+    // An explicit `input.asDraft: true` (the "Save as Quote" flow) always wins either way.
+    const effectiveAsDraft = input.asDraft || customerGroup?.invoiceType === "DELIVERY";
 
     // Per-user access restrictions (P8-5) - fetched once, used for both the customer-access check
     // right below and the discount-ceiling check further down. Never trust the client past this;
@@ -288,9 +425,36 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
       );
     }
 
-    const priceListId = await resolvePriceListId(tx, input.customerId, organizationId, input.businessLocationId);
+    // Add Sale's own "Selling Price Group" field (`sell/create.blade.php`) lets the cashier
+    // consciously override the customer/location-derived default for THIS one sale - validated
+    // to actually belong to this org (never trust a client-sent id past that) before use, then
+    // recorded on the Sale row itself (see priceListId below) so a report can see what actually
+    // priced this invoice, matching the reference's own `selling_price_group_id` column.
+    let priceListId = await resolvePriceListId(tx, input.customerId, organizationId, input.businessLocationId);
+    if (input.priceListId) {
+      const overridePriceList = await tx.priceList.findFirst({ where: { id: input.priceListId, organizationId } });
+      if (!overridePriceList) throw new NotFoundError("Selling price group not found");
+      priceListId = overridePriceList.id;
+    }
     const overrides = await getPriceOverrides(tx, priceListId);
-    const lines = await Promise.all(input.items.map((item) => priceLine(tx, item, input.businessLocationId, organizationId, overrides)));
+    const groupDiscountPercent = await resolveGroupDiscountPercent(tx, input.customerId, organizationId);
+
+    // Add Sale's "Attach Document" - documentPath was already validated by shape (see
+    // checkoutSchema), but its org segment is still just a client-echoed string, so it's checked
+    // against the caller's real organizationId here before being trusted enough to persist -
+    // otherwise a caller could get another org's uploaded file linked onto their own sale (no data
+    // leak on its own since download re-checks the Sale's org too, but still not a value to trust
+    // past this point without verifying it actually matches).
+    if (input.documentPath && !input.documentPath.startsWith(`sale-documents/${organizationId}/`)) {
+      throw new ValidationError(
+        [{ field: "documentPath", message: "This document was not uploaded by this organization" }],
+        "Invalid document reference",
+      );
+    }
+    const canEditLinePrice = actor.isSystemAdmin || callerPermissions.includes("pos.editLinePrice");
+    const lines = await Promise.all(
+      input.items.map((item) => priceLine(tx, item, input.businessLocationId, organizationId, overrides, groupDiscountPercent, canEditLinePrice)),
+    );
 
     // Server-derived from the actual priced lines - never trusts input.mode for this, since mode
     // is just the caller's declared intent (and may be absent entirely on the legacy /pos screen).
@@ -343,7 +507,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
       couponDiscountAmount = couponDiscountAmount.toDecimalPlaces(2);
       // A DRAFT quote hasn't actually "used" the coupon yet - nothing should need reversing if
       // it's later voided (see voidQuote), so usage is only counted once confirmQuote() runs.
-      if (!input.asDraft) {
+      if (!effectiveAsDraft) {
         await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
       }
     }
@@ -391,7 +555,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     // balance could easily have moved by the time it's confirmed, so redemption simply isn't
     // offered on a quote rather than risk debiting a stale count. Earning still happens normally
     // at confirm time, computed fresh from that point's totals.
-    if (org.rewardPointsEnabled && !input.asDraft) {
+    if (org.rewardPointsEnabled && !effectiveAsDraft) {
       const requestedPoints = Math.max(0, Math.min(input.redeemPoints ?? 0, customer.rewardPoints));
       const cappedRequest = org.maxRedeemPoints != null ? Math.min(requestedPoints, org.maxRedeemPoints) : requestedPoints;
       const maxAffordablePoints = subtotalAfterInvoiceDiscount.div(org.pointValueSar).floor().toNumber();
@@ -409,14 +573,24 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     const subtotal = subtotalAfterInvoiceDiscount.sub(pointsDiscountAmount).add(shippingAmount).toDecimalPlaces(2);
     const taxAmount = subtotal.mul(effectiveTaxRate).toDecimalPlaces(2);
     const discountAmount = lineDiscountAmount.add(couponDiscountAmount).add(invoiceDiscountAmount).add(pointsDiscountAmount);
-    const totalAmount = subtotal.add(taxAmount);
+
+    // Additional expenses (reference's 4 fixed named slots) are a flat, UNTAXED pass-through
+    // charge added straight onto the grand total - unlike shippingAmount above, which is a real
+    // taxable charge folded into subtotal before tax is computed. See buildAdditionalExpensesData.
+    const additionalExpensesTotal = (input.additionalExpenses ?? []).reduce(
+      (sum, e) => sum.add(new Decimal(e.value)),
+      new Decimal(0),
+    );
+    const totalAmount = subtotal.add(taxAmount).add(additionalExpensesTotal);
 
     // --- Customer-group monthly spend/volume caps (P8-3) - enforced against the WHOLE group's
-    // combined FINAL sales this calendar month, not just this customer's own. All-null on the
-    // group means unrestricted. Quotes don't count against the cap - only real checkouts do. ---
-    if (!input.asDraft && customer.customerGroupId) {
-      const group = await tx.customerGroup.findUnique({ where: { id: customer.customerGroupId } });
-      if (group && (group.maxAmountPerMonth != null || group.maxInvoicesPerMonth != null || group.maxQtyPerMonth != null)) {
+    // combined FINAL sales this calendar month by default, or against just this one customer's own
+    // when the group's maxFor is CUSTOMER (EJADA reference's "For Customer"/"For Company" radio -
+    // see the CustomerGroupCapScope schema comment). All-null on the group means unrestricted.
+    // Quotes don't count against the cap - only real checkouts do. ---
+    if (!effectiveAsDraft && customerGroup) {
+      const group = customerGroup;
+      if (group.maxAmountPerMonth != null || group.maxInvoicesPerMonth != null || group.maxQtyPerMonth != null) {
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -424,7 +598,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           organizationId,
           status: "FINAL",
           saleDate: { gte: monthStart, lt: monthEnd },
-          customer: { customerGroupId: group.id },
+          ...(group.maxFor === "CUSTOMER" ? { customerId: customer.id } : { customer: { customerGroupId: group.id } }),
         };
 
         if (group.maxAmountPerMonth != null) {
@@ -484,25 +658,118 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
 
     const saleDate = new Date();
 
+    // Add Sale's own Pay Term Number/Type (pre-filled from the customer, independently editable
+    // there) - computed into one concrete due date here, matching the reference's own
+    // `sell_due_date` (computed client-side and sent as a plain date there; computed server-side
+    // here instead, since this is the one place both saleDate and the pay term are already
+    // trustworthy together). Months are calendar months via `setMonth` (handles month-length
+    // differences the way `Date` naturally does); days are a flat day count.
+    let dueDate: Date | null = null;
+    if (input.payTermNumber && input.payTermType) {
+      dueDate = new Date(saleDate);
+      if (input.payTermType === "MONTHS") dueDate.setMonth(dueDate.getMonth() + input.payTermNumber);
+      else dueDate.setDate(dueDate.getDate() + input.payTermNumber);
+    }
+
     // The whole order is "ready" once its slowest service line finishes - not the fastest -
     // so this takes the max hours across service lines, not an average or the first one.
     const serviceHours = lines.map((l) => l.estimatedProcessingHours).filter((h): h is number => h != null);
     const estimatedReadyAt = serviceHours.length > 0 ? new Date(saleDate.getTime() + Math.max(...serviceHours) * 60 * 60 * 1000) : null;
 
-    // --- Quote (asDraft): freeze the priced lines/totals now and stop - no stock deduction, no
-    // ZATCA (icv/hash/XML/signature/QR all stay null), no payments, no customer balance change,
-    // no loyalty earn/redeem. confirmQuote() runs all of that later against these exact totals,
-    // only re-checking that stock is still available. Deliberately simpler than the reference,
-    // which re-resolves pricing fresh at confirm time - see docs plan section 7. ---
-    if (input.asDraft) {
+    // --- Quote (asDraft, or a group whose invoiceType is DELIVERY): freeze the priced lines/totals
+    // now and stop - no stock deduction, no ZATCA (icv/hash/XML/signature/QR all stay null), no
+    // payments, no customer balance change, no loyalty earn/redeem. confirmQuote() runs all of
+    // that later against these exact totals, only re-checking that stock is still available.
+    // Deliberately simpler than the reference, which re-resolves pricing fresh at confirm time -
+    // see docs plan section 7. ---
+    if (effectiveAsDraft) {
+      // Editing an existing draft (see checkout()'s existingDraftId param comment) - everything
+      // above this point (customer/location/VAT checks, per-line pricing, coupon, invoice
+      // discount) already ran identically to a fresh create; this branch just writes the result
+      // onto the SAME row instead of a new one, preserving its id/quoteNumber/deliveryNumber/
+      // isQuotation/createdBy/createdAt exactly as the reference's own edit->update() does (the
+      // reference literally reuses the transaction's invoice_no on save, never reissuing it).
+      if (existingDraftId) {
+        const existing = await tx.sale.findFirst({ where: { id: existingDraftId, organizationId, status: "DRAFT" } });
+        if (!existing) throw new NotFoundError("Quote not found");
+
+        await tx.saleItem.deleteMany({ where: { saleId: existing.id } });
+        const updatedSale = await tx.sale.update({
+          where: { id: existing.id },
+          data: {
+            businessLocationId: input.businessLocationId,
+            customerId: input.customerId,
+            estimatedReadyAt,
+            saleType,
+            subtotal: subtotal.toDecimalPlaces(2),
+            discountAmount: discountAmount.toDecimalPlaces(2),
+            taxAmount: taxAmount.toDecimalPlaces(2),
+            totalAmount: totalAmount.toDecimalPlaces(2),
+            dueAmount: totalAmount.toDecimalPlaces(2),
+            notes: input.notes,
+            invoiceTypeCode: customer.vatNumber?.trim() ? "STANDARD" : "SIMPLIFIED",
+            couponId,
+            couponDiscountAmount,
+            invoiceDiscountAmount,
+            shippingAmount,
+            ...buildCustomFieldsData(input.customFields),
+            ...buildAdditionalExpensesData(input.additionalExpenses),
+            taxExemptionReasonCode: input.taxExemptionReasonCode,
+            priceListId,
+            payTermNumber: input.payTermNumber,
+            payTermType: input.payTermType,
+            dueDate,
+            documentPath: input.documentPath,
+            documentOriginalName: input.documentOriginalName,
+          },
+        });
+
+        await tx.saleItem.createMany({
+          data: lines.map((l) => ({
+            saleId: updatedSale.id,
+            productId: l.productId,
+            serviceId: l.serviceId,
+            descriptionEn: l.descriptionEn,
+            descriptionAr: l.descriptionAr,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            taxPercent: l.taxPercent,
+            taxAmount: l.taxAmount,
+            discountAmount: l.discountAmount,
+            subtotal: l.subtotal,
+            total: l.total,
+            taxCategoryCode: l.taxCategoryCode,
+            note: l.note,
+            widthM: l.widthM,
+            heightM: l.heightM,
+          })),
+        });
+
+        return tx.sale.findUniqueOrThrow({
+          where: { id: updatedSale.id },
+          include: {
+            items: true,
+            payments: true,
+            customer: { include: { customerGroup: { select: { sendSms: true } } } },
+            businessLocation: true,
+          },
+        });
+      }
+
+      // Explicit caller intent always wins; absent that, a DELIVERY-typed customer group's
+      // auto-forced draft is a Delivery, not a Quotation - everything else defaults to Quotation
+      // (matches every pre-existing caller, which never set this and always meant "quote").
+      const isQuotation = input.isQuotation ?? customerGroup?.invoiceType !== "DELIVERY";
       const quoteSaleId = randomUUID();
-      const quoteNumber = await claimBusinessLocationNumber(tx, input.businessLocationId, "quote");
+      const draftDocumentNumber = await claimBusinessLocationNumber(tx, input.businessLocationId, isQuotation ? "quote" : "draft");
 
       const quoteSale = await tx.sale.create({
         data: {
           id: quoteSaleId,
           organizationId,
-          quoteNumber,
+          quoteNumber: isQuotation ? draftDocumentNumber : null,
+          deliveryNumber: isQuotation ? null : draftDocumentNumber,
+          isQuotation,
           invoiceNumber: null,
           businessLocationId: input.businessLocationId,
           customerId: input.customerId,
@@ -527,6 +794,16 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           couponDiscountAmount,
           invoiceDiscountAmount,
           shippingAmount,
+          ...buildCustomFieldsData(input.customFields),
+          ...buildAdditionalExpensesData(input.additionalExpenses),
+          taxExemptionReasonCode: input.taxExemptionReasonCode,
+          priceListId,
+          payTermNumber: input.payTermNumber,
+          payTermType: input.payTermType,
+          dueDate,
+          documentPath: input.documentPath,
+          documentOriginalName: input.documentOriginalName,
+          channel: input.channel ?? "POS",
         },
       });
 
@@ -545,12 +822,20 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           subtotal: l.subtotal,
           total: l.total,
           taxCategoryCode: l.taxCategoryCode,
+          note: l.note,
+          widthM: l.widthM,
+          heightM: l.heightM,
         })),
       });
 
       return tx.sale.findUniqueOrThrow({
         where: { id: quoteSale.id },
-        include: { items: true, payments: true, customer: true, businessLocation: true },
+        include: {
+          items: true,
+          payments: true,
+          customer: { include: { customerGroup: { select: { sendSms: true } } } },
+          businessLocation: true,
+        },
       });
     }
 
@@ -583,6 +868,8 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     // 8-field QR. Otherwise fall back to Phase A/B's JSON-hash + 5-field QR - no regression for
     // locations that haven't been onboarded yet (see docs/POS-ZATCA-PLAN.md).
     const certificate = await tx.zatcaDeviceCertificate.findUnique({ where: { businessLocationId: input.businessLocationId } });
+    const localTime = toLocationLocalParts(saleDate, businessLocation.timezone);
+    const localTimestampIso = `${localTime.dateIso}T${localTime.timeIso}`;
 
     let invoiceHash: string;
     let qrCodeBase64: string;
@@ -591,6 +878,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
     let publicKeyPem: string | undefined;
 
     if (certificate) {
+      const paymentMeansCodes = await resolvePaymentMeansCodes(tx, input.payments);
       const ublLines: UblInvoiceLine[] = lines.map((l, index) => ({
         id: index + 1,
         descriptionEn: l.descriptionEn,
@@ -601,6 +889,12 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         lineSubtotal: l.subtotal.toString(),
         lineTax: l.taxAmount.toString(),
         lineTotal: l.total.toString(),
+        ...(input.taxExemptionReasonCode && (l.taxCategoryCode === "E" || l.taxCategoryCode === "Z")
+          ? {
+              taxExemptionReasonCode: input.taxExemptionReasonCode,
+              taxExemptionReason: TAX_EXEMPTION_REASONS[input.taxExemptionReasonCode]?.en,
+            }
+          : {}),
       }));
 
       xmlContent = buildInvoiceXml({
@@ -608,8 +902,8 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         uuid: saleId,
         icv,
         previousInvoiceHash,
-        issueDateIso: saleDate.toISOString().slice(0, 10),
-        issueTimeIso: saleDate.toISOString().slice(11, 19),
+        issueDateIso: localTime.dateIso,
+        issueTimeIso: localTime.timeIso,
         invoiceTypeCode,
         currency: businessLocation.currency,
         seller: {
@@ -618,6 +912,9 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           crNumber: businessLocation.crNumber,
           city: businessLocation.city,
           address: businessLocation.address,
+          district: businessLocation.district,
+          postalCode: businessLocation.postalCode,
+          buildingNo: businessLocation.buildingNo,
         },
         buyer: { name: customer.nameEn, vatNumber: customer.vatNumber },
         lines: ublLines,
@@ -625,6 +922,8 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         discountAmount: discountAmount.toDecimalPlaces(2).toString(),
         taxAmount: taxAmount.toDecimalPlaces(2).toString(),
         totalAmount: totalAmount.toDecimalPlaces(2).toString(),
+        chargeAmount: additionalExpensesTotal.toDecimalPlaces(2).toString(),
+        paymentMeansCodes,
       });
 
       invoiceHash = computeXmlInvoiceHash(xmlContent);
@@ -635,7 +934,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
       qrCodeBase64 = buildSignedQrTlvBase64({
         sellerName: businessLocation.businessNameAr,
         vatNumber: businessLocation.vatNumber,
-        timestampIso: saleDate.toISOString(),
+        timestampIso: localTimestampIso,
         invoiceTotal: totalAmount.toDecimalPlaces(2).toString(),
         vatTotal: taxAmount.toDecimalPlaces(2).toString(),
         invoiceHashBase64: invoiceHash,
@@ -665,7 +964,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
       qrCodeBase64 = buildQrTlvBase64({
         sellerName: businessLocation.businessNameAr,
         vatNumber: businessLocation.vatNumber,
-        timestampIso: saleDate.toISOString(),
+        timestampIso: localTimestampIso,
         invoiceTotal: totalAmount.toDecimalPlaces(2).toString(),
         vatTotal: taxAmount.toDecimalPlaces(2).toString(),
       });
@@ -703,6 +1002,16 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         couponDiscountAmount,
         invoiceDiscountAmount,
         shippingAmount,
+        ...buildCustomFieldsData(input.customFields),
+        ...buildAdditionalExpensesData(input.additionalExpenses),
+        taxExemptionReasonCode: input.taxExemptionReasonCode,
+        priceListId,
+        payTermNumber: input.payTermNumber,
+        payTermType: input.payTermType,
+        dueDate,
+        documentPath: input.documentPath,
+        documentOriginalName: input.documentOriginalName,
+        channel: input.channel ?? "POS",
       },
     });
 
@@ -721,6 +1030,9 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
         subtotal: l.subtotal,
         total: l.total,
         taxCategoryCode: l.taxCategoryCode,
+        note: l.note,
+        widthM: l.widthM,
+        heightM: l.heightM,
       })),
     });
 
@@ -783,6 +1095,7 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
           paymentMethodId: p.paymentMethodId,
           type: "SALE_PAYMENT" as const,
           referenceNumber: p.referenceNumber,
+          notes: p.notes,
           createdBy,
         })),
       });
@@ -872,14 +1185,21 @@ export async function checkout(input: CheckoutInput, createdBy: string, organiza
 
     return tx.sale.findUniqueOrThrow({
       where: { id: sale.id },
-      include: { items: true, payments: { include: { paymentMethod: true } }, customer: true, businessLocation: true },
+      include: {
+        items: true,
+        payments: { include: { paymentMethod: true } },
+        customer: { include: { customerGroup: { select: { sendSms: true } } } },
+        businessLocation: true,
+      },
     });
   });
 
   // Fired after commit, never inside the transaction - an SMS failure must never roll back a real
   // sale. Guarded on FINAL so saving a quote (asDraft) never fires a "new sale"/"payment received"
-  // text - nothing was actually sold yet.
-  if (sale.status === "FINAL" && sale.customer.phone) {
+  // text - nothing was actually sold yet. Also guarded on the customer's group's own `sendSms` flag
+  // (EJADA reference's send_sms checkbox) - defaults to true when the customer has no group, so
+  // this doesn't go quiet for the common ungrouped case.
+  if (sale.status === "FINAL" && sale.customer.phone && sale.customer.customerGroup?.sendSms !== false) {
     await sendTemplatedSms(
       organizationId,
       "NEW_SALE",
@@ -951,6 +1271,47 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
       }
     }
 
+    // Same customer-group monthly cap enforcement as checkout() - a quote (including one created
+    // as a DRAFT by default because its group's invoiceType is DELIVERY) never counted against the
+    // cap while it sat as a draft; this is the point it becomes a real FINAL sale, so it's checked
+    // here instead, against the same combined-group-or-per-customer scope (maxFor).
+    if (customer.customerGroupId) {
+      const group = await tx.customerGroup.findUnique({ where: { id: customer.customerGroupId } });
+      if (group && (group.maxAmountPerMonth != null || group.maxInvoicesPerMonth != null || group.maxQtyPerMonth != null)) {
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const monthWhere: Prisma.SaleWhereInput = {
+          organizationId,
+          status: "FINAL",
+          saleDate: { gte: monthStart, lt: monthEnd },
+          ...(group.maxFor === "CUSTOMER" ? { customerId: customer.id } : { customer: { customerGroupId: group.id } }),
+        };
+
+        if (group.maxAmountPerMonth != null) {
+          const existing = await tx.sale.aggregate({ where: monthWhere, _sum: { totalAmount: true } });
+          const existingAmount = existing._sum.totalAmount ?? new Decimal(0);
+          if (existingAmount.add(draft.totalAmount).gt(group.maxAmountPerMonth)) {
+            throw new AppError(400, `This customer group's monthly spend cap of ${group.maxAmountPerMonth.toFixed(2)} would be exceeded`);
+          }
+        }
+        if (group.maxInvoicesPerMonth != null) {
+          const existingCount = await tx.sale.count({ where: monthWhere });
+          if (existingCount + 1 > group.maxInvoicesPerMonth) {
+            throw new AppError(400, `This customer group's monthly invoice cap of ${group.maxInvoicesPerMonth} would be exceeded`);
+          }
+        }
+        if (group.maxQtyPerMonth != null) {
+          const qtyAgg = await tx.saleItem.aggregate({ where: { sale: monthWhere }, _sum: { quantity: true } });
+          const existingQty = qtyAgg._sum.quantity ?? new Decimal(0);
+          const thisQty = draft.items.reduce((sum, l) => sum.add(l.quantity), new Decimal(0));
+          if (existingQty.add(thisQty).gt(group.maxQtyPerMonth)) {
+            throw new AppError(400, `This customer group's monthly quantity cap of ${group.maxQtyPerMonth.toString()} would be exceeded`);
+          }
+        }
+      }
+    }
+
     const org = await tx.organization.findUniqueOrThrow({
       where: { id: organizationId },
       select: { rewardPointsEnabled: true, pointsEarnDivisor: true, minOrderForPoints: true, maxPointsPerOrder: true },
@@ -1008,6 +1369,8 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
     const previousInvoiceHash = previousSale?.invoiceHash ?? GENESIS_PREVIOUS_HASH;
 
     const certificate = await tx.zatcaDeviceCertificate.findUnique({ where: { businessLocationId: draft.businessLocationId } });
+    const localTime = toLocationLocalParts(saleDate, businessLocation.timezone);
+    const localTimestampIso = `${localTime.dateIso}T${localTime.timeIso}`;
 
     let invoiceHash: string;
     let qrCodeBase64: string;
@@ -1016,6 +1379,7 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
     let publicKeyPem: string | undefined;
 
     if (certificate) {
+      const paymentMeansCodes = await resolvePaymentMeansCodes(tx, input.payments);
       const ublLines: UblInvoiceLine[] = draft.items.map((l, index) => ({
         id: index + 1,
         descriptionEn: l.descriptionEn,
@@ -1026,6 +1390,12 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
         lineSubtotal: l.subtotal.toString(),
         lineTax: l.taxAmount.toString(),
         lineTotal: l.total.toString(),
+        ...(draft.taxExemptionReasonCode && (l.taxCategoryCode === "E" || l.taxCategoryCode === "Z")
+          ? {
+              taxExemptionReasonCode: draft.taxExemptionReasonCode,
+              taxExemptionReason: TAX_EXEMPTION_REASONS[draft.taxExemptionReasonCode]?.en,
+            }
+          : {}),
       }));
 
       xmlContent = buildInvoiceXml({
@@ -1033,8 +1403,8 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
         uuid: draft.id,
         icv,
         previousInvoiceHash,
-        issueDateIso: saleDate.toISOString().slice(0, 10),
-        issueTimeIso: saleDate.toISOString().slice(11, 19),
+        issueDateIso: localTime.dateIso,
+        issueTimeIso: localTime.timeIso,
         invoiceTypeCode,
         currency: businessLocation.currency,
         seller: {
@@ -1043,6 +1413,9 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
           crNumber: businessLocation.crNumber,
           city: businessLocation.city,
           address: businessLocation.address,
+          district: businessLocation.district,
+          postalCode: businessLocation.postalCode,
+          buildingNo: businessLocation.buildingNo,
         },
         buyer: { name: customer.nameEn, vatNumber: customer.vatNumber },
         lines: ublLines,
@@ -1050,6 +1423,13 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
         discountAmount: draft.discountAmount.toString(),
         taxAmount: draft.taxAmount.toString(),
         totalAmount: draft.totalAmount.toString(),
+        chargeAmount: draft.additionalExpense1Value
+          .add(draft.additionalExpense2Value)
+          .add(draft.additionalExpense3Value)
+          .add(draft.additionalExpense4Value)
+          .toDecimalPlaces(2)
+          .toString(),
+        paymentMeansCodes,
       });
 
       invoiceHash = computeXmlInvoiceHash(xmlContent);
@@ -1060,7 +1440,7 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
       qrCodeBase64 = buildSignedQrTlvBase64({
         sellerName: businessLocation.businessNameAr,
         vatNumber: businessLocation.vatNumber,
-        timestampIso: saleDate.toISOString(),
+        timestampIso: localTimestampIso,
         invoiceTotal: draft.totalAmount.toString(),
         vatTotal: draft.taxAmount.toString(),
         invoiceHashBase64: invoiceHash,
@@ -1090,7 +1470,7 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
       qrCodeBase64 = buildQrTlvBase64({
         sellerName: businessLocation.businessNameAr,
         vatNumber: businessLocation.vatNumber,
-        timestampIso: saleDate.toISOString(),
+        timestampIso: localTimestampIso,
         invoiceTotal: draft.totalAmount.toString(),
         vatTotal: draft.taxAmount.toString(),
       });
@@ -1178,6 +1558,7 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
           paymentMethodId: p.paymentMethodId,
           type: "SALE_PAYMENT" as const,
           referenceNumber: p.referenceNumber,
+          notes: p.notes,
           createdBy,
         })),
       });
@@ -1250,13 +1631,19 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
 
     return tx.sale.findUniqueOrThrow({
       where: { id: draft.id },
-      include: { items: true, payments: { include: { paymentMethod: true } }, customer: true, businessLocation: true },
+      include: {
+        items: true,
+        payments: { include: { paymentMethod: true } },
+        customer: { include: { customerGroup: { select: { sendSms: true } } } },
+        businessLocation: true,
+      },
     });
   });
 
   // Same post-commit trigger pair as checkout() - a confirmed quote is the first moment it
   // becomes a real invoice, so it gets the same NEW_SALE/PAYMENT_RECEIVED texts a direct sale would.
-  if (sale.customer.phone) {
+  // Same customer-group sendSms gate as checkout() too.
+  if (sale.customer.phone && sale.customer.customerGroup?.sendSms !== false) {
     await sendTemplatedSms(
       organizationId,
       "NEW_SALE",
@@ -1288,25 +1675,138 @@ export async function voidQuote(saleId: string, organizationId: string) {
   return prisma.sale.update({ where: { id: draft.id }, data: { status: "CANCELLED" } });
 }
 
-export async function listQuotes(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
+// Reference's own action-dropdown "Delete" (SellPosController@destroy -> TransactionUtil::
+// deleteSale()) - a genuine hard delete, distinct from voidQuote() above (this app's own
+// soft-cancel-for-an-audit-trail addition, which the reference dropdown doesn't actually have).
+// Reference's deleteSale() only reverses stock/payments/points on a FINAL sale being deleted - for
+// a DRAFT (all this list ever shows) it's confirmed to be a straight row delete with no side
+// effects, since a draft never touched stock, money, or points. Scoped to status=DRAFT so a
+// CANCELLED (voided) or FINAL row can never be reached through this path.
+export async function deleteQuote(saleId: string, organizationId: string) {
+  const draft = await prisma.sale.findFirst({ where: { id: saleId, organizationId, status: "DRAFT" } });
+  if (!draft) throw new NotFoundError("Quote not found");
+  await prisma.sale.delete({ where: { id: draft.id } });
+}
+
+// Reference's action-dropdown "View Quote URL" (quotation-only) - Util::getInvoiceUrl()'s lazy
+// generate-and-persist-once pattern: the token never changes once issued, so a link already
+// shared/printed/texted to a customer keeps working. 24 random bytes (48 hex chars) rather than
+// the reference's weak md5(rand()+microtime()) - this app has no reason to keep that weakness.
+export async function getOrCreateShareToken(saleId: string, organizationId: string): Promise<string> {
+  const sale = await prisma.sale.findFirst({ where: { id: saleId, organizationId }, select: { publicToken: true } });
+  if (!sale) throw new NotFoundError("Quote not found");
+  if (sale.publicToken) return sale.publicToken;
+  const token = randomBytes(24).toString("hex");
+  await prisma.sale.update({ where: { id: saleId }, data: { publicToken: token } });
+  return token;
+}
+
+// Backs the public /q/:token page (mounted before the auth gate, see routes/index.ts) - anyone
+// with the link can view it, no login, matching the reference's own public show_invoice/show_quote
+// routes. Deliberately returns the exact same shape sale.service.ts's getById() does (customer,
+// businessLocation, items, resolvedInvoiceLayout) so the frontend can render it through the same
+// InvoiceDocument templates already made draft-aware - a public quote link and an authenticated
+// print preview are the same document, just reached two different ways.
+export async function getSaleByPublicToken(token: string) {
+  const sale = await prisma.sale.findFirst({
+    where: { publicToken: token },
+    include: {
+      customer: { include: { defaultInvoiceLayout: true } },
+      businessLocation: { include: { invoiceLayoutSettings: true } },
+      createdByUser: { select: { fullNameEn: true } },
+      items: { include: { product: true, service: true } },
+      payments: { include: { paymentMethod: true } },
+      registerSession: { select: { openedAt: true, openedByUser: { select: { fullNameEn: true } } } },
+    },
+  });
+  if (!sale) throw new NotFoundError("Not found");
+  const resolvedInvoiceLayout =
+    sale.customer?.defaultInvoiceLayout ?? sale.businessLocation.invoiceLayoutSettings.find((l) => l.isDefault) ?? null;
+  return { ...sale, resolvedInvoiceLayout };
+}
+
+// Reference's action-dropdown "Send Notification" (quotation-only, template_for=new_quotation) -
+// an on-demand send, unlike every other trigger in this app which only ever fires as a side
+// effect of checkout()/confirmQuote(). {quoteUrl} reuses the exact same lazily-generated token as
+// "View Quote URL" (getOrCreateShareToken above) - sending a notification also mints the link if
+// this is the first time either action has been used for this quote.
+export async function sendQuoteNotification(saleId: string, organizationId: string, input: SendQuoteNotificationInput) {
+  const sale = await prisma.sale.findFirst({
+    where: { id: saleId, organizationId, isQuotation: true },
+    include: { customer: true, organization: { select: { nameEn: true } } },
+  });
+  if (!sale) throw new NotFoundError("Quote not found");
+
+  const token = await getOrCreateShareToken(saleId, organizationId);
+  const quoteUrl = `${env.clientUrl}/q/${token}`;
+  const placeholders = {
+    customerName: sale.customer.nameEn,
+    quoteNumber: sale.quoteNumber ?? "",
+    amount: sale.totalAmount.toFixed(2),
+    quoteUrl,
+  };
+
+  if (input.mobile) {
+    await sendTemplatedSms(organizationId, "NEW_QUOTATION", input.mobile, placeholders, "SALE", saleId);
+  }
+  if (input.email) {
+    const subject = `Quotation ${sale.quoteNumber ?? ""} from ${sale.organization.nameEn}`;
+    await sendTemplatedEmail(organizationId, "NEW_QUOTATION", input.email, subject, placeholders, "SALE", saleId);
+  }
+}
+
+const QUOTE_SORTABLE_FIELDS = ["quoteNumber", "deliveryNumber", "totalAmount", "createdAt"];
+
+// isQuotation selects which of the two DRAFT sub-types this list shows - true (default) is the
+// existing Quotes list, false is List Deliveries (see the Sale.isQuotation schema comment).
+// Filters mirror the reference's own draft.blade.php/quotations.blade.php + getDraftDatables():
+// Business Location, Customer, Date Range, Created By, Customer Group - the one filter NOT built
+// here is the reference's laundry-only Shipping Status, since this app has no shipping/order-status
+// field on Sale yet (tracked separately as a queued laundry-workflow item, not silently dropped).
+export async function listQuotes(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null, isQuotation: boolean = true) {
   const { page, limit, skip } = parsePagination(query);
+  const orderBy = parseSort(query, QUOTE_SORTABLE_FIELDS, "createdAt");
 
   const where: Prisma.SaleWhereInput = {
     organizationId,
     status: "DRAFT",
+    isQuotation,
     ...resolveBusinessLocationFilter(query.businessLocationId ? String(query.businessLocationId) : undefined, allowedLocationIds),
+    ...(query.customerId ? { customerId: String(query.customerId) } : {}),
+    ...(query.createdBy ? { createdBy: String(query.createdBy) } : {}),
+    ...(query.customerGroupId ? { customer: { customerGroupId: String(query.customerGroupId) } } : {}),
+    ...(query.from || query.to
+      ? {
+          createdAt: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
   const [data, total] = await Promise.all([
     prisma.sale.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip,
       take: limit,
       include: {
         items: true,
-        customer: { select: { id: true, nameEn: true, nameAr: true, phone: true, balance: true } },
+        customer: {
+          select: {
+            id: true,
+            nameEn: true,
+            nameAr: true,
+            phone: true,
+            email: true,
+            balance: true,
+            cashBack: true,
+            customerGroup: { select: { id: true, nameEn: true, nameAr: true } },
+          },
+        },
         businessLocation: { select: { branchName: true } },
+        createdByUser: { select: { fullNameEn: true } },
       },
     }),
     prisma.sale.count({ where }),

@@ -28,6 +28,17 @@ export interface PosLine {
   stockOnHand?: number;
   manageStock?: boolean;
   unit: string;
+  // Reference's per-line edit modal (row_edit_product_price_modal.blade.php) - unitPriceOverride/
+  // taxOverrideId only ever actually apply server-side for a caller holding pos.editLinePrice (see
+  // pos.service.ts's priceLine()); the catalog unitPrice/taxPercent above are left untouched so
+  // clearing an override just means dropping these two fields.
+  unitPriceOverride?: number;
+  taxOverrideId?: string;
+  taxOverridePercent?: number;
+  note?: string;
+  // Laundry's own dimension-based pricing (carpets/curtains priced per m²).
+  widthM?: number;
+  heightM?: number;
 }
 
 export interface PosCustomer {
@@ -38,6 +49,17 @@ export interface PosCustomer {
   balance: string;
   rewardPoints?: number;
   cashBack?: string;
+  // Reference's Add Sale header - Billing/Shipping Address display + Pay Term pre-fill (see
+  // AddSaleHeader in PosPage.tsx). Optional since the touch-grid POS's customer flows never
+  // needed this and shouldn't have to supply it.
+  address?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  shippingAddress?: string | null;
+  paymentTermsDays?: number;
+  payTermType?: "DAYS" | "MONTHS" | null;
 }
 
 export type DiscountMode = "PERCENT" | "FIXED";
@@ -47,13 +69,36 @@ export interface PosPayment {
   paymentMethodId: string;
   label: string;
   amount: number;
-  referenceNumber?: string; // BnplSession id, for BNPL tenders
+  referenceNumber?: string; // BnplSession id for BNPL tenders; a free-typed reference/transaction no. for everything else
+  note?: string; // reference's per-row `payment[$row_index][note]`
+  // Cash tendered by the customer for this row (client-only - never sent to checkout, which only
+  // ever sees `amount`) - lets the split-tender UI show "Change: X" when tendered exceeds amount,
+  // without inflating what's actually recorded as paid on the sale.
+  tendered?: number;
+  // True for a row added by a fixed-amount flow (BNPL capture, cashback) whose amount/method are
+  // tied to something else (an approved session, a capped balance) and must not be hand-edited.
+  locked?: boolean;
 }
 
 export interface AppliedCoupon {
   code: string;
   discountAmount: number; // computed server-side by the preview endpoint at apply time
 }
+
+// Reference's own 4 fixed additional_expense_key_N/_value_N slots - untaxed flat pass-through
+// charges (see pos.service.ts's checkout()). A slot with an empty key is dropped at checkout
+// time rather than sent as a nameless amount.
+export interface AdditionalExpenseSlot {
+  key: string;
+  value: number;
+}
+
+const EMPTY_ADDITIONAL_EXPENSES: AdditionalExpenseSlot[] = [
+  { key: "", value: 0 },
+  { key: "", value: 0 },
+  { key: "", value: 0 },
+  { key: "", value: 0 },
+];
 
 // Must match POINT_VALUE in backend/src/modules/pos/pos.service.ts - 1 point = this many
 // currency units off. Kept in sync manually since there's no shared config source yet.
@@ -80,12 +125,31 @@ interface PosState {
   payments: PosPayment[];
   coupon: AppliedCoupon | null;
   note: string;
+  customFields: string[]; // reference's sell-level custom_field_1..4, by index
+  additionalExpenses: AdditionalExpenseSlot[]; // reference's 4 fixed named expense slots
+  taxExemptionReasonCode: string | null;
+  // Reference's Add Sale header (`sell/create.blade.php`) - a per-sale Selling Price Group
+  // override (distinct from the customer/location-derived default - see pos.service.ts's
+  // checkout()) and a per-sale Pay Term (pre-filled from the picked customer's own configured
+  // term on setCustomer, then independently editable), used only to compute Sale.dueDate.
+  priceListId: string | null;
+  payTermNumber: number | null;
+  payTermType: "DAYS" | "MONTHS" | null;
+  // Reference's Add Sale "Attach Document" - set once the file has actually finished uploading
+  // (see useUploadSaleDocument in posApi.ts); documentOriginalName is what the cashier sees/typed,
+  // documentPath is the opaque server path threaded into the checkout payload.
+  documentPath: string | null;
+  documentOriginalName: string | null;
 
   addItem: (item: Omit<PosLine, "key" | "quantity" | "discountAmount"> & { quantity?: number }) => void;
   incQty: (key: string) => void;
   decQty: (key: string) => void;
   setQty: (key: string, qty: number) => void;
   setLineDiscount: (key: string, amount: number) => void;
+  setLineUnitPriceOverride: (key: string, price: number | null) => void;
+  setLineTaxOverride: (key: string, taxId: string | null, taxPercent?: number) => void;
+  setLineNote: (key: string, note: string) => void;
+  setLineDimensions: (key: string, widthM: number | null, heightM: number | null) => void;
   removeLine: (key: string) => void;
   clear: () => void;
 
@@ -96,8 +160,15 @@ interface PosState {
   setAppliedCreditAmount: (amount: number) => void;
   setNote: (note: string) => void;
   setCoupon: (coupon: AppliedCoupon | null) => void;
+  setCustomField: (index: number, value: string) => void;
+  setAdditionalExpense: (index: number, slot: AdditionalExpenseSlot) => void;
+  setTaxExemptionReasonCode: (code: string | null) => void;
+  setPriceListId: (id: string | null) => void;
+  setPayTerm: (number: number | null, type: "DAYS" | "MONTHS" | null) => void;
+  setDocument: (path: string | null, originalName: string | null) => void;
 
   addPayment: (p: Omit<PosPayment, "id">) => void;
+  updatePayment: (id: string, patch: Partial<Omit<PosPayment, "id">>) => void;
   removePayment: (id: string) => void;
   clearPayments: () => void;
 
@@ -118,6 +189,14 @@ export const usePosStore = create<PosState>((set) => ({
   payments: [],
   coupon: null,
   note: "",
+  customFields: ["", "", "", ""],
+  additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
+  taxExemptionReasonCode: null,
+  priceListId: null,
+  payTermNumber: null,
+  payTermType: null,
+  documentPath: null,
+  documentOriginalName: null,
 
   addItem: (item) =>
     set((state) => {
@@ -153,12 +232,61 @@ export const usePosStore = create<PosState>((set) => ({
       lines: state.lines.map((l) => (l.key === key ? { ...l, discountAmount: Math.max(0, amount) } : l)),
     })),
 
+  setLineUnitPriceOverride: (key, price) =>
+    set((state) => ({
+      lines: state.lines.map((l) => (l.key === key ? { ...l, unitPriceOverride: price ?? undefined } : l)),
+    })),
+
+  setLineTaxOverride: (key, taxId, taxPercent) =>
+    set((state) => ({
+      lines: state.lines.map((l) =>
+        l.key === key ? { ...l, taxOverrideId: taxId ?? undefined, taxOverridePercent: taxId ? taxPercent : undefined } : l,
+      ),
+    })),
+
+  setLineNote: (key, note) =>
+    set((state) => ({ lines: state.lines.map((l) => (l.key === key ? { ...l, note: note || undefined } : l)) })),
+
+  setLineDimensions: (key, widthM, heightM) =>
+    set((state) => ({
+      lines: state.lines.map((l) =>
+        l.key === key ? { ...l, widthM: widthM ?? undefined, heightM: heightM ?? undefined } : l,
+      ),
+    })),
+
   removeLine: (key) => set((state) => ({ lines: state.lines.filter((l) => l.key !== key) })),
 
   clear: () =>
-    set({ lines: [], payments: [], invoiceDiscountValue: 0, shipping: 0, redeemPoints: 0, appliedCreditAmount: 0, coupon: null, note: "" }),
+    set({
+      lines: [],
+      payments: [],
+      invoiceDiscountValue: 0,
+      shipping: 0,
+      redeemPoints: 0,
+      appliedCreditAmount: 0,
+      coupon: null,
+      note: "",
+      customFields: ["", "", "", ""],
+      additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
+      taxExemptionReasonCode: null,
+      priceListId: null,
+      payTermNumber: null,
+      payTermType: null,
+      documentPath: null,
+      documentOriginalName: null,
+    }),
 
-  setCustomer: (customer) => set({ customer, redeemPoints: 0, appliedCreditAmount: 0 }),
+  setCustomer: (customer) =>
+    set({
+      customer,
+      redeemPoints: 0,
+      appliedCreditAmount: 0,
+      // Reference's own Add Sale JS pre-fills pay_term_number/pay_term_type from whichever
+      // customer is picked - mirrored here so the header inputs start correct, though the
+      // cashier can still edit them independently afterward.
+      payTermNumber: customer?.paymentTermsDays ? customer.paymentTermsDays : null,
+      payTermType: customer?.paymentTermsDays ? (customer.payTermType ?? null) : null,
+    }),
   setInvoiceDiscount: (invoiceDiscountMode, invoiceDiscountValue) =>
     set({ invoiceDiscountMode, invoiceDiscountValue: Math.max(0, invoiceDiscountValue) }),
   setShipping: (shipping) => set({ shipping: Math.max(0, shipping) }),
@@ -171,13 +299,40 @@ export const usePosStore = create<PosState>((set) => ({
     }),
   setNote: (note) => set({ note }),
   setCoupon: (coupon) => set({ coupon }),
+  setCustomField: (index, value) =>
+    set((state) => ({ customFields: state.customFields.map((v, i) => (i === index ? value : v)) })),
+  setAdditionalExpense: (index, slot) =>
+    set((state) => ({ additionalExpenses: state.additionalExpenses.map((s, i) => (i === index ? slot : s)) })),
+  setTaxExemptionReasonCode: (code) => set({ taxExemptionReasonCode: code }),
+  setPriceListId: (id) => set({ priceListId: id }),
+  setPayTerm: (number, type) => set({ payTermNumber: number, payTermType: type }),
+  setDocument: (path, originalName) => set({ documentPath: path, documentOriginalName: originalName }),
 
   addPayment: (p) => set((state) => ({ payments: [...state.payments, { ...p, id: uid() }] })),
+  updatePayment: (id, patch) =>
+    set((state) => ({ payments: state.payments.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
   removePayment: (id) => set((state) => ({ payments: state.payments.filter((p) => p.id !== id) })),
   clearPayments: () => set({ payments: [] }),
 
   loadCart: (lines, customer) =>
-    set({ lines, customer, payments: [], invoiceDiscountValue: 0, shipping: 0, redeemPoints: 0, appliedCreditAmount: 0, coupon: null }),
+    set({
+      lines,
+      customer,
+      payments: [],
+      invoiceDiscountValue: 0,
+      shipping: 0,
+      redeemPoints: 0,
+      appliedCreditAmount: 0,
+      coupon: null,
+      customFields: ["", "", "", ""],
+      additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
+      taxExemptionReasonCode: null,
+      priceListId: null,
+      payTermNumber: null,
+      payTermType: null,
+      documentPath: null,
+      documentOriginalName: null,
+    }),
 }));
 
 export interface PosTotals {
@@ -192,6 +347,7 @@ export interface PosTotals {
   discountTotal: number; // line + invoice + coupon + points
   taxAmount: number; // final VAT actually charged (on the discounted, shipping-inclusive base)
   shipping: number;
+  additionalExpensesTotal: number; // untaxed flat pass-through charges, added after tax
   grandTotal: number;
   paid: number;
   availableCredit: number; // customer's total store credit on hand (from a negative balance)
@@ -244,7 +400,14 @@ export function selectTotals(state: PosState): PosTotals {
   const finalSubtotal = subtotalAfterInvoiceDiscount - pointsDiscountAmount + state.shipping;
   const taxAmount = finalSubtotal * effectiveTaxRate;
 
-  const grandTotal = Math.max(0, finalSubtotal + taxAmount);
+  // Additional expenses (reference's 4 fixed named slots) are untaxed flat pass-through charges,
+  // added straight onto the grand total - mirrors pos.service.ts checkout() exactly. A slot with
+  // no key is dropped (matches what's actually sent to checkout).
+  const additionalExpensesTotal = state.additionalExpenses
+    .filter((e) => e.key.trim())
+    .reduce((sum, e) => sum + e.value, 0);
+
+  const grandTotal = Math.max(0, finalSubtotal + taxAmount) + additionalExpensesTotal;
   const paid = state.payments.reduce((sum, p) => sum + p.amount, 0);
   const dueBeforeCredit = Math.max(0, grandTotal - paid);
 
@@ -265,6 +428,7 @@ export function selectTotals(state: PosState): PosTotals {
     discountTotal: roundMoney(lineDiscountTotal + invoiceDiscountAmount + couponDiscountAmount + pointsDiscountAmount),
     taxAmount: roundMoney(taxAmount),
     shipping: roundMoney(state.shipping),
+    additionalExpensesTotal: roundMoney(additionalExpensesTotal),
     grandTotal: roundMoney(grandTotal),
     paid: roundMoney(paid),
     availableCredit: roundMoney(availableCredit),

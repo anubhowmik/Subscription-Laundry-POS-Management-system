@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Wallet, Lock } from "lucide-react";
 import { useCurrentRegisterSession, useOpenRegister, useCloseRegister } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
 import { Button } from "../../components/ui/Button";
@@ -41,8 +42,9 @@ export function RegisterSessionBar({ businessLocationId, currency, locale, isAr,
           </span>
           <button
             onClick={() => setCloseModalOpen(true)}
-            className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-600 transition-colors hover:bg-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+            className="flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-600 transition-colors hover:bg-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
           >
+            <Lock className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
             {isAr ? "إغلاق الصندوق" : "Close Register"}
           </button>
         </>
@@ -54,8 +56,9 @@ export function RegisterSessionBar({ businessLocationId, currency, locale, isAr,
           </span>
           <button
             onClick={() => setOpenModalOpen(true)}
-            className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+            className="flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
           >
+            <Wallet className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
             {isAr ? "فتح الصندوق" : "Open Register"}
           </button>
         </>

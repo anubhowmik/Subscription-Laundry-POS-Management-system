@@ -1,6 +1,7 @@
 import { prisma } from "../../config/prisma";
 import { encryptSecret, decryptSecret } from "../../utils/secretBox";
 import { sendUnifonicSms } from "./unifonicAdapter";
+import { getEmailSender } from "./emailSender";
 import { NOTIFICATION_TEMPLATE_DEFS, type NotificationTemplateDef } from "../../config/notificationTemplates";
 
 type NotificationTrigger = NotificationTemplateDef["trigger"];
@@ -108,6 +109,68 @@ export async function sendTemplatedSms(
   const message = `${fill(template.messageEn)}\n${fill(template.messageAr)}`;
 
   await sendSms(organizationId, toPhone, message, referenceType, referenceId);
+}
+
+/**
+ * Same template-load-and-substitute pipeline as sendTemplatedSms(), but for the "Send
+ * Notification" row action's email channel (QuotesPage.tsx) - the first trigger sent by email in
+ * this app, so there's no per-trigger customizable subject line yet (see notificationTemplates.ts
+ * comment); `subject` is provided by the caller instead, with placeholders already substituted
+ * into it just like the body. Never throws - a failed notification must never block the row
+ * action that triggered it; logs a NotificationLog row either way, same as sendSms().
+ */
+export async function sendTemplatedEmail(
+  organizationId: string,
+  trigger: NotificationTrigger,
+  toEmail: string,
+  subject: string,
+  placeholders: Record<string, string>,
+  referenceType?: string,
+  referenceId?: string,
+) {
+  const row = await prisma.notificationTemplate.findUnique({ where: { organizationId_trigger: { organizationId, trigger } } });
+  if (row && !row.isEnabled) return;
+
+  const def = NOTIFICATION_TEMPLATE_DEFS.find((d) => d.trigger === trigger)!;
+  const template = row ?? def;
+
+  function fill(text: string) {
+    let out = text;
+    for (const [key, value] of Object.entries(placeholders)) {
+      out = out.split(`{${key}}`).join(value);
+    }
+    return out;
+  }
+
+  // Same "send both languages together" reasoning as sendTemplatedSms() - no per-customer
+  // language preference exists in the schema yet.
+  const bodyEn = fill(template.messageEn);
+  const bodyAr = fill(template.messageAr);
+  const text = `${bodyEn}\n\n${bodyAr}`;
+  const html = `<p>${bodyEn}</p><hr/><p dir="rtl">${bodyAr}</p>`;
+
+  try {
+    await getEmailSender().send({ to: toEmail, subject, text, html });
+    await prisma.notificationLog.create({
+      // toPhone holds the recipient email here - NotificationLog predates any non-SMS channel and
+      // has no separate toEmail column; reusing it keeps one log table for both channels rather
+      // than a schema split for a single trigger.
+      data: { organizationId, toPhone: toEmail, message: text, status: "SENT", provider: "RESEND", referenceType, referenceId },
+    });
+  } catch (err) {
+    await prisma.notificationLog.create({
+      data: {
+        organizationId,
+        toPhone: toEmail,
+        message: text,
+        status: "FAILED",
+        provider: "RESEND",
+        referenceType,
+        referenceId,
+        errorMessage: err instanceof Error ? err.message : "Unknown error sending email",
+      },
+    });
+  }
 }
 
 /**
