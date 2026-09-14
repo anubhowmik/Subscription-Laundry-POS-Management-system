@@ -8,5 +8,6 @@ router.use(authenticate);
 router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_product"));
 
 router.get("/summary", controller.getSummary);
+router.get("/sales-overview", controller.getSalesOverview);
 
 export default router;

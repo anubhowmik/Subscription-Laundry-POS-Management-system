@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Sparkline } from "./Sparkline";
 
 /**
  * The KPI-tile pattern: a solid-color icon square (white glyph) on the start side, label+value+
@@ -20,6 +21,8 @@ export function StatCard({
   trendLabel,
   warn,
   highlight,
+  sparkline,
+  sparklineColor = "#263BAA",
 }: {
   icon: LucideIcon;
   /** Literal Tailwind classes, written out at each call site so the static scanner can see them. */
@@ -32,11 +35,17 @@ export function StatCard({
   trendLabel?: string;
   warn?: boolean;
   highlight?: boolean;
+  /** Reference dashboard's own mini-squiggle under each KPI tile - last-N-days values for this
+   * exact metric, oldest first. Omit entirely when there's no real series behind it. */
+  sparkline?: number[];
+  /** Hex color for the sparkline stroke - defaults to the brand indigo; pass "#fff" (or similar)
+   * on a `highlight`ed card so it reads against the solid-fill background. */
+  sparklineColor?: string;
 }) {
   const hasTrend = trendPct !== null && trendPct !== undefined;
   return (
     <div
-      className={`group relative flex items-center gap-3.5 overflow-hidden rounded-2xl p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${cardBg}`}
+      className={`group relative flex items-center gap-3.5 overflow-hidden rounded-2xl p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${sparkline ? "pb-9" : ""} ${cardBg}`}
     >
       {/* The coloring animation: a blurred clone of the icon's own color blooms in behind it on
           hover - same technique as the Home launcher cards' hover glow, but driven entirely by
@@ -86,6 +95,11 @@ export function StatCard({
         </div>
         {trendLabel && <p className={`mt-0.5 truncate text-[11px] ${highlight ? "text-white/60" : "text-slate-400"}`}>{trendLabel}</p>}
       </div>
+      {sparkline && sparkline.length >= 2 && (
+        <div className="pointer-events-none absolute inset-x-4 bottom-2 h-6 opacity-70">
+          <Sparkline values={sparkline} color={highlight ? "#ffffff" : sparklineColor} height={24} />
+        </div>
+      )}
     </div>
   );
 }
