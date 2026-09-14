@@ -3,6 +3,8 @@ import { getParam } from "../../utils/params";
 import * as service from "./customer.service";
 import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
+import { parseSpreadsheetFile } from "../../utils/spreadsheet";
+import { AppError } from "../../utils/AppError";
 
 function accessScope(req: Request) {
   return req.user!.isSystemAdmin
@@ -42,10 +44,26 @@ export async function deactivate(req: Request, res: Response) {
   return sendSuccess(res, customer, "Customer deactivated");
 }
 
+export async function activate(req: Request, res: Response) {
+  const customer = await service.activate(getParam(req, "id"), req.user!.organizationId);
+  await writeAuditLog({ req, action: "ACTIVATE", module: "customers", entityId: customer.id });
+  return sendSuccess(res, customer, "Customer activated");
+}
+
 export async function setApprovalStatus(req: Request, res: Response) {
   const customer = await service.setApprovalStatus(getParam(req, "id"), req.body.status, req.user!.organizationId);
   await writeAuditLog({ req, action: "UPDATE", module: "customer_approval", entityId: customer.id, newValues: customer });
   return sendSuccess(res, customer, "Customer approval status updated");
+}
+
+export async function importCustomers(req: Request, res: Response) {
+  if (!req.file) throw new AppError(400, "No file was uploaded");
+  const sheet = await parseSpreadsheetFile(req.file.buffer, req.file.originalname);
+  const result = await service.importCustomers(sheet, req.user!.organizationId);
+  if (result.imported > 0) {
+    await writeAuditLog({ req, action: "CREATE", module: "customers_import", newValues: { imported: result.imported } });
+  }
+  return sendSuccess(res, result, result.errors.length > 0 ? "Import failed - fix the errors and try again" : "Customers imported");
 }
 
 export async function applyCreditToSale(req: Request, res: Response) {

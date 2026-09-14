@@ -11,9 +11,26 @@ export const createCustomerGroupSchema = z.object({
   maxAmountPerMonth: z.number().min(0).optional().nullable(),
   maxInvoicesPerMonth: z.number().int().positive().optional().nullable(),
   maxQtyPerMonth: z.number().min(0).optional().nullable(),
+  maxFor: z.enum(["CUSTOMER", "COMPANY"]).optional().nullable(),
+  defaultAccountId: z.string().uuid().optional().nullable(),
+  priceCalculationType: z.enum(["PERCENTAGE", "SELLING_PRICE_GROUP"]).optional(),
+  isCorporate: z.boolean().optional(),
+  taxNumber: z.string().optional().nullable(),
+  sendSms: z.boolean().optional(),
+  priceEditable: z.boolean().optional(),
+  invoiceType: z.enum(["DELIVERY", "FINAL"]).optional(),
 });
 
 export const updateCustomerGroupSchema = createCustomerGroupSchema.partial();
+
+export const payGroupDueSchema = z.object({
+  businessLocationId: z.string().uuid(),
+  paymentMethodId: z.string().uuid(),
+  amount: z.number().positive("Amount must be greater than zero"),
+  referenceNumber: z.string().optional(),
+  notes: z.string().optional(),
+  paymentDate: z.string().optional(),
+});
 
 export const listCustomerGroupQuerySchema = z.object({
   page: z.string().optional(),
@@ -22,4 +39,7 @@ export const listCustomerGroupQuerySchema = z.object({
   sortOrder: z.string().optional(),
   search: z.string().optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  isCorporate: z.string().optional(),
+  priceCalculationType: z.enum(["PERCENTAGE", "SELLING_PRICE_GROUP"]).optional(),
+  invoiceType: z.enum(["DELIVERY", "FINAL"]).optional(),
 });

@@ -31,3 +31,20 @@ export async function deactivate(req: Request, res: Response) {
   await writeAuditLog({ req, action: "DEACTIVATE", module: "customer_groups", entityId: group.id });
   return sendSuccess(res, group, "Customer group deactivated");
 }
+
+export async function activate(req: Request, res: Response) {
+  const group = await service.activate(getParam(req, "id"), req.user!.organizationId);
+  await writeAuditLog({ req, action: "UPDATE", module: "customer_groups", entityId: group.id, newValues: group });
+  return sendSuccess(res, group, "Customer group activated");
+}
+
+export async function getDue(req: Request, res: Response) {
+  return sendSuccess(res, await service.getDue(getParam(req, "id"), req.user!.organizationId));
+}
+
+export async function payDue(req: Request, res: Response) {
+  const id = getParam(req, "id");
+  const result = await service.payDue(id, req.body, req.user!.organizationId, req.user!.id);
+  await writeAuditLog({ req, action: "CREATE", module: "customer_groups", entityId: id, newValues: result });
+  return sendSuccess(res, result, "Payment recorded");
+}

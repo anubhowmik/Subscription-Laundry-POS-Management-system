@@ -3,6 +3,8 @@ import { getParam } from "../../utils/params";
 import * as service from "./supplier.service";
 import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
+import { parseSpreadsheetFile } from "../../utils/spreadsheet";
+import { AppError } from "../../utils/AppError";
 
 export async function list(req: Request, res: Response) {
   const { data, meta } = await service.list(req.query, req.user!.organizationId);
@@ -34,4 +36,20 @@ export async function deactivate(req: Request, res: Response) {
   const supplier = await service.deactivate(getParam(req, "id"), req.user!.organizationId);
   await writeAuditLog({ req, action: "DEACTIVATE", module: "suppliers", entityId: supplier.id });
   return sendSuccess(res, supplier, "Supplier deactivated");
+}
+
+export async function activate(req: Request, res: Response) {
+  const supplier = await service.activate(getParam(req, "id"), req.user!.organizationId);
+  await writeAuditLog({ req, action: "ACTIVATE", module: "suppliers", entityId: supplier.id });
+  return sendSuccess(res, supplier, "Supplier activated");
+}
+
+export async function importSuppliers(req: Request, res: Response) {
+  if (!req.file) throw new AppError(400, "No file was uploaded");
+  const sheet = await parseSpreadsheetFile(req.file.buffer, req.file.originalname);
+  const result = await service.importSuppliers(sheet, req.user!.organizationId);
+  if (result.imported > 0) {
+    await writeAuditLog({ req, action: "CREATE", module: "suppliers_import", newValues: { imported: result.imported } });
+  }
+  return sendSuccess(res, result, result.errors.length > 0 ? "Import failed - fix the errors and try again" : "Suppliers imported");
 }
