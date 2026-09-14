@@ -46,7 +46,14 @@ interface SaleItemDetail {
 
 interface SaleDetail {
   id: string;
-  invoiceNumber: string;
+  // Null on a DRAFT quote/delivery until confirmed - quoteNumber/deliveryNumber fill in for the
+  // title in that case, same resolution as InvoiceDocument.tsx's displayNumber. This modal is also
+  // used as the "View" row action on List Deliveries/Quotes (QuotesPage.tsx), not just finalized
+  // sales, since fulfillment-status tracking on a still-open delivery ticket is a real workflow.
+  invoiceNumber: string | null;
+  quoteNumber: string | null;
+  deliveryNumber: string | null;
+  isQuotation: boolean;
   totalAmount: string;
   items: SaleItemDetail[];
   customer: { nameEn: string; nameAr: string | null };
@@ -77,9 +84,11 @@ export function SaleDetailModal({ saleId, onClose }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sale-detail", saleId] }),
   });
 
+  const displayNumber = sale ? sale.invoiceNumber ?? (sale.isQuotation ? sale.quoteNumber : sale.deliveryNumber) : null;
+
   return (
     <Modal
-      title={sale?.invoiceNumber ?? "…"}
+      title={displayNumber ?? "…"}
       subtitle={sale ? (isAr ? sale.customer.nameAr || sale.customer.nameEn : sale.customer.nameEn) : undefined}
       onClose={onClose}
       size="lg"
