@@ -17,10 +17,13 @@ import { Badge } from "../../components/ui/Badge";
 import { Modal } from "../../components/ui/Modal";
 import { Alert } from "../../components/ui/Alert";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, Table, THead, Th } from "../../components/ui/Table";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { LoadingState } from "../../components/ui/Spinner";
 import { labelClass, inputClass, selectClass, errorTextClass } from "../../components/ui/formClasses";
-import { Building2, CheckCircle2 } from "lucide-react";
+import { Building2, CheckCircle2, Pencil, FileText, Power } from "lucide-react";
+import type { ReactNode } from "react";
 
 const schema = z.object({
   businessNameEn: z.string().min(1, "Required"),
@@ -71,6 +74,23 @@ export default function BusinessLocationsPage() {
   const { data: locations } = useQuery({
     queryKey: ["all-business-locations-admin"],
     queryFn: async () => (await api.get<ApiSuccess<BusinessLocation[]>>("/business-locations", { params: { limit: 100 } })).data.data,
+  });
+
+  // A business's branch list is inherently small (capped by the plan's maxBranches) and always
+  // fetched in full - no server pagination needed, so sorting/exporting happens client-side over
+  // whatever's already loaded, unlike the bigger paginated lists (Suppliers, Sales, etc).
+  const [sortBy, setSortBy] = useState<"branchName" | "branchCode">("branchName");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  function handleSort(field: string) {
+    if (sortBy === field) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(field as "branchName" | "branchCode");
+      setSortOrder("asc");
+    }
+  }
+  const sortedLocations = [...(locations ?? [])].sort((a, b) => {
+    const cmp = a[sortBy].localeCompare(b[sortBy]);
+    return sortOrder === "asc" ? cmp : -cmp;
   });
 
   // Only shown when the plan actually caps branches (null = unlimited) - lets an admin see where
@@ -239,6 +259,27 @@ export default function BusinessLocationsPage() {
     setServerError(null);
   }
 
+  const columns: { key: string; label: string; sortField?: string; render: (loc: BusinessLocation) => ReactNode; exportValue: (loc: BusinessLocation) => string | number | null }[] = [
+    { key: "branchName", label: "Branch", sortField: "branchName", render: (loc) => loc.branchName, exportValue: (loc) => loc.branchName },
+    { key: "branchCode", label: "Code", sortField: "branchCode", render: (loc) => <span className="ltr-nums">{loc.branchCode}</span>, exportValue: (loc) => loc.branchCode },
+    { key: "group", label: "Group", render: (loc) => loc.group?.nameEn ?? "-", exportValue: (loc) => loc.group?.nameEn ?? null },
+    {
+      key: "vatNumber",
+      label: "VAT Number",
+      render: (loc) => <span className="ltr-nums">{loc.vatNumber ?? <span className="text-amber-600">Missing</span>}</span>,
+      exportValue: (loc) => loc.vatNumber,
+    },
+    { key: "crNumber", label: "CR Number", render: (loc) => <span className="ltr-nums">{loc.crNumber ?? "-"}</span>, exportValue: (loc) => loc.crNumber },
+    {
+      key: "status",
+      label: t("common.status"),
+      render: (loc) => <Badge variant={loc.status === "ACTIVE" ? "success" : "neutral"}>{loc.status}</Badge>,
+      exportValue: (loc) => loc.status,
+    },
+  ];
+  const columnVisibility = useColumnVisibility("business-locations", columns.map((c) => c.key));
+  const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -292,56 +333,66 @@ export default function BusinessLocationsPage() {
       )}
 
       <TableContainer>
-        <Table>
-          <THead>
-            <tr>
-              <Th>Branch</Th>
-              <Th>Code</Th>
-              <Th>Group</Th>
-              <Th>VAT Number</Th>
-              <Th>CR Number</Th>
-              <Th>{t("common.status")}</Th>
-              <Th>{t("common.actions")}</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {locations?.map((loc) => (
-              <tr key={loc.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                <td className="px-4 py-3">{loc.branchName}</td>
-                <td className="px-4 py-3"><span className="ltr-nums">{loc.branchCode}</span></td>
-                <td className="px-4 py-3 text-slate-500">{loc.group?.nameEn ?? "-"}</td>
-                <td className="px-4 py-3">
-                  <span className="ltr-nums">{loc.vatNumber ?? <span className="text-amber-600">Missing</span>}</span>
-                </td>
-                <td className="px-4 py-3"><span className="ltr-nums">{loc.crNumber ?? "-"}</span></td>
-                <td className="px-4 py-3">
-                  <Badge variant={loc.status === "ACTIVE" ? "success" : "neutral"}>{loc.status}</Badge>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <button onClick={() => openEdit(loc)} className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100">
-                      {t("common.edit")}
-                    </button>
-                    <button onClick={() => setLayoutEditing(loc)} className="rounded-lg px-2 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100">
-                      Invoice Layout
-                    </button>
-                    {user?.isSystemAdmin && (
-                      <button
-                        onClick={() => statusMutation.mutate({ id: loc.id, nextStatus: loc.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" })}
-                        disabled={statusMutation.isPending}
-                        className={`rounded-lg px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
-                          loc.status === "ACTIVE" ? "text-red-600 hover:bg-red-50" : "text-emerald-600 hover:bg-emerald-50"
-                        }`}
-                      >
-                        {loc.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
-                      </button>
-                    )}
-                  </div>
-                </td>
+        <TableToolbar>
+          <div className="ms-auto flex items-center gap-1.5">
+            <ColumnVisibilityMenu
+              columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+              isVisible={columnVisibility.isVisible}
+              onToggle={columnVisibility.toggle}
+              isAr={false}
+            />
+            <TableExportButtons
+              title="Business Locations"
+              columns={visibleColumns.map((c) => ({ key: c.key, label: c.label }))}
+              getRows={async () => sortedLocations.map((loc) => Object.fromEntries(visibleColumns.map((c) => [c.key, c.exportValue(loc)])))}
+              isAr={false}
+            />
+          </div>
+        </TableToolbar>
+        <TableScroll>
+          <Table>
+            <THead>
+              <tr>
+                {visibleColumns.map((c) =>
+                  c.sortField ? (
+                    <SortableTh key={c.key} field={c.sortField} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort}>
+                      {c.label}
+                    </SortableTh>
+                  ) : (
+                    <Th key={c.key}>{c.label}</Th>
+                  ),
+                )}
+                <Th>{t("common.actions")}</Th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </THead>
+            <tbody>
+              {sortedLocations.map((loc) => (
+                <tr key={loc.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                  {visibleColumns.map((c) => (
+                    <td key={c.key} className="px-4 py-3">
+                      {c.render(loc)}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3">
+                    <RowActions>
+                      <RowActionButton icon={Pencil} label={t("common.edit")} onClick={() => openEdit(loc)} />
+                      <RowActionButton icon={FileText} label="Invoice Layout" onClick={() => setLayoutEditing(loc)} />
+                      {user?.isSystemAdmin && (
+                        <RowActionButton
+                          icon={Power}
+                          label={loc.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
+                          variant={loc.status === "ACTIVE" ? "danger" : "success"}
+                          disabled={statusMutation.isPending}
+                          onClick={() => statusMutation.mutate({ id: loc.id, nextStatus: loc.status === "ACTIVE" ? "INACTIVE" : "ACTIVE" })}
+                        />
+                      )}
+                    </RowActions>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableScroll>
       </TableContainer>
 
       {(editing || creating) && (

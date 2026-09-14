@@ -122,11 +122,15 @@ export async function reactivate(id: string, organizationId: string, isSystemAdm
   return prisma.businessLocation.update({ where: { id }, data: { status: "ACTIVE" } });
 }
 
-/** Returns null (not a default row) when the branch hasn't customized anything yet - the
- * frontend already knows how to render a fully-default layout without a row existing. */
+/** Gets/updates this branch's DEFAULT invoice layout - unchanged behavior for existing callers
+ * (BusinessLocationsPage.tsx's per-branch modal) even though InvoiceLayoutSettings is now a real
+ * named catalog with possibly several rows per branch (see the accounting/invoiceLayouts plan -
+ * multiple named layouts, one flagged isDefault). See invoiceLayouts module for full CRUD across
+ * every layout, not just the default one. Returns null when the branch hasn't customized
+ * anything yet - the frontend already knows how to render a fully-default layout without a row. */
 export async function getInvoiceLayout(id: string, organizationId: string) {
   await getById(id, organizationId);
-  return prisma.invoiceLayoutSettings.findUnique({ where: { businessLocationId: id } });
+  return prisma.invoiceLayoutSettings.findFirst({ where: { businessLocationId: id, isDefault: true } });
 }
 
 export async function upsertInvoiceLayout(id: string, input: InvoiceLayoutSettingsInput, organizationId: string) {
@@ -135,9 +139,9 @@ export async function upsertInvoiceLayout(id: string, input: InvoiceLayoutSettin
   // would be ambiguous with "field not provided" for Prisma's typing here.
   const labelOverrides =
     input.labelOverrides === null ? Prisma.JsonNull : input.labelOverrides === undefined ? undefined : input.labelOverrides;
-  return prisma.invoiceLayoutSettings.upsert({
-    where: { businessLocationId: id },
-    create: { businessLocationId: id, ...input, labelOverrides },
-    update: { ...input, labelOverrides },
-  });
+  const existing = await prisma.invoiceLayoutSettings.findFirst({ where: { businessLocationId: id, isDefault: true } });
+  if (existing) {
+    return prisma.invoiceLayoutSettings.update({ where: { id: existing.id }, data: { ...input, labelOverrides } });
+  }
+  return prisma.invoiceLayoutSettings.create({ data: { businessLocationId: id, isDefault: true, ...input, labelOverrides } });
 }
