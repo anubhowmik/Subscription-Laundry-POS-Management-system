@@ -32,7 +32,10 @@ import PriceListsPage from "./pages/priceLists/PriceListsPage";
 import CustomerGroupsPage from "./pages/customerGroups/CustomerGroupsPage";
 import ImportContactsPage from "./pages/importContacts/ImportContactsPage";
 import ReportsPage from "./pages/reports/ReportsPage";
-import InventoryPage from "./pages/inventory/InventoryPage";
+import StockAdjustmentsPage from "./pages/inventory/StockAdjustmentsPage";
+import StockAdjustmentCreatePage from "./pages/inventory/StockAdjustmentCreatePage";
+import StockTransfersPage from "./pages/inventory/StockTransfersPage";
+import StockTransferCreatePage from "./pages/inventory/StockTransferCreatePage";
 import CompensationsPage from "./pages/compensations/CompensationsPage";
 import BookingsPage from "./pages/bookings/BookingsPage";
 import NotificationSettingsPage from "./pages/notifications/NotificationSettingsPage";
@@ -42,6 +45,8 @@ import SuppliersPage from "./pages/suppliers/SuppliersPage";
 import PurchasesPage from "./pages/purchases/PurchasesPage";
 import ExpensesPage from "./pages/expenses/ExpensesPage";
 import InventoryPostingsPage from "./pages/inventoryPostings/InventoryPostingsPage";
+import InventoryPostingFormPage from "./pages/inventoryPostings/InventoryPostingFormPage";
+import ClassifiedSalesListPage from "./pages/inventoryPostings/ClassifiedSalesListPage";
 import RegisterSessionsPage from "./pages/registerSessions/RegisterSessionsPage";
 import MessagesPage from "./pages/messages/MessagesPage";
 import AnnouncementsPage from "./pages/announcements/AnnouncementsPage";
@@ -224,8 +229,20 @@ export default function App() {
             <Route element={<PermissionRoute anyOf={["products.view"]} />}>
               <Route path="products" element={<ProductsPage />} />
             </Route>
-            <Route element={<PermissionRoute anyOf={["inventory.view", "inventory.adjust", "inventory.transfer"]} />}>
-              <Route path="inventory" element={<InventoryPage />} />
+            {/* Matches the EJADA reference's own separate "Stock Adjustment"/"Stock Transfers"
+                dropdowns (each its own top-level menu, not a shared "Inventory" screen) - see
+                Sidebar.tsx's stockAdjustments/stockTransfers NavSections. */}
+            <Route element={<PermissionRoute anyOf={["inventory.view", "inventory.adjust"]} />}>
+              <Route path="stock-adjustments" element={<StockAdjustmentsPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["inventory.adjust"]} />}>
+              <Route path="stock-adjustments/create" element={<StockAdjustmentCreatePage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["inventory.view", "inventory.transfer"]} />}>
+              <Route path="stock-transfers" element={<StockTransfersPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["inventory.transfer"]} />}>
+              <Route path="stock-transfers/create" element={<StockTransferCreatePage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["suppliers.manage"]} />}>
               <Route path="suppliers" element={<SuppliersPage />} />
@@ -235,6 +252,13 @@ export default function App() {
             </Route>
             <Route element={<PermissionRoute anyOf={["inventory_postings.manage"]} />}>
               <Route path="inventory-postings" element={<InventoryPostingsPage />} />
+              <Route path="inventory-postings/create" element={<InventoryPostingFormPage />} />
+              <Route path="inventory-postings/inventory" element={<ClassifiedSalesListPage titleEn="Inventory" titleAr="المخزون" statusFilter="IN_STOCK,IN_WAREHOUSE" />} />
+              <Route
+                path="inventory-postings/warehouse-invoices"
+                element={<ClassifiedSalesListPage titleEn="Warehouse Invoices" titleAr="فواتير المستودع" statusFilter="IN_WAREHOUSE" />}
+              />
+              <Route path="inventory-postings/:id" element={<InventoryPostingFormPage />} />
             </Route>
           </Route>
 

@@ -158,6 +158,15 @@ enum InventoryPostingStatus {
   CONFIRMED
 }
 
+// Which bucket a classified sale was placed into when it was added to an Inventory Posting -
+// matches the reference's own 3-button classify action (InventoryPostingController@create's
+// $("#status") in_stock/out_stock/in_warehouse) exactly.
+enum InventoryPostingSaleStatus {
+  IN_STOCK
+  OUT_STOCK
+  IN_WAREHOUSE
+}
+
 // The reference site's "Announcements" module: a date-ranged notice, optionally scoped to one
 // business location (null = all locations), with a published/draft toggle.
 model Announcement {
@@ -1556,6 +1565,7 @@ model StockAdjustment {
   organizationId       String
   businessLocationId   String
   adjustmentNumber     String? // human-readable, e.g. ADJ-000001 - claimed from BusinessLocation.lastAdjustmentSeq
+  refNo                String? // reference's own free-text "Ref No" field (StockAdjustmentController's ref_no) - user's own external reference, distinct from adjustmentNumber
   adjustmentDate       DateTime                @default(now())
   lossType             StockAdjustmentLossType @default(NORMAL)
   totalAmountRecovered Decimal                 @default(0) @db.Decimal(12, 2) // meaningful only when lossType is ABNORMAL
@@ -1833,16 +1843,16 @@ model Sale {
   // or a later edit can see which price list actually priced this specific invoice, same as the
   // reference's own `selling_price_group_id` column. Null means the customer/location default was
   // used, unchanged from every prior round's behavior.
-  priceListId  String?
+  priceListId          String?
   // Pay Term entered on Add Sale (pre-filled from the customer's own configured term, but
   // independently editable per-invoice, matching the reference's `pay_term_number`/`pay_term_type`
   // fields) - used only to compute dueDate below; does not alter the customer's own stored term.
-  payTermNumber Int?
-  payTermType   PayTermType?
+  payTermNumber        Int?
+  payTermType          PayTermType?
   // Reference's own `sell_due_date` - computed client-side from payTermNumber/payTermType against
   // saleDate and sent as one concrete date, not recomputed server-side from the two parts (matches
   // the reference's own store()-time behavior exactly). Null when no pay term was set.
-  dueDate       DateTime?
+  dueDate              DateTime?
   // Reference's own "Attach Document" upload (`sell_document`, max 9MB, pdf/csv/zip/doc/docx/
   // jpeg/jpg/png) - uploaded separately via POST /sales/documents BEFORE checkout (this endpoint
   // is plain JSON, not multipart), then referenced here by the path that upload returned. See
@@ -1868,13 +1878,13 @@ model Sale {
   zatcaSubmittedAt    DateTime? // when we last called Clearance/Reporting for this invoice (Phase D)
   zatcaResponseRaw    Json? // full raw response from ZATCA's Clearance/Reporting API, for audit
 
-  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation     BusinessLocation      @relation(fields: [businessLocationId], references: [id])
-  customer             Customer              @relation(fields: [customerId], references: [id])
-  createdByUser        User                  @relation(fields: [createdBy], references: [id])
-  registerSession      RegisterSession?      @relation(fields: [registerSessionId], references: [id])
-  coupon               Coupon?               @relation(fields: [couponId], references: [id])
-  priceList            PriceList?            @relation(fields: [priceListId], references: [id])
+  organization         Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation     BusinessLocation       @relation(fields: [businessLocationId], references: [id])
+  customer             Customer               @relation(fields: [customerId], references: [id])
+  createdByUser        User                   @relation(fields: [createdBy], references: [id])
+  registerSession      RegisterSession?       @relation(fields: [registerSessionId], references: [id])
+  coupon               Coupon?                @relation(fields: [couponId], references: [id])
+  priceList            PriceList?             @relation(fields: [priceListId], references: [id])
   items                SaleItem[]
   payments             Payment[]
   compensations        Compensation[]
@@ -1882,6 +1892,7 @@ model Sale {
   cashbackTransactions CashbackTransaction[]
   sellReturns          SellReturn[]
   bnplSession          BnplSession?
+  inventoryPostings    InventoryPostingSale[]
 
   // Scoped to the branch, not the org - invoiceNumber/quoteNumber are now claimed from a
   // per-BusinessLocation counter (P7-5), so two different branches can legitimately produce the
@@ -1941,21 +1952,21 @@ model SaleItem {
 // would. `refundedAmount` may be less than `totalAmount` (e.g. store credit instead of cash) -
 // the customer balance adjustment nets the two (see sellReturn.service.ts).
 model SellReturn {
-  id                 String   @id @default(uuid())
+  id                 String        @id @default(uuid())
   organizationId     String
   saleId             String
   customerId         String
   businessLocationId String
   creditNoteNumber   String? // human-readable, e.g. CN-000001 - claimed from BusinessLocation.lastReturnSeq (P7-5)
-  returnDate         DateTime @default(now())
-  subtotal           Decimal  @db.Decimal(12, 2)
+  returnDate         DateTime      @default(now())
+  subtotal           Decimal       @db.Decimal(12, 2)
   // Return-level discount (reference's own discount_type/discount_amount on the return form),
   // netted into `subtotal` the exact same way Sale.invoiceDiscountAmount is - stores only the
   // resulting amount, not the fixed/percentage mode used to compute it.
-  discountAmount     Decimal  @default(0) @db.Decimal(12, 2)
-  taxAmount          Decimal  @db.Decimal(12, 2)
-  totalAmount        Decimal  @db.Decimal(12, 2)
-  refundedAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  discountAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount          Decimal       @db.Decimal(12, 2)
+  totalAmount        Decimal       @db.Decimal(12, 2)
+  refundedAmount     Decimal       @default(0) @db.Decimal(12, 2)
   // Reference's own `payment_status` on a sell_return transaction (has the store actually paid
   // the customer back yet?) - reuses the exact same PaymentStatus enum Sale already uses, computed
   // once at create() time from refundedAmount vs totalAmount (see sellReturn.service.ts). A stored,
@@ -1965,7 +1976,7 @@ model SellReturn {
   paymentStatus      PaymentStatus @default(DUE)
   notes              String?
   createdBy          String
-  createdAt          DateTime @default(now())
+  createdAt          DateTime      @default(now())
 
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sale             Sale             @relation(fields: [saleId], references: [id])
@@ -2012,7 +2023,7 @@ model SellReturnItem {
 // ---------------------------------------------------------------------------
 
 model Supplier {
-  id                     String     @id @default(uuid())
+  id                     String       @id @default(uuid())
   organizationId         String
   code                   String // the reference app's "Contact ID" - auto-generated (SUP-00001) but overridable by the user at creation, see supplier.service.ts's create()
   // nameEn is always populated (required everywhere else in the system - invoices, purchase
@@ -2023,7 +2034,7 @@ model Supplier {
   // businessName for "business" - rather than being a second, independently-typed field.
   nameEn                 String
   nameAr                 String?
-  contactType            String     @default("individual") // "individual" | "business" - the reference's own value strings
+  contactType            String       @default("individual") // "individual" | "business" - the reference's own value strings
   prefix                 String? // individual-only: Mr / Mrs / Miss
   firstName              String? // individual-only
   middleName             String? // individual-only
@@ -2039,8 +2050,8 @@ model Supplier {
   // - allowExpeditedDiscount: in the reference, gates an early-payment discount (pay within N
   //   days of the transaction -> automatic % off), controlled by org-wide settings
   //   (enable_expedited_payments/days/percent) this app doesn't have either. Same status.
-  globalCustomer         Boolean    @default(false)
-  allowExpeditedDiscount Boolean    @default(false)
+  globalCustomer         Boolean      @default(false)
+  allowExpeditedDiscount Boolean      @default(false)
   phone                  String
   altPhone               String?
   landline               String?
@@ -2064,11 +2075,11 @@ model Supplier {
   crNumber               String?
   nationalAddress        String?
   notes                  String?
-  creditLimit            Decimal    @default(0) @db.Decimal(12, 2)
-  paymentTermsDays       Int        @default(0)
+  creditLimit            Decimal      @default(0) @db.Decimal(12, 2)
+  paymentTermsDays       Int          @default(0)
   payTermType            PayTermType?
-  openingBalance         Decimal    @default(0) @db.Decimal(12, 2)
-  balance                Decimal    @default(0) @db.Decimal(12, 2) // positive = we owe the supplier (Purchase Due)
+  openingBalance         Decimal      @default(0) @db.Decimal(12, 2)
+  balance                Decimal      @default(0) @db.Decimal(12, 2) // positive = we owe the supplier (Purchase Due)
   // Generic per-organization custom fields, shared label config with Customer (Organization's
   // contactCustomFieldNLabel) - see reference's shared `custom_labels['contact']` config.
   customField1           String?
@@ -2081,10 +2092,10 @@ model Supplier {
   customField8           String?
   customField9           String?
   customField10          String?
-  status                 UserStatus @default(ACTIVE)
+  status                 UserStatus   @default(ACTIVE)
   createdBy              String?
-  createdAt              DateTime   @default(now())
-  updatedAt              DateTime   @updatedAt
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
   deletedAt              DateTime?
 
   organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2283,9 +2294,10 @@ model Expense {
   @@index([businessLocationId])
 }
 
-// A periodic branch reconciliation snapshot - counts/totals are computed server-side at save
-// time from live Sale/SaleItem state (see inventoryPosting.service.ts), not entered by hand, so
-// the record is a trustworthy audit trail rather than something a cashier could fudge.
+// A periodic branch reconciliation - staff search for "ready" sales (see computeShippingStatus()
+// in sale.service.ts) within a date range, manually classify each one into In Stock / Out Stock /
+// In Warehouse (InventoryPostingSale below), and record a cash-in-drawer count alongside it.
+// Matches the reference's own InventoryPostingController exactly, not an auto-computed snapshot.
 model InventoryPosting {
   id                 String                 @id @default(uuid())
   organizationId     String
@@ -2293,23 +2305,45 @@ model InventoryPosting {
   postingDate        DateTime               @default(now())
   status             InventoryPostingStatus @default(PENDING)
   cashInDrawer       Decimal                @default(0) @db.Decimal(12, 2)
-  inStockCount       Int                    @default(0)
-  inStockTotal       Decimal                @default(0) @db.Decimal(12, 2)
-  inWarehouseCount   Int                    @default(0)
-  inWarehouseTotal   Decimal                @default(0) @db.Decimal(12, 2)
-  outStockCount      Int                    @default(0)
-  outStockTotal      Decimal                @default(0) @db.Decimal(12, 2)
+  // Reference's own search-box fields on the create/edit screen (date range + which employees
+  // worked the count) - kept on the posting record itself since the reference persists them
+  // alongside the classified result, not just as a transient search filter.
+  employeeIds        String[]               @default([])
+  searchDateFrom     DateTime?
+  searchDateTo       DateTime?
+  // Set once reconcile() runs (InventoryPostingController@reconcile) - after this, the posting's
+  // OutStock sales are considered settled and the posting itself is locked from further edits.
+  reconciledAt       DateTime?
   notes              String?
   createdBy          String
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  organization     Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation       @relation(fields: [businessLocationId], references: [id])
+  createdByUser    User                   @relation(fields: [createdBy], references: [id])
+  sales            InventoryPostingSale[]
 
   @@index([organizationId])
   @@index([businessLocationId])
+}
+
+// Join row recording which bucket (In Stock / Out Stock / In Warehouse) a given sale was
+// classified into on a specific Inventory Posting - the reference's own per-invoice classify
+// action (InventoryPostingController@store's transactions() pivot sync). A sale can only appear
+// on one posting at a time (enforced by the unique constraint below combined with the service
+// only ever offering "ready" sales not already posted elsewhere).
+model InventoryPostingSale {
+  id                 String                     @id @default(uuid())
+  inventoryPostingId String
+  saleId             String
+  status             InventoryPostingSaleStatus
+
+  inventoryPosting InventoryPosting @relation(fields: [inventoryPostingId], references: [id], onDelete: Cascade)
+  sale             Sale             @relation(fields: [saleId], references: [id])
+
+  @@unique([inventoryPostingId, saleId])
+  @@index([saleId])
 }
 
 model Message {

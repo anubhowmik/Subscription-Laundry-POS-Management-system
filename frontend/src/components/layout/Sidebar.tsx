@@ -51,6 +51,8 @@ import {
   List,
   PackageCheck,
   Send,
+  ArrowLeftRight,
+  Warehouse,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "../../api/client";
@@ -183,9 +185,45 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: "/products", labelKey: "nav.products", permissions: ["products.view"], icon: ShoppingBasket, only: "product" },
       { to: "/services", labelKey: "nav.services", permissions: ["services.view"], icon: WashingMachine, only: "service" },
-      { to: "/inventory", labelKey: "nav.inventory", permissions: ["inventory.view", "inventory.adjust", "inventory.transfer"], icon: ClipboardList, only: "product" },
       { to: "/purchases", labelKey: "nav.purchases", permissions: ["purchases.manage"], icon: ShoppingBag, only: "product" },
-      { to: "/inventory-postings", labelKey: "nav.inventoryPostings", permissions: ["inventory_postings.manage"], icon: ClipboardCheck, only: "product" },
+    ],
+  },
+  {
+    // Matches the EJADA reference's own "Inventory Counting" dropdown (AdminSidebarMenu.php's
+    // inventory_counting module) exactly - 4 items: Create/List Inventory Posting, plus its own
+    // "Inventory" and "Warehouse Invoices" read-only lists (SellController@inventory /
+    // @warehouse_invoices), both backed by ClassifiedSalesListPage with a different status filter.
+    labelKey: "nav.section.inventoryCounting",
+    collapsible: true,
+    icon: ClipboardCheck,
+    items: [
+      { to: "/inventory-postings/create", labelKey: "nav.inventoryPostingsCreate", permissions: ["inventory_postings.manage"], icon: PlusCircle, only: "product" },
+      { to: "/inventory-postings", labelKey: "nav.inventoryPostingsList", permissions: ["inventory_postings.manage"], icon: List, only: "product" },
+      { to: "/inventory-postings/inventory", labelKey: "nav.inventoryPostingsInventory", permissions: ["inventory_postings.manage"], icon: PackageCheck, only: "product" },
+      { to: "/inventory-postings/warehouse-invoices", labelKey: "nav.inventoryPostingsWarehouseInvoices", permissions: ["inventory_postings.manage"], icon: Warehouse, only: "product" },
+    ],
+  },
+  {
+    // Matches the EJADA reference's own "stock_adjustment" dropdown (StockAdjustmentController) -
+    // a standalone top-level menu with its own List/Add items, not folded into a shared
+    // "Inventory" screen the way this app used to combine it with Stock Transfers.
+    labelKey: "nav.section.stockAdjustments",
+    collapsible: true,
+    icon: ClipboardList,
+    items: [
+      { to: "/stock-adjustments", labelKey: "nav.stockAdjustmentsList", permissions: ["inventory.view", "inventory.adjust"], icon: List, only: "product" },
+      { to: "/stock-adjustments/create", labelKey: "nav.stockAdjustmentsAdd", permissions: ["inventory.adjust"], icon: PlusCircle, only: "product" },
+    ],
+  },
+  {
+    // Matches the EJADA reference's own "Stock transfers" dropdown (StockTransferController) -
+    // likewise its own standalone menu, separate from Stock Adjustment above.
+    labelKey: "nav.section.stockTransfers",
+    collapsible: true,
+    icon: ArrowLeftRight,
+    items: [
+      { to: "/stock-transfers", labelKey: "nav.stockTransfersList", permissions: ["inventory.view", "inventory.transfer"], icon: List, only: "product" },
+      { to: "/stock-transfers/create", labelKey: "nav.stockTransfersAdd", permissions: ["inventory.transfer"], icon: PlusCircle, only: "product" },
     ],
   },
   {
@@ -310,7 +348,14 @@ const APPS: AppDef[] = [
     // unlinked from the sidebar since Service POS/Product POS replaced it as the linked options -
     // but it must still resolve to the POS Laundry app when landed on directly (a bookmark, a
     // direct URL), or useCurrentApp() below finds no match and renders a blank sidebar shell.
-    paths: [...NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.to.slice(1))), "pos"],
+    // "pos/service" and "pos/product" are deliberately EXCLUDED even though NAV_SECTIONS contains
+    // quick-link items pointing at them (see those items' own comments) - those links exist so a
+    // POS Laundry user can jump into the other two apps, they don't mean POS Laundry "owns" those
+    // screens. Leaving them in this list used to create an exact tie in bestPathMatch() against
+    // Service POS's/Product POS's own (correct) claim to their own screen - and since this app is
+    // listed first in APPS, the tie always resolved here, snapping a fresh (non-Home-started)
+    // visit to either app's own POS screen back to POS Laundry's sidebar instead.
+    paths: [...NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.to.slice(1))).filter((p) => p !== "pos/service" && p !== "pos/product"), "pos"],
     accentColor: pickAccent(0),
     activeNavClasses: "bg-app-pos-50 text-app-pos-600",
   },
