@@ -32,6 +32,11 @@ export const listTransfersQuerySchema = z.object({
   limit: z.string().optional(),
   status: z.enum(["IN_TRANSIT", "RECEIVED", "CANCELLED"]).optional(),
   productId: z.string().uuid().optional(),
+  fromBusinessLocationId: z.string().uuid().optional(),
+  toBusinessLocationId: z.string().uuid().optional(),
+  createdBy: z.string().uuid().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });
 
 export const listTransactionsQuerySchema = z.object({
@@ -48,6 +53,7 @@ export const listTransactionsQuerySchema = z.object({
 
 export const createStockAdjustmentSchema = z.object({
   businessLocationId: z.string().uuid(),
+  refNo: z.string().optional(),
   lossType: z.enum(["NORMAL", "ABNORMAL"]).optional(),
   totalAmountRecovered: z.number().min(0).optional(),
   notes: z.string().optional(),

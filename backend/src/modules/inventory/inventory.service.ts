@@ -257,6 +257,17 @@ export async function listTransfers(query: Record<string, unknown>, organization
       : {}),
     ...(query.status ? { status: query.status as "IN_TRANSIT" | "RECEIVED" | "CANCELLED" } : {}),
     ...(query.productId ? { productId: String(query.productId) } : {}),
+    ...(query.fromBusinessLocationId ? { fromBusinessLocationId: String(query.fromBusinessLocationId) } : {}),
+    ...(query.toBusinessLocationId ? { toBusinessLocationId: String(query.toBusinessLocationId) } : {}),
+    ...(query.createdBy ? { createdBy: String(query.createdBy) } : {}),
+    ...(query.from || query.to
+      ? {
+          shippedAt: {
+            ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+            ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+          },
+        }
+      : {}),
   };
 
   const [data, total] = await Promise.all([
@@ -320,6 +331,7 @@ export async function listTransactions(query: Record<string, unknown>, organizat
 
 interface CreateStockAdjustmentInput {
   businessLocationId: string;
+  refNo?: string;
   lossType?: "NORMAL" | "ABNORMAL";
   totalAmountRecovered?: number;
   notes?: string;
@@ -354,6 +366,7 @@ export async function createStockAdjustment(
         organizationId,
         businessLocationId: input.businessLocationId,
         adjustmentNumber,
+        refNo: input.refNo,
         lossType: input.lossType ?? "NORMAL",
         totalAmountRecovered: input.totalAmountRecovered ?? 0,
         notes: input.notes,
