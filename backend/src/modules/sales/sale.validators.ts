@@ -9,6 +9,20 @@ export const listBoardItemsQuerySchema = z.object({
   businessLocationId: z.string().uuid().optional(),
   status: z.enum(["PENDING", "IN_PROGRESS", "READY", "DELIVERED", "CANCELLED"]).optional(),
   search: z.string().optional(),
+  // Reference's own Orders board filters (Restaurant\OrderController@index, laundry branch) -
+  // service/category narrow which garments show up, from/to narrows by the invoice's sale date.
+  // Naming matches sale.service.ts's own list()'s serviceId/serviceCategoryId convention.
+  serviceId: z.string().uuid().optional(),
+  serviceCategoryId: z.string().uuid().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  returned: z.enum(["true", "false"]).optional(),
+});
+
+export const bulkUpdateItemStatusSchema = z.object({
+  itemIds: z.array(z.string().uuid()).min(1, "Select at least one item"),
+  status: z.enum(["PENDING", "IN_PROGRESS", "READY", "DELIVERED", "CANCELLED"]),
+  note: z.string().optional(),
 });
 
 export const payDueSchema = z.object({

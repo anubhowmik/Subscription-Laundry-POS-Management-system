@@ -4,7 +4,13 @@ import { authenticate } from "../../middleware/authenticate";
 import { requirePermission } from "../../middleware/permission";
 import { validate } from "../../middleware/validate";
 import { uploadSaleDocument } from "../../middleware/upload";
-import { updateItemStatusSchema, listBoardItemsQuerySchema, payDueSchema, listShipmentsQuerySchema } from "./sale.validators";
+import {
+  updateItemStatusSchema,
+  bulkUpdateItemStatusSchema,
+  listBoardItemsQuerySchema,
+  payDueSchema,
+  listShipmentsQuerySchema,
+} from "./sale.validators";
 
 const router = Router();
 router.use(authenticate, requirePermission("sales.view"));
@@ -46,6 +52,14 @@ router.patch(
   requirePermission("sales.update"),
   validate(updateItemStatusSchema),
   controller.updateItemStatus,
+);
+// Reference's own bulk "Mark as Cleaned"/"Mark as Ready" (Restaurant\OrderController@markAsCleaned).
+router.patch(
+  "/items/bulk-status",
+  requirePermission("app.pos_laundry", "app.pos_service"),
+  requirePermission("sales.update"),
+  validate(bulkUpdateItemStatusSchema),
+  controller.bulkUpdateItemStatus,
 );
 
 export default router;

@@ -78,3 +78,15 @@ export async function updateItemStatus(req: Request, res: Response) {
   await writeAuditLog({ req, action: "UPDATE", module: "sale_item_status", entityId: item.id, newValues: { status } });
   return sendSuccess(res, item, "Item status updated");
 }
+
+export async function bulkUpdateItemStatus(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { itemIds, status, note } = req.body as {
+    itemIds: string[];
+    status: "PENDING" | "IN_PROGRESS" | "READY" | "DELIVERED" | "CANCELLED";
+    note?: string;
+  };
+  const result = await service.bulkUpdateItemStatus(itemIds, status, note, req.user!.organizationId, allowedLocationIds, req.user!.id);
+  await writeAuditLog({ req, action: "UPDATE", module: "sale_item_status", entityId: itemIds.join(","), newValues: { status, count: result.updated } });
+  return sendSuccess(res, result, "Items updated");
+}

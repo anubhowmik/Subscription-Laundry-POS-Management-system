@@ -160,15 +160,32 @@ export async function listBoardItems(query: Record<string, unknown>, organizatio
             ],
           }
         : {}),
+      ...(query.from || query.to
+        ? {
+            saleDate: {
+              ...(query.from ? { gte: new Date(String(query.from)) } : {}),
+              ...(query.to ? { lte: new Date(String(query.to)) } : {}),
+            },
+          }
+        : {}),
     },
     ...(query.status ? { fulfillmentStatus: query.status as ItemFulfillmentStatus } : {}),
+    ...(query.serviceId ? { serviceId: String(query.serviceId) } : {}),
+    ...(query.serviceCategoryId ? { service: { categoryId: String(query.serviceCategoryId) } } : {}),
+    // Reference's own "Returned" filter (Restaurant\OrderController's `returned` param) - only
+    // items that have at least one line on a sell return against them.
+    ...(query.returned === "true" ? { sellReturnItems: { some: {} } } : {}),
   };
 
   const items = await prisma.saleItem.findMany({
     where,
     orderBy: { sale: { saleDate: "asc" } },
     take: 300,
-    include: { sale: { select: { id: true, invoiceNumber: true, saleDate: true, businessLocationId: true, customer: { select: { nameEn: true, nameAr: true, phone: true } } } } },
+    include: {
+      sale: { select: { id: true, invoiceNumber: true, saleDate: true, businessLocationId: true, customer: { select: { nameEn: true, nameAr: true, phone: true } } } },
+      // Reference's own returned-quantity icon on each order card.
+      _count: { select: { sellReturnItems: true } },
+    },
   });
 
   // For cancelled items, look up what status they were cancelled FROM (recorded in the audit
@@ -189,8 +206,9 @@ export async function listBoardItems(query: Record<string, unknown>, organizatio
     }
   }
 
-  return items.map((item) => ({
+  return items.map(({ _count, ...item }) => ({
     ...item,
+    hasReturn: _count.sellReturnItems > 0,
     restoreStatus: item.fulfillmentStatus === "CANCELLED" ? (restoreStatusById.get(item.id) ?? "PENDING") : null,
   }));
 }
@@ -226,27 +244,74 @@ export async function updateItemStatus(
     }),
   ]);
 
-  // One SMS per order, not per item - fires only once every item on the invoice has reached the
-  // same milestone, so a customer with five garments doesn't get five "ready" texts.
-  if (status === "READY" || status === "DELIVERED") {
-    const siblingItems = await prisma.saleItem.findMany({ where: { saleId }, select: { fulfillmentStatus: true } });
-    const allReached = siblingItems.every((i) => i.fulfillmentStatus === status);
-    if (allReached) {
-      const fullSale = await prisma.sale.findUnique({ where: { id: saleId }, select: { invoiceNumber: true, customer: { select: { phone: true } } } });
-      if (fullSale?.customer.phone) {
-        await sendTemplatedSms(
-          organizationId,
-          status === "READY" ? "ORDER_READY" : "ORDER_DELIVERED",
-          fullSale.customer.phone,
-          { invoiceNumber: fullSale.invoiceNumber ?? "" },
-          "SALE",
-          saleId,
-        );
-      }
-    }
-  }
+  await notifyIfMilestoneReached(saleId, status, organizationId);
 
   return updated;
+}
+
+/**
+ * One SMS per order, not per item - fires only once every item on the invoice has reached the
+ * same milestone, so a customer with five garments doesn't get five "ready" texts. Shared by the
+ * single-item and bulk status-update paths so a bulk "Mark selected as Ready" triggers exactly
+ * the same notification a cashier clicking through each card one at a time would have.
+ */
+async function notifyIfMilestoneReached(saleId: string, status: ItemFulfillmentStatus, organizationId: string) {
+  if (status !== "READY" && status !== "DELIVERED") return;
+  const siblingItems = await prisma.saleItem.findMany({ where: { saleId }, select: { fulfillmentStatus: true } });
+  const allReached = siblingItems.every((i) => i.fulfillmentStatus === status);
+  if (!allReached) return;
+  const fullSale = await prisma.sale.findUnique({ where: { id: saleId }, select: { invoiceNumber: true, customer: { select: { phone: true } } } });
+  if (!fullSale?.customer.phone) return;
+  await sendTemplatedSms(
+    organizationId,
+    status === "READY" ? "ORDER_READY" : "ORDER_DELIVERED",
+    fullSale.customer.phone,
+    { invoiceNumber: fullSale.invoiceNumber ?? "" },
+    "SALE",
+    saleId,
+  );
+}
+
+/**
+ * Reference's own bulk "Mark as Cleaned"/"Mark as Ready" (Restaurant\OrderController@markAsCleaned)
+ * and "Mark All as Ready"/"Mark All as Cleaned" - a laundry counter processing a rack of garments
+ * doesn't want to click through each item's card individually. Items may span multiple invoices;
+ * the per-invoice "all siblings reached this status" notification check still runs once per
+ * affected sale afterward, same as the single-item path.
+ */
+export async function bulkUpdateItemStatus(
+  itemIds: string[],
+  status: ItemFulfillmentStatus,
+  note: string | undefined,
+  organizationId: string,
+  allowedLocationIds: string[] | null,
+  changedBy: string,
+) {
+  const items = await prisma.saleItem.findMany({
+    where: {
+      id: { in: itemIds },
+      sale: { organizationId, ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}) },
+    },
+    select: { id: true, saleId: true, fulfillmentStatus: true },
+  });
+  if (items.length !== itemIds.length) {
+    throw new ValidationError([], `${itemIds.length - items.length} of ${itemIds.length} selected item(s) could not be found`);
+  }
+
+  const now = new Date();
+  await prisma.$transaction(
+    items.flatMap((item) => [
+      prisma.saleItem.update({ where: { id: item.id }, data: { fulfillmentStatus: status, statusUpdatedAt: now } }),
+      prisma.saleItemStatusHistory.create({
+        data: { saleItemId: item.id, fromStatus: item.fulfillmentStatus, toStatus: status, changedBy, note },
+      }),
+    ]),
+  );
+
+  const affectedSaleIds = [...new Set(items.map((item) => item.saleId))];
+  await Promise.all(affectedSaleIds.map((saleId) => notifyIfMilestoneReached(saleId, status, organizationId)));
+
+  return { updated: items.length };
 }
 
 const SHIPPING_STAGE_RANK: Record<ItemFulfillmentStatus, number> = {
