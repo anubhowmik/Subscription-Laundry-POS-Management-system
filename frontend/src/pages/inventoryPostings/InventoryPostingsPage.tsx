@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { isAxiosError } from "axios";
+import { Plus, CheckCircle2, ShieldCheck, Pencil, Trash2, Eye, ClipboardCheck } from "lucide-react";
 import { api } from "../../api/client";
+import { confirmAction } from "../../stores/confirmStore";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
@@ -11,15 +14,13 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { Alert } from "../../components/ui/Alert";
-import { Modal } from "../../components/ui/Modal";
 import { Pagination } from "../../components/ui/Pagination";
 import { StatCard } from "../../components/ui/StatCard";
-import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh } from "../../components/ui/Table";
-import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, SortableTh, RowActions, RowActionButton } from "../../components/ui/Table";
+import { PageSizeSelect, TableExportButtons, ColumnVisibilityMenu, FiltersMenu } from "../../components/ui/TableToolbarControls";
 import { fetchAllRows } from "../../lib/tableExport";
 import { useColumnVisibility } from "../../hooks/useColumnVisibility";
-import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
-import { ClipboardCheck } from "lucide-react";
+import { selectClass } from "../../components/ui/formClasses";
 import type { ReactNode } from "react";
 
 interface PostingRow {
@@ -27,6 +28,7 @@ interface PostingRow {
   postingDate: string;
   status: "PENDING" | "CONFIRMED";
   cashInDrawer: string;
+  reconciledAt: string | null;
   inStockCount: number;
   inStockTotal: string;
   inWarehouseCount: number;
@@ -40,12 +42,11 @@ interface PostingRow {
 export default function InventoryPostingsPage() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
-  const { currentLocation } = useBusinessLocation();
+  const navigate = useNavigate();
+  const { currentLocation, locations } = useBusinessLocation();
   const currency = currentLocation?.currency ?? "SAR";
   const locale = isAr ? "ar-SA" : "en-US";
   const qc = useQueryClient();
-
-  const [formOpen, setFormOpen] = useState(false);
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
@@ -59,9 +60,21 @@ export default function InventoryPostingsPage() {
     }
   }
 
-  // Shared with the "export all matching rows" fetch below - keep every filter param here so
-  // export always reflects exactly what's currently on screen, just without the page cap.
-  const filterParams = { sortBy, sortOrder };
+  const [businessLocationId, setBusinessLocationId] = useState("");
+  const [status, setStatus] = useState("");
+  const activeFilterCount = (businessLocationId ? 1 : 0) + (status ? 1 : 0);
+  function clearAllFilters() {
+    setBusinessLocationId("");
+    setStatus("");
+    setPage(1);
+  }
+
+  const filterParams = {
+    sortBy,
+    sortOrder,
+    ...(businessLocationId ? { businessLocationId } : {}),
+    ...(status ? { status } : {}),
+  };
 
   const { data } = useQuery({
     queryKey: ["inventory-postings", page, limit, filterParams],
@@ -69,6 +82,39 @@ export default function InventoryPostingsPage() {
       const res = await api.get<ApiSuccess<PostingRow[]>>("/inventory-postings", { params: { ...filterParams, page, limit } });
       return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
     },
+  });
+
+  const [error, setError] = useState<string | null>(null);
+  function handleError(err: unknown) {
+    setError(isAxiosError(err) ? err.response?.data?.message ?? (isAr ? "حدث خطأ ما" : "Something went wrong") : isAr ? "حدث خطأ ما" : "Something went wrong");
+  }
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["inventory-postings"] });
+  }
+
+  const confirmMutation = useMutation({
+    mutationFn: async (id: string) => api.put(`/inventory-postings/${id}/confirm`),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: handleError,
+  });
+  const reconcileMutation = useMutation({
+    mutationFn: async (id: string) => api.put(`/inventory-postings/${id}/reconcile`),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: handleError,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/inventory-postings/${id}`),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: handleError,
   });
 
   const columns: { key: string; label: string; sortField?: string; render: (p: PostingRow) => ReactNode; exportValue: (p: PostingRow) => string | number | null }[] = [
@@ -81,7 +127,7 @@ export default function InventoryPostingsPage() {
     },
     {
       key: "businessLocation",
-      label: isAr ? "الفرع" : "Branch",
+      label: isAr ? "الفرع" : "Location",
       render: (p) => p.businessLocation.branchName,
       exportValue: (p) => p.businessLocation.branchName,
     },
@@ -96,16 +142,6 @@ export default function InventoryPostingsPage() {
       exportValue: (p) => `${p.inStockCount} (${formatMoney(p.inStockTotal, currency, locale)})`,
     },
     {
-      key: "inWarehouse",
-      label: isAr ? "في المستودع" : "In Warehouse",
-      render: (p) => (
-        <span className="ltr-nums">
-          {p.inWarehouseCount} <span className="text-slate-400">({formatMoney(p.inWarehouseTotal, currency, locale)})</span>
-        </span>
-      ),
-      exportValue: (p) => `${p.inWarehouseCount} (${formatMoney(p.inWarehouseTotal, currency, locale)})`,
-    },
-    {
       key: "outStock",
       label: isAr ? "تم التسليم" : "Out Stock",
       render: (p) => (
@@ -114,6 +150,16 @@ export default function InventoryPostingsPage() {
         </span>
       ),
       exportValue: (p) => `${p.outStockCount} (${formatMoney(p.outStockTotal, currency, locale)})`,
+    },
+    {
+      key: "inWarehouse",
+      label: isAr ? "في المستودع" : "In Warehouse",
+      render: (p) => (
+        <span className="ltr-nums">
+          {p.inWarehouseCount} <span className="text-slate-400">({formatMoney(p.inWarehouseTotal, currency, locale)})</span>
+        </span>
+      ),
+      exportValue: (p) => `${p.inWarehouseCount} (${formatMoney(p.inWarehouseTotal, currency, locale)})`,
     },
     {
       key: "cashInDrawer",
@@ -126,9 +172,12 @@ export default function InventoryPostingsPage() {
       key: "status",
       label: t("common.status"),
       render: (p) => (
-        <Badge variant={p.status === "CONFIRMED" ? "success" : "warning"}>
-          {p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معلق" : "Pending"}
-        </Badge>
+        <div className="flex flex-col gap-1">
+          <Badge variant={p.status === "CONFIRMED" ? "success" : "warning"}>
+            {p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معلق" : "Pending"}
+          </Badge>
+          {p.reconciledAt && <Badge variant="neutral">{isAr ? "تمت التسوية" : "Reconciled"}</Badge>}
+        </div>
       ),
       exportValue: (p) => (p.status === "CONFIRMED" ? (isAr ? "مؤكد" : "Confirmed") : isAr ? "معلق" : "Pending"),
     },
@@ -147,11 +196,13 @@ export default function InventoryPostingsPage() {
       <PageHeader
         title={isAr ? "جرد المخزون" : "Inventory Counting"}
         actions={
-          <Button onClick={() => setFormOpen(true)}>
-            + {isAr ? "تسجيل جرد جديد" : "New Posting"}
+          <Button onClick={() => navigate("/inventory-postings/create")}>
+            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden /> {isAr ? "إضافة جرد" : "Add Inventory Posting"}
           </Button>
         }
       />
+
+      {error && <Alert variant="danger">{error}</Alert>}
 
       {data?.meta && (
         <div className="grid grid-cols-1 gap-4 sm:max-w-xs">
@@ -169,6 +220,41 @@ export default function InventoryPostingsPage() {
 
       <TableContainer>
         <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{isAr ? "الفرع" : "Location"}</label>
+              <select
+                value={businessLocationId}
+                onChange={(e) => {
+                  setBusinessLocationId(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(selectClass, "w-full")}
+              >
+                <option value="">{isAr ? "الكل" : "All"}</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.branchName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">{t("common.status")}</label>
+              <select
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
+                className={cn(selectClass, "w-full")}
+              >
+                <option value="">{isAr ? "الكل" : "All"}</option>
+                <option value="PENDING">{isAr ? "معلق" : "Pending"}</option>
+                <option value="CONFIRMED">{isAr ? "مؤكد" : "Confirmed"}</option>
+              </select>
+            </div>
+          </FiltersMenu>
           <div className="ms-auto flex items-center gap-1.5">
             <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
             <PageSizeSelect
@@ -211,6 +297,7 @@ export default function InventoryPostingsPage() {
                     <Th key={c.key}>{c.label}</Th>
                   ),
                 )}
+                <Th>{t("common.actions")}</Th>
               </tr>
             </THead>
             <tbody>
@@ -221,11 +308,53 @@ export default function InventoryPostingsPage() {
                       {c.render(p)}
                     </td>
                   ))}
+                  <td className="px-4 py-3">
+                    <RowActions>
+                      <RowActionButton
+                        icon={p.status === "PENDING" ? Pencil : Eye}
+                        label={p.status === "PENDING" ? (isAr ? "تعديل" : "Edit") : isAr ? "عرض" : "View"}
+                        onClick={() => navigate(`/inventory-postings/${p.id}`)}
+                      />
+                      {p.status === "PENDING" && (
+                        <RowActionButton
+                          icon={CheckCircle2}
+                          label={isAr ? "تأكيد" : "Confirm"}
+                          variant="success"
+                          disabled={confirmMutation.isPending}
+                          onClick={async () => {
+                            if (await confirmAction({ message: isAr ? "تأكيد هذا الجرد؟" : "Confirm this posting?" })) confirmMutation.mutate(p.id);
+                          }}
+                        />
+                      )}
+                      {p.status === "CONFIRMED" && !p.reconciledAt && (
+                        <RowActionButton
+                          icon={ShieldCheck}
+                          label={isAr ? "تسوية" : "Reconcile"}
+                          variant="success"
+                          disabled={reconcileMutation.isPending}
+                          onClick={async () => {
+                            if (await confirmAction({ message: isAr ? "تسوية هذا الجرد؟" : "Reconcile this posting?" })) reconcileMutation.mutate(p.id);
+                          }}
+                        />
+                      )}
+                      {p.status === "PENDING" && (
+                        <RowActionButton
+                          icon={Trash2}
+                          label={t("common.delete")}
+                          variant="danger"
+                          disabled={deleteMutation.isPending}
+                          onClick={async () => {
+                            if (await confirmAction({ message: isAr ? "حذف هذا الجرد؟" : "Delete this posting?", danger: true })) deleteMutation.mutate(p.id);
+                          }}
+                        />
+                      )}
+                    </RowActions>
+                  </td>
                 </tr>
               ))}
               {data?.rows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-slate-400">
                     {t("common.noResults")}
                   </td>
                 </tr>
@@ -244,133 +373,6 @@ export default function InventoryPostingsPage() {
           label={`${t("common.page")} ${page} ${t("common.of")} ${data.meta.totalPages}`}
         />
       )}
-
-      {formOpen && (
-        <PostingFormModal
-          isAr={isAr}
-          currency={currency}
-          locale={locale}
-          onClose={() => setFormOpen(false)}
-          onSaved={() => {
-            qc.invalidateQueries({ queryKey: ["inventory-postings"] });
-            setFormOpen(false);
-          }}
-        />
-      )}
     </div>
-  );
-}
-
-interface Snapshot {
-  inStockCount: number;
-  inStockTotal: string;
-  inWarehouseCount: number;
-  inWarehouseTotal: string;
-  outStockCount: number;
-  outStockTotal: string;
-}
-
-function PostingFormModal({
-  isAr,
-  currency,
-  locale,
-  onClose,
-  onSaved,
-}: {
-  isAr: boolean;
-  currency: string;
-  locale: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { locations, currentLocationId } = useBusinessLocation();
-  const [businessLocationId, setBusinessLocationId] = useState(currentLocationId ?? "");
-  const [cashInDrawer, setCashInDrawer] = useState("");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: snapshot, isFetching } = useQuery({
-    queryKey: ["posting-preview", businessLocationId],
-    queryFn: async () => (await api.get<ApiSuccess<Snapshot>>("/inventory-postings/preview", { params: { businessLocationId } })).data.data,
-    enabled: Boolean(businessLocationId),
-  });
-
-  const mutation = useMutation({
-    mutationFn: async () =>
-      api.post("/inventory-postings", {
-        businessLocationId,
-        cashInDrawer: cashInDrawer ? Number(cashInDrawer) : undefined,
-        notes: notes || undefined,
-      }),
-    onSuccess: onSaved,
-    onError: (err) => setError(isAxiosError(err) ? err.response?.data?.message ?? (isAr ? "حدث خطأ ما" : "Something went wrong") : isAr ? "حدث خطأ ما" : "Something went wrong"),
-  });
-
-  const canSubmit = Boolean(businessLocationId) && Boolean(snapshot);
-
-  return (
-    <Modal
-      title={isAr ? "تسجيل جرد جديد" : "New Inventory Posting"}
-      onClose={onClose}
-      size="lg"
-      footer={
-        <Button
-          onClick={() => {
-            setError(null);
-            mutation.mutate();
-          }}
-          disabled={!canSubmit || mutation.isPending}
-          fullWidth
-        >
-          {mutation.isPending ? "…" : isAr ? "حفظ الجرد" : "Save Posting"}
-        </Button>
-      }
-    >
-      <div className="space-y-4">
-        <div>
-          <label className={labelClass}>{isAr ? "الفرع" : "Branch"}</label>
-          <select value={businessLocationId} onChange={(e) => setBusinessLocationId(e.target.value)} className={selectClass}>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.branchName}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {isFetching && <p className="text-xs text-slate-400">{isAr ? "جارٍ الحساب..." : "Computing..."}</p>}
-
-        {snapshot && (
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
-              <p className="text-xs font-semibold text-emerald-700">{isAr ? "في المتجر" : "In Stock"}</p>
-              <p className="ltr-nums text-lg font-bold text-emerald-800">{snapshot.inStockCount}</p>
-              <p className="ltr-nums text-xs text-emerald-600">{formatMoney(snapshot.inStockTotal, currency, locale)}</p>
-            </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
-              <p className="text-xs font-semibold text-amber-700">{isAr ? "في المستودع" : "In Warehouse"}</p>
-              <p className="ltr-nums text-lg font-bold text-amber-800">{snapshot.inWarehouseCount}</p>
-              <p className="ltr-nums text-xs text-amber-600">{formatMoney(snapshot.inWarehouseTotal, currency, locale)}</p>
-            </div>
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center">
-              <p className="text-xs font-semibold text-red-700">{isAr ? "تم التسليم" : "Out Stock"}</p>
-              <p className="ltr-nums text-lg font-bold text-red-800">{snapshot.outStockCount}</p>
-              <p className="ltr-nums text-xs text-red-600">{formatMoney(snapshot.outStockTotal, currency, locale)}</p>
-            </div>
-          </div>
-        )}
-
-        <div>
-          <label className={labelClass}>{isAr ? "النقد بالدرج" : "Cash in Drawer"}</label>
-          <input type="number" min={0} value={cashInDrawer} onChange={(e) => setCashInDrawer(e.target.value)} placeholder="0" className={cn(inputClass, "ltr-nums")} />
-        </div>
-        <div>
-          <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
-        </div>
-      </div>
-
-      {error && <Alert variant="danger" className="mt-4">{error}</Alert>}
-    </Modal>
   );
 }

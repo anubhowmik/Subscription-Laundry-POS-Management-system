@@ -331,7 +331,7 @@ const SHIPPING_STAGE_RANK: Record<ItemFulfillmentStatus, number> = {
  * create two sources of truth that could drift apart. Instead: the sale isn't further along than
  * its least-progressed item (CANCELLED items don't count unless every item is cancelled) - the
  * same "what's holding this order up" logic a cashier would apply by eye. */
-function computeShippingStatus(items: { fulfillmentStatus: ItemFulfillmentStatus }[]): ItemFulfillmentStatus {
+export function computeShippingStatus(items: { fulfillmentStatus: ItemFulfillmentStatus }[]): ItemFulfillmentStatus {
   const active = items.filter((i) => i.fulfillmentStatus !== "CANCELLED");
   if (active.length === 0) return "CANCELLED";
   return active.reduce((worst, i) => (SHIPPING_STAGE_RANK[i.fulfillmentStatus] < SHIPPING_STAGE_RANK[worst] ? i.fulfillmentStatus : worst), active[0].fulfillmentStatus);
