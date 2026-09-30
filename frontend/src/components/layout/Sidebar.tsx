@@ -511,23 +511,37 @@ function SidebarNav({ currentApp, onNavigate }: { currentApp: AppDef | undefined
 
         return (
           <div key={section.labelKey}>
+            {/* Standard accordion treatment: the header stays neutral (gray hover/pressed) like
+                any other toggle - it's the currently-active PAGE inside that gets the app's accent
+                color via NavItemLink below, not the section header itself just for being open.
+                A bold label is the only "you're inside this section" cue, matching the plain,
+                low-chrome pattern most admin/ERP sidebars use (GitHub, Linear, Zoho Books) rather
+                than tinting the whole row. */}
             <button
               type="button"
               onClick={() => setOpenOverrides((prev) => ({ ...prev, [section.labelKey]: !isOpen }))}
               aria-expanded={isOpen}
-              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-slate-100",
+                isActiveSection ? "font-semibold text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
+              )}
             >
               <SectionIcon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} aria-hidden />
               <span className="flex-1 truncate text-start">{t(section.labelKey)}</span>
               <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isOpen && "rotate-180")} aria-hidden />
             </button>
-            {isOpen && (
-              <div className="mt-0.5 space-y-0.5 ps-4">
-                {items.map((item) => (
-                  <NavItemLink key={item.to} item={item} currentApp={currentApp} unreadCount={unreadCount} onNavigate={onNavigate} />
-                ))}
+            {/* Animated via grid-template-rows (0fr -> 1fr) rather than a hard show/hide - the
+                overflow-hidden inner wrapper is what actually clips content during the transition,
+                since a `grid-rows-[0fr]` track alone doesn't clip its child. */}
+            <div className={cn("grid transition-[grid-template-rows] duration-200 ease-in-out", isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+              <div className="overflow-hidden">
+                <div className="ms-[19px] mt-0.5 space-y-0.5 border-s border-slate-200 ps-3.5">
+                  {items.map((item) => (
+                    <NavItemLink key={item.to} item={item} currentApp={currentApp} unreadCount={unreadCount} onNavigate={onNavigate} />
+                  ))}
+                </div>
               </div>
-            )}
+            </div>
           </div>
         );
       })}
