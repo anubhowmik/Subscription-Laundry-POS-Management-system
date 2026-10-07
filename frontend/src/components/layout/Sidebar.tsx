@@ -60,6 +60,7 @@ import {
   VenetianMask as UserSecret,
   BanknoteArrowDown as MoneyCheck,
   Briefcase,
+  Percent,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "../../api/client";
@@ -192,6 +193,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: "/products", labelKey: "nav.products", permissions: ["products.view"], icon: ShoppingBasket, only: "product" },
       { to: "/services", labelKey: "nav.services", permissions: ["services.view"], icon: WashingMachine, only: "service" },
+      // Reference: Products > Categories (taxonomies) - product and service categories, with sales targets.
+      { to: "/categories", labelKey: "nav.categories", permissions: ["categories.view", "services.view"], icon: Tags },
       { to: "/purchases", labelKey: "nav.purchases", permissions: ["purchases.manage"], icon: ShoppingBag, only: "product" },
     ],
   },
@@ -270,6 +273,20 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/reports/cash-register", labelKey: "nav.cashRegisterReport", permissions: ["reports.cash_register"], icon: MoneyCheck },
       { to: "/reports/customer-visits", labelKey: "nav.customerVisitsReport", permissions: ["reports.customer_visits"], icon: Users },
       { to: "/reports", labelKey: "nav.reportsOverview", permissions: ["reports.sales", "reports.inventory"], icon: BarChart3 },
+    ],
+  },
+  {
+    // The EJADA reference's "Sales Reports" dropdown (AdminSidebarMenu.php, `report.sales_reports`),
+    // rebuilt one sub-report at a time in the reference's own order, all with its fa-percent icon.
+    labelKey: "nav.section.salesReports",
+    collapsible: true,
+    icon: PieChart,
+    items: [
+      { to: "/reports/daily-sales", labelKey: "nav.dailySalesReport", permissions: ["reports.daily_sales"], icon: Percent },
+      { to: "/reports/weekly-lfl-sales", labelKey: "nav.weeklyLflSalesReport", permissions: ["reports.weekly_lfl_sales"], icon: Percent },
+      { to: "/reports/monthly-lfl-sales", labelKey: "nav.monthlyLflSalesReport", permissions: ["reports.monthly_lfl_sales"], icon: Percent },
+      { to: "/reports/sales-analysis", labelKey: "nav.salesAnalysisReport", permissions: ["reports.sales_analysis"], icon: Percent },
+      { to: "/reports/sales-performance", labelKey: "nav.salesPerformanceReport", permissions: ["reports.sales_performance"], icon: Percent },
     ],
   },
   {

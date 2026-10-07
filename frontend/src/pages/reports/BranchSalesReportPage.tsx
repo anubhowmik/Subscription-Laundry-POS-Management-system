@@ -7,6 +7,8 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Alert } from "../../components/ui/Alert";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   ReportDataTable,
   amountColumn,
@@ -43,14 +45,15 @@ interface ReportData {
 export default function BranchSalesReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const [filters, setFilters] = useState<BaseReportFilters>(() => initialBaseFilters(fiscalYearStartMonth));
 
   const { data: options } = useReportOptions();
   const params = { ...baseFilterParams(filters), locationIds: undefined };
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "branch-sales", params],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/branch-sales", { params })).data.data,
+    queryKey: ["reports", "branch-sales", params, appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/branch-sales", { params: { ...params, ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

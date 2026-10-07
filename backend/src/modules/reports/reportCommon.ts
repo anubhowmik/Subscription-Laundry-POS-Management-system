@@ -1,4 +1,5 @@
 import type ExcelJS from "exceljs";
+import type { Prisma } from "@prisma/client";
 import type { Response } from "express";
 import { prisma } from "../../config/prisma";
 import { AuthorizationError, NotFoundError } from "../../utils/AppError";
@@ -25,6 +26,11 @@ export const REPORT_PERMISSIONS = [
   "reports.loyalty_points",
   "reports.cash_register",
   "reports.customer_visits",
+  "reports.daily_sales",
+  "reports.weekly_lfl_sales",
+  "reports.monthly_lfl_sales",
+  "reports.sales_analysis",
+  "reports.sales_performance",
 ] as const;
 
 export interface ReportLocationQuery {
@@ -239,4 +245,37 @@ export async function productCategoryTree(organizationId: string) {
     return ids;
   };
   return { topOf, subtree };
+}
+
+/**
+ * Service POS and Product POS are separate apps: a report opened from one of them (the frontend
+ * sends `app=service|product`) covers only that app's sales. POS Laundry sends nothing and sees
+ * everything.
+ */
+export type ReportAppScope = "service" | "product" | undefined;
+
+export function parseAppScope(query: Record<string, unknown>): ReportAppScope {
+  return query.app === "service" || query.app === "product" ? query.app : undefined;
+}
+
+/** Invoice-level reports: invoices of that app's type, plus MIXED ones (POS Laundry's legacy screen
+ * sells both in one invoice, so it belongs to both apps). Older rows without a saleType fall back to
+ * having at least one line of that type. */
+export function saleScopeWhere(scope: ReportAppScope): Prisma.SaleWhereInput {
+  if (!scope) return {};
+  const type = scope === "service" ? "SERVICE" : "PRODUCT";
+  return {
+    AND: [{ OR: [{ saleType: { in: [type, "MIXED"] } }, { saleType: null, items: { some: itemScopeWhere(scope) } }] }],
+  };
+}
+
+/** Item-level reports: only that app's lines (service lines in Service POS, product lines in Product POS). */
+export function itemScopeWhere(scope: ReportAppScope): Prisma.SaleItemWhereInput {
+  if (!scope) return {};
+  return scope === "service" ? { serviceId: { not: null } } : { productId: { not: null } };
+}
+
+/** Same as itemScopeWhere, for lines already loaded with their product/service. */
+export function lineInScope(scope: ReportAppScope, line: { product?: unknown; service?: unknown }) {
+  return !scope || (scope === "service" ? Boolean(line.service) : Boolean(line.product));
 }

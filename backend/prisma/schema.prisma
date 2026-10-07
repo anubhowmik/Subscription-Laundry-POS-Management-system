@@ -1474,6 +1474,10 @@ model Category {
   descriptionAr  String?
   parentId       String?
   status         UserStatus @default(ACTIVE)
+  // Reference's category `target` / `target_mtd` (taxonomy form, laundry mode): the main
+  // category's yearly and monthly sales targets, read by Sales Reports > Sales Performance.
+  target         Decimal?   @db.Decimal(14, 2)
+  targetMtd      Decimal?   @db.Decimal(14, 2)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -1741,6 +1745,9 @@ model ServiceCategory {
   nameAr         String
   description    String?
   status         UserStatus @default(ACTIVE)
+  // Sales targets, as on product categories (a laundry item is a Service here).
+  target         Decimal?   @db.Decimal(14, 2)
+  targetMtd      Decimal?   @db.Decimal(14, 2)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

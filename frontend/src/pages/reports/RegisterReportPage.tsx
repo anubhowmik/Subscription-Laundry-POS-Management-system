@@ -13,6 +13,8 @@ import { RowActionButton, RowActionLink, RowActions } from "../../components/ui/
 import { selectClass } from "../../components/ui/formClasses";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   FilterField,
   ReportDataTable,
@@ -72,6 +74,7 @@ const params = (f: Filters) => ({ ...baseFilterParams(f), ...(f.userId ? { userI
 export default function RegisterReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { can } = useAuth();
   const canManageRegisters = can("pos.register.manage");
   const { fiscalYearStartMonth } = useReportOrgSettings();
@@ -81,8 +84,8 @@ export default function RegisterReportPage() {
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "register", params(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/register", { params: params(filters) })).data.data,
+    queryKey: ["reports", "register", params(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/register", { params: { ...params(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

@@ -9,6 +9,8 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Alert } from "../../components/ui/Alert";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   ReportDataTable,
   amountColumn,
@@ -56,14 +58,15 @@ interface ReportData {
 export default function DailyProductsReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const [filters, setFilters] = useState<BaseReportFilters>(() => initialBaseFilters(fiscalYearStartMonth));
   const [tab, setTab] = useState<"products" | "categories">("products");
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "daily-products", baseFilterParams(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/daily-products", { params: baseFilterParams(filters) })).data.data,
+    queryKey: ["reports", "daily-products", baseFilterParams(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/daily-products", { params: { ...baseFilterParams(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

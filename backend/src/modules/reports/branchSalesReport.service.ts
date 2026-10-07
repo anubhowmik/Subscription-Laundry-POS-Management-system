@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   locationFiltersText,
   parseReportLocationQuery,
   reportDateWindow,
@@ -34,6 +34,7 @@ type Key = (typeof KEYS)[number];
 
 export async function branchSalesReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations({ ...q, locationIds: [] }, organizationId, allowedLocationIds);
   const groups = await prisma.businessLocation.findMany({
@@ -43,7 +44,7 @@ export async function branchSalesReport(query: Record<string, unknown>, organiza
   const groupOf = new Map(groups.map((g) => [g.id, g.group]));
 
   const sales = await prisma.sale.findMany({
-    where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to } },
+    where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to }, ...saleScopeWhere(scope) },
     select: {
       businessLocationId: true,
       customerId: true,

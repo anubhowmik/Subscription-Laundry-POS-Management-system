@@ -7,9 +7,12 @@ export const createCategorySchema = z.object({
   descriptionEn: z.string().optional(),
   descriptionAr: z.string().optional(),
   parentId: z.string().uuid().optional().nullable(),
+  // Reference's category target / target_mtd (sales targets read by Sales Reports > Sales Performance).
+  target: z.number().min(0).optional().nullable(),
+  targetMtd: z.number().min(0).optional().nullable(),
 });
 
-export const updateCategorySchema = createCategorySchema.partial();
+export const updateCategorySchema = createCategorySchema.partial().extend({ status: z.enum(["ACTIVE", "INACTIVE"]).optional() });
 
 export const listCategoryQuerySchema = z.object({
   page: z.string().optional(),

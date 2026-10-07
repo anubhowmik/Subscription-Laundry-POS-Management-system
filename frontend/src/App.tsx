@@ -46,6 +46,11 @@ import CashbackReportPage from "./pages/reports/CashbackReportPage";
 import LoyaltyPointsReportPage from "./pages/reports/LoyaltyPointsReportPage";
 import CashRegisterReportPage from "./pages/reports/CashRegisterReportPage";
 import CustomerVisitsReportPage from "./pages/reports/CustomerVisitsReportPage";
+import DailySalesReportPage from "./pages/reports/DailySalesReportPage";
+import LflSalesReportPage from "./pages/reports/LflSalesReportPage";
+import SalesAnalysisReportPage from "./pages/reports/SalesAnalysisReportPage";
+import SalesPerformanceReportPage from "./pages/reports/SalesPerformanceReportPage";
+import CategoriesPage from "./pages/categories/CategoriesPage";
 import StockAdjustmentsPage from "./pages/inventory/StockAdjustmentsPage";
 import StockAdjustmentCreatePage from "./pages/inventory/StockAdjustmentCreatePage";
 import StockTransfersPage from "./pages/inventory/StockTransfersPage";
@@ -244,6 +249,25 @@ export default function App() {
             </Route>
             <Route element={<PermissionRoute anyOf={["reports.customer_visits"]} />}>
               <Route path="reports/customer-visits" element={<CustomerVisitsReportPage />} />
+            </Route>
+            {/* The EJADA reference's Sales Reports dropdown, one sub-report at a time. */}
+            <Route element={<PermissionRoute anyOf={["reports.daily_sales"]} />}>
+              <Route path="reports/daily-sales" element={<DailySalesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.weekly_lfl_sales"]} />}>
+              <Route path="reports/weekly-lfl-sales" element={<LflSalesReportPage key="week" period="week" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.monthly_lfl_sales"]} />}>
+              <Route path="reports/monthly-lfl-sales" element={<LflSalesReportPage key="month" period="month" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.sales_analysis"]} />}>
+              <Route path="reports/sales-analysis" element={<SalesAnalysisReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.sales_performance"]} />}>
+              <Route path="reports/sales-performance" element={<SalesPerformanceReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["categories.view", "services.view"]} />}>
+              <Route path="categories" element={<CategoriesPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["messages.manage"]} />}>
               <Route path="messages" element={<MessagesPage />} />

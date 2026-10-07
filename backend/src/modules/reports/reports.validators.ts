@@ -42,6 +42,8 @@ export const vatBreakdownReportQuerySchema = z.object({
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 export const dailyProductsReportQuerySchema = z.object({
+  // Which app the report was opened from (Service POS / Product POS scope it; POS Laundry omits it).
+  app: z.enum(["service", "product"]).optional(),
   locationGroupId: z.string().uuid().optional(),
   // Comma-separated branch ids (the reference's multi-select `location_id[]`).
   locationIds: z.string().optional(),
@@ -53,6 +55,8 @@ export const dailyProductsReportQuerySchema = z.object({
 
 // Shared by every page under the Reports dropdown (reference's report.js filter frame).
 const reportFrameQuery = {
+  // Which app the report was opened from (Service POS / Product POS scope it; POS Laundry omits it).
+  app: z.enum(["service", "product"]).optional(),
   locationGroupId: z.string().uuid().optional(),
   locationIds: z.string().optional(),
   from: dateOnly.optional(),
@@ -100,3 +104,25 @@ export const cashbackReportQuerySchema = z.object({ ...reportFrameQuery, custome
 export const loyaltyPointsReportQuerySchema = cashbackReportQuerySchema;
 export const cashRegisterReportQuerySchema = z.object({ ...reportFrameQuery, status: z.enum(["open", "close"]).optional() });
 export const customerVisitsReportQuerySchema = cashbackReportQuerySchema;
+
+// Sales Reports dropdown.
+export const dailySalesReportQuerySchema = z.object({
+  // Which app the report was opened from (Service POS / Product POS scope it; POS Laundry omits it).
+  app: z.enum(["service", "product"]).optional(),
+  locationGroupId: z.string().uuid().optional(),
+  locationIds: z.string().optional(),
+  date: dateOnly.optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+});
+export const lflSalesReportQuerySchema = z.object(reportFrameQuery);
+export const salesAnalysisReportQuerySchema = z.object({
+  // Which app the report was opened from (Service POS / Product POS scope it; POS Laundry omits it).
+  app: z.enum(["service", "product"]).optional(),
+  locationGroupId: z.string().uuid().optional(),
+  locationIds: z.string().optional(),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  compareYear: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+});
+export const salesPerformanceReportQuerySchema = salesAnalysisReportQuerySchema;

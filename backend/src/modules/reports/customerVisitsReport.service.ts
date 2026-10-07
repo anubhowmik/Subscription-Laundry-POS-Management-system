@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { itemScopeWhere, saleScopeWhere, parseAppScope,
   locationFiltersText,
   parseReportLocationQuery,
   reportDateWindow,
@@ -34,6 +34,7 @@ const { Decimal } = Prisma;
 
 export async function customerVisitsReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const customerId = query.customerId ? String(query.customerId) : undefined;
   const { startDate, endDate, from, to } = reportDateWindow(q);
@@ -47,13 +48,14 @@ export async function customerVisitsReport(query: Record<string, unknown>, organ
         businessLocationId: { in: locations.map((l) => l.id) },
         saleDate: { gte: from, lte: to },
         ...(customerId ? { customerId } : customerGroupId ? { customer: { customerGroupId } } : {}),
+        ...saleScopeWhere(scope),
       },
       orderBy: { saleDate: "asc" },
       select: {
         totalAmount: true,
         customer: { select: { id: true, nameEn: true, nameAr: true, businessName: true, phone: true } },
         businessLocation: { select: { id: true, branchName: true, branchNameAr: true, branchCode: true, city: true } },
-        items: { select: { descriptionEn: true, descriptionAr: true } },
+        items: { where: itemScopeWhere(scope), select: { descriptionEn: true, descriptionAr: true } },
       },
     }),
     prisma.customer.count({ where: { organizationId } }),

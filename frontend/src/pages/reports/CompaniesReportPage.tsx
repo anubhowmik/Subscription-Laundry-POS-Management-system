@@ -7,6 +7,8 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Alert } from "../../components/ui/Alert";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   CustomerGroupField,
   ReportDataTable,
@@ -47,14 +49,15 @@ const params = (f: Filters) => ({ ...baseFilterParams(f), ...(f.customerGroupId 
 export default function CompaniesReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const initial = (): Filters => ({ ...initialBaseFilters(fiscalYearStartMonth), customerGroupId: "" });
   const [filters, setFilters] = useState<Filters>(initial);
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "companies", params(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/companies", { params: params(filters) })).data.data,
+    queryKey: ["reports", "companies", params(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/companies", { params: { ...params(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

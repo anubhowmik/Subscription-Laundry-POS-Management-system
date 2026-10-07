@@ -9,6 +9,8 @@ import { Alert } from "../../components/ui/Alert";
 import { selectClass } from "../../components/ui/formClasses";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   FilterField,
   ReportDataTable,
@@ -38,6 +40,7 @@ interface Filters extends BaseReportFilters {
 export default function CashRegisterReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const initial = (): Filters => ({ ...initialBaseFilters(fiscalYearStartMonth), status: "" });
   const [filters, setFilters] = useState<Filters>(initial);
@@ -45,8 +48,8 @@ export default function CashRegisterReportPage() {
   const { data: options } = useReportOptions();
   const params = { ...baseFilterParams(filters), locationIds: undefined, ...(filters.status ? { status: filters.status } : {}) };
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "cash-register", params],
-    queryFn: async () => (await api.get<ApiSuccess<{ rows: Row[]; totals: Amounts }>>("/reports/cash-register", { params })).data.data,
+    queryKey: ["reports", "cash-register", params, appScope],
+    queryFn: async () => (await api.get<ApiSuccess<{ rows: Row[]; totals: Amounts }>>("/reports/cash-register", { params: { ...params, ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

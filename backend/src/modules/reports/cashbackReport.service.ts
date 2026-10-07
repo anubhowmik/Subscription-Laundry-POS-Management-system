@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseReportLocationQuery,
@@ -27,6 +27,7 @@ import {
 
 export async function cashbackReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const customerId = query.customerId ? String(query.customerId) : undefined;
   const { startDate, endDate, from, to } = reportDateWindow(q);
@@ -41,8 +42,8 @@ export async function cashbackReport(query: Record<string, unknown>, organizatio
         ...(customerId ? { customerId } : customerGroupId ? { customer: { customerGroupId } } : {}),
         OR: [
           { saleId: null, compensationId: null },
-          { sale: { businessLocationId: { in: locationIds } } },
-          { saleId: null, compensation: { businessLocationId: { in: locationIds } } },
+          { sale: { businessLocationId: { in: locationIds }, ...saleScopeWhere(scope) } },
+          { saleId: null, compensation: { businessLocationId: { in: locationIds }, ...(scope ? { sale: saleScopeWhere(scope) } : {}) } },
         ],
       },
       orderBy: { createdAt: "desc" },

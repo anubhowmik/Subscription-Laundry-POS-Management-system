@@ -7,6 +7,8 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Alert } from "../../components/ui/Alert";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   ContactFilterField,
   CustomerGroupField,
@@ -52,14 +54,15 @@ const params = (f: Filters) => ({
 export default function LoyaltyPointsReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const initial = (): Filters => ({ ...initialBaseFilters(fiscalYearStartMonth), customerGroupId: "", customer: null });
   const [filters, setFilters] = useState<Filters>(initial);
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "loyalty-points", params(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/loyalty-points", { params: params(filters) })).data.data,
+    queryKey: ["reports", "loyalty-points", params(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/loyalty-points", { params: { ...params(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

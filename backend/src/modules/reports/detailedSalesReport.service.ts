@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { lineInScope, saleScopeWhere, parseAppScope,
   locationFiltersText,
   parseReportLocationQuery,
   reportDateWindow,
@@ -46,12 +46,13 @@ const fmt = (a: Acc, customers: number) => ({ ...(Object.fromEntries(KEYS.map((k
 
 export async function detailedSalesReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations(q, organizationId, allowedLocationIds);
 
   const [sales, productCategories, serviceCategories] = await Promise.all([
     prisma.sale.findMany({
-      where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to } },
+      where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to }, ...saleScopeWhere(scope) },
       select: {
         businessLocationId: true,
         customerId: true,
@@ -102,6 +103,8 @@ export async function detailedSalesReport(query: Record<string, unknown>, organi
     const extra = sale.totalAmount.sub(gross).sub(sale.taxAmount).add(sale.discountAmount);
     const paid = Prisma.Decimal.min(sale.paidAmount, sale.totalAmount);
     sale.items.forEach((line) => {
+      // The invoice's figures are still spread over all its lines; only this app's lines become rows.
+      if (!lineInScope(scope, line)) return;
       const share = lineSum.gt(0) ? line.subtotal.div(lineSum) : new Decimal(1).div(sale.items.length);
       const categoryId = line.product?.categoryId ?? line.service?.categoryId ?? null;
       const categoryKey = line.product && categoryId ? `pc:${productTop.get(categoryId) ?? categoryId}` : line.service && categoryId ? `sc:${categoryId}` : "none";

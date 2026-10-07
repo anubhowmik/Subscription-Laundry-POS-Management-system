@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import { locationFiltersText, parseReportLocationQuery, productCategoryTree, reportDateWindow, reportHeaderText, resolveReportLocations, xlsxFilename } from "./reportCommon";
+import { itemScopeWhere, saleScopeWhere, parseAppScope, locationFiltersText, parseReportLocationQuery, productCategoryTree, reportDateWindow, reportHeaderText, resolveReportLocations, xlsxFilename } from "./reportCommon";
 
 const { Decimal } = Prisma;
 type Decimal = Prisma.Decimal;
@@ -30,19 +30,21 @@ interface Cell {
 
 export async function dailyProductsReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations(q, organizationId, allowedLocationIds);
   const locationIds = locations.map((l) => l.id);
   const tree = await productCategoryTree(organizationId);
 
   const sales = await prisma.sale.findMany({
-    where: { organizationId, status: "FINAL", businessLocationId: { in: locationIds }, saleDate: { gte: from, lte: to } },
+    where: { organizationId, status: "FINAL", businessLocationId: { in: locationIds }, saleDate: { gte: from, lte: to }, ...saleScopeWhere(scope) },
     select: {
       id: true,
       businessLocationId: true,
       customerId: true,
       totalAmount: true,
       items: {
+        where: itemScopeWhere(scope),
         select: {
           quantity: true,
           subtotal: true,

@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { Prisma, type ItemFulfillmentStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { computeShippingStatus } from "../sales/sale.service";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseIdList,
@@ -48,12 +48,13 @@ export function invoiceCounter(invoiceNumber: string | null) {
 
 export async function salesReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const shippingStatuses = parseIdList(query.shippingStatuses) as ItemFulfillmentStatus[];
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations(q, organizationId, allowedLocationIds);
 
   const sales = await prisma.sale.findMany({
-    where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to } },
+    where: { organizationId, status: "FINAL", businessLocationId: { in: locations.map((l) => l.id) }, saleDate: { gte: from, lte: to }, ...saleScopeWhere(scope) },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,

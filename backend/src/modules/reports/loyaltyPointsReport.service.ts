@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseReportLocationQuery,
@@ -25,6 +25,7 @@ import {
 
 export async function loyaltyPointsReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const customerId = query.customerId ? String(query.customerId) : undefined;
   const { startDate, endDate, from, to } = reportDateWindow(q);
@@ -36,7 +37,7 @@ export async function loyaltyPointsReport(query: Record<string, unknown>, organi
         organizationId,
         type: { in: ["EARN", "REDEEM"] },
         createdAt: { gte: from, lte: to },
-        sale: { businessLocationId: { in: locations.map((l) => l.id) } },
+        sale: { businessLocationId: { in: locations.map((l) => l.id) }, ...saleScopeWhere(scope) },
         ...(customerId ? { customerId } : customerGroupId ? { customer: { customerGroupId } } : {}),
       },
       orderBy: { createdAt: "desc" },

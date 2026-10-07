@@ -9,6 +9,8 @@ import { Alert } from "../../components/ui/Alert";
 import { StatCard } from "../../components/ui/StatCard";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   ReportDataTable,
   amountColumn,
@@ -51,13 +53,14 @@ interface ReportData {
 export default function TaxReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const [filters, setFilters] = useState<BaseReportFilters>(() => initialBaseFilters(fiscalYearStartMonth));
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "tax", baseFilterParams(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/tax", { params: baseFilterParams(filters) })).data.data,
+    queryKey: ["reports", "tax", baseFilterParams(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/tax", { params: { ...baseFilterParams(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

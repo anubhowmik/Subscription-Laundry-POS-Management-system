@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma, type CompensationStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseReportLocationQuery,
@@ -36,6 +36,7 @@ export const COMPENSATION_STATUSES: CompensationStatus[] = ["PENDING", "APPROVED
 
 export async function compensationsReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const customerId = query.customerId ? String(query.customerId) : undefined;
   const status = query.status ? (String(query.status) as CompensationStatus) : undefined;
@@ -50,6 +51,7 @@ export async function compensationsReport(query: Record<string, unknown>, organi
         createdAt: { gte: from, lte: to },
         ...(customerId ? { customerId } : customerGroupId ? { customer: { customerGroupId } } : {}),
         ...(status ? { status } : {}),
+        ...(scope ? { sale: saleScopeWhere(scope) } : {}),
       },
       orderBy: { createdAt: "desc" },
       select: {

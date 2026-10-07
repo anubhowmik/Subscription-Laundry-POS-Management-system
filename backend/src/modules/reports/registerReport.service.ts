@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseReportLocationQuery,
@@ -44,6 +44,7 @@ const METHOD_LABELS: Record<string, { nameEn: string; nameAr: string }> = {
 
 export async function registerReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const userId = query.userId ? String(query.userId) : undefined;
   const status = query.status === "open" ? "OPEN" : query.status === "close" ? "CLOSED" : undefined;
   const { startDate, endDate, from, to } = reportDateWindow(q);
@@ -80,7 +81,7 @@ export async function registerReport(query: Record<string, unknown>, organizatio
         openedByUser: { select: { fullNameEn: true, fullNameAr: true, email: true } },
         closedByUser: { select: { fullNameEn: true, fullNameAr: true } },
         sales: {
-          where: { status: "FINAL" },
+          where: { status: "FINAL", ...saleScopeWhere(scope) },
           select: { payments: { where: { type: "SALE_PAYMENT" }, select: { amount: true, paymentMethodId: true, paymentDate: true } } },
         },
       },

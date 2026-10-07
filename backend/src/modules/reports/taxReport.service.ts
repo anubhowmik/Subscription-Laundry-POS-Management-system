@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import {
+import { saleScopeWhere, parseAppScope,
   localDateTime,
   locationFiltersText,
   parseReportLocationQuery,
@@ -33,6 +33,7 @@ const zero = () => new Decimal(0);
 
 export async function taxReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations(q, organizationId, allowedLocationIds);
 
@@ -45,6 +46,7 @@ export async function taxReport(query: Record<string, unknown>, organizationId: 
         businessLocationId: { in: locations.map((l) => l.id) },
         saleDate: { gte: from, lte: to },
         OR: [{ taxAmount: { gt: 0 } }, { items: { some: { taxAmount: { gt: 0 } } } }],
+        ...saleScopeWhere(scope),
       },
       orderBy: { saleDate: "desc" },
       select: {

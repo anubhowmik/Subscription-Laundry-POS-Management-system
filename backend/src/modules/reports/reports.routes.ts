@@ -27,6 +27,10 @@ import {
   loyaltyPointsReportQuerySchema,
   cashRegisterReportQuerySchema,
   customerVisitsReportQuerySchema,
+  dailySalesReportQuerySchema,
+  lflSalesReportQuerySchema,
+  salesAnalysisReportQuerySchema,
+  salesPerformanceReportQuerySchema,
 } from "./reports.validators";
 
 const router = Router();
@@ -76,6 +80,16 @@ router.get("/cash-register/export", requirePermission("reports.cash_register"), 
 // Reference's Reports > Customer Visits Report (no permission check in the reference; gated here).
 router.get("/customer-visits", requirePermission("reports.customer_visits"), validate(customerVisitsReportQuerySchema, "query"), controller.customerVisitsReport);
 router.get("/customer-visits/export", requirePermission("reports.customer_visits"), validate(customerVisitsReportQuerySchema, "query"), controller.customerVisitsReportExport);
+// Reference's Sales Reports > Daily Sales Report.
+router.get("/daily-sales", requirePermission("reports.daily_sales"), validate(dailySalesReportQuerySchema, "query"), controller.dailySalesReport);
+// Reference's Sales Reports > Weekly LFL Sales Report.
+router.get("/weekly-lfl-sales", requirePermission("reports.weekly_lfl_sales"), validate(lflSalesReportQuerySchema, "query"), controller.weeklyLflSalesReport);
+// Reference's Sales Reports > Monthly LFL Sales Report.
+router.get("/monthly-lfl-sales", requirePermission("reports.monthly_lfl_sales"), validate(lflSalesReportQuerySchema, "query"), controller.monthlyLflSalesReport);
+// Reference's Sales Reports > Sales Analysis Report.
+router.get("/sales-analysis", requirePermission("reports.sales_analysis"), validate(salesAnalysisReportQuerySchema, "query"), controller.salesAnalysisReport);
+// Reference's Sales Reports > Sales Performance Report.
+router.get("/sales-performance", requirePermission("reports.sales_performance"), validate(salesPerformanceReportQuerySchema, "query"), controller.salesPerformanceReport);
 // Reference's Reports > Sales Report (`sales_report` permission). "/sales" below is this app's
 // older summary endpoint used by the Reports Overview page.
 router.get("/sales-report", requirePermission("reports.sales_report"), validate(salesReportV2QuerySchema, "query"), controller.salesReportV2);

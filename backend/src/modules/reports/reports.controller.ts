@@ -14,6 +14,10 @@ import * as cashback from "./cashbackReport.service";
 import * as loyaltyPoints from "./loyaltyPointsReport.service";
 import * as cashRegister from "./cashRegisterReport.service";
 import * as customerVisits from "./customerVisitsReport.service";
+import * as dailySales from "./dailySalesReport.service";
+import * as lflSales from "./lflSalesReport.service";
+import * as salesAnalysis from "./salesAnalysisReport.service";
+import * as salesPerformance from "./salesPerformanceReport.service";
 import { prisma } from "../../config/prisma";
 import { customerSearch } from "../paymentAccounts/paymentAccount.service";
 import { sendSuccess } from "../../utils/apiResponse";
@@ -223,4 +227,29 @@ export async function customerVisitsReportExport(req: Request, res: Response) {
   const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
   const { workbook, filename } = await customerVisits.customerVisitsReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
   return sendXlsx(res, workbook, filename);
+}
+
+export async function dailySalesReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await dailySales.dailySalesReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function monthlyLflSalesReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await lflSales.lflSalesReport("month", req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function weeklyLflSalesReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await lflSales.lflSalesReport("week", req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function salesAnalysisReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await salesAnalysis.salesAnalysisReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function salesPerformanceReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await salesPerformance.salesPerformanceReport(req.query, req.user!.organizationId, allowedLocationIds));
 }

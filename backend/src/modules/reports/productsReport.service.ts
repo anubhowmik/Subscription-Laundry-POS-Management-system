@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
-import {
+import { itemScopeWhere, parseAppScope,
   locationFiltersText,
   parseIdList,
   productCategoryTree,
@@ -82,6 +82,7 @@ export async function customerGroupName(customerGroupId: string | undefined, org
 
 export async function productsReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const itemFilters = parseItemFilters(query);
   const { startDate, endDate, from, to } = reportDateWindow(q);
@@ -91,7 +92,7 @@ export async function productsReport(query: Record<string, unknown>, organizatio
 
   const lines = await prisma.saleItem.findMany({
     where: {
-      ...saleItemFilter(itemFilters, productCategoryIds),
+      AND: [saleItemFilter(itemFilters, productCategoryIds), itemScopeWhere(scope)],
       sale: {
         organizationId,
         status: "FINAL",

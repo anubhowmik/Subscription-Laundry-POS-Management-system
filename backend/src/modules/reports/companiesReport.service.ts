@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { NotFoundError } from "../../utils/AppError";
-import {
+import { saleScopeWhere, parseAppScope,
   locationFiltersText,
   parseReportLocationQuery,
   pickName,
@@ -42,6 +42,7 @@ interface Amounts {
 
 export async function companiesReport(query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null) {
   const q = parseReportLocationQuery(query);
+  const scope = parseAppScope(query);
   const customerGroupId = query.customerGroupId ? String(query.customerGroupId) : undefined;
   const { startDate, endDate, from, to } = reportDateWindow(q);
   const { locations, filters } = await resolveReportLocations(q, organizationId, allowedLocationIds);
@@ -62,6 +63,7 @@ export async function companiesReport(query: Record<string, unknown>, organizati
         businessLocationId: { in: locationIds },
         saleDate: { gte: from, lte: to },
         ...(customerGroupId ? { customerGroupId } : {}),
+        ...saleScopeWhere(scope),
       },
       _sum: { totalAmount: true, taxAmount: true },
     }),
@@ -72,6 +74,7 @@ export async function companiesReport(query: Record<string, unknown>, organizati
         businessLocationId: { in: locationIds },
         returnDate: { gte: from, lte: to },
         ...(customerGroupId ? { customerGroupId } : {}),
+        ...(scope ? { sale: saleScopeWhere(scope) } : {}),
       },
       _sum: { totalAmount: true, taxAmount: true },
     }),

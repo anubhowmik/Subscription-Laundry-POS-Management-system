@@ -1,12 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { parsePagination, parseSort } from "../../utils/pagination";
-import { NotFoundError } from "../../utils/AppError";
+import { NotFoundError, ValidationError } from "../../utils/AppError";
 
 const SORTABLE_FIELDS = ["nameEn", "createdAt", "updatedAt"];
 
 export async function list(query: Record<string, unknown>, organizationId: string) {
-  const { page, limit, skip } = parsePagination(query);
+  // Categories are a short list that every product form / POS filter loads in one go, so default
+  // to the whole list (the generic default of 25 silently hid categories past the 25th).
+  const { page, limit, skip } = parsePagination({ limit: 1000, ...query }, 1000);
   const orderBy = parseSort(query, SORTABLE_FIELDS, "nameEn");
 
   const where: Prisma.CategoryWhereInput = {
@@ -38,12 +40,30 @@ export async function getById(id: string, organizationId: string) {
   return category;
 }
 
+/**
+ * Categories are two levels deep, like the reference's taxonomies: a sub-category's parent must be a
+ * top-level category of the same business, and a category that has sub-categories can't itself
+ * become one.
+ */
+async function assertValidParent(parentId: string | null | undefined, organizationId: string, selfId?: string) {
+  if (!parentId) return;
+  if (parentId === selfId) throw new ValidationError([{ field: "parentId", message: "A category can't be its own parent" }]);
+  const parent = await prisma.category.findFirst({ where: { id: parentId, organizationId }, select: { parentId: true } });
+  if (!parent) throw new ValidationError([{ field: "parentId", message: "Parent category not found" }]);
+  if (parent.parentId) throw new ValidationError([{ field: "parentId", message: "A sub-category can't have sub-categories" }]);
+  if (selfId && (await prisma.category.count({ where: { parentId: selfId } })) > 0) {
+    throw new ValidationError([{ field: "parentId", message: "This category has sub-categories, so it can't become one" }]);
+  }
+}
+
 export async function create(input: Omit<Prisma.CategoryUncheckedCreateInput, "organizationId">, organizationId: string) {
+  await assertValidParent(input.parentId, organizationId);
   return prisma.category.create({ data: { ...input, organizationId } });
 }
 
 export async function update(id: string, input: Prisma.CategoryUncheckedUpdateInput, organizationId: string) {
   await getById(id, organizationId);
+  if (input.parentId !== undefined) await assertValidParent(input.parentId as string | null, organizationId, id);
   return prisma.category.update({ where: { id }, data: input });
 }
 

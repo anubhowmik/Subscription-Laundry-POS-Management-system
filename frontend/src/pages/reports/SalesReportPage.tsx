@@ -8,6 +8,8 @@ import { Alert } from "../../components/ui/Alert";
 import { MultiSelectDropdown } from "../../components/ui/MultiSelectDropdown";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   FilterField,
   ReportDataTable,
@@ -77,14 +79,15 @@ function PaymentMethodsCell({ methods, isAr }: { methods: MethodAmount[]; isAr: 
 export default function SalesReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const initial = (): Filters => ({ ...initialBaseFilters(fiscalYearStartMonth), shippingStatuses: [] });
   const [filters, setFilters] = useState<Filters>(initial);
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "sales-report", params(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/sales-report", { params: params(filters) })).data.data,
+    queryKey: ["reports", "sales-report", params(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<ReportData>>("/reports/sales-report", { params: { ...params(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });

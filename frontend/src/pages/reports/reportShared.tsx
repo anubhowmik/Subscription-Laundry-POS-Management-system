@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { useCurrentApp } from "../../components/layout/Sidebar";
 import { cn } from "../../lib/cn";
 import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
 import { Pagination } from "../../components/ui/Pagination";
@@ -51,6 +52,8 @@ export function useReportOptions() {
   return useQuery({
     queryKey: ["reports", "options"],
     queryFn: async () => (await api.get<ApiSuccess<ReportOptions>>("/reports/options")).data.data,
+    // Branches / groups / categories / items barely change; don't refetch on every report page.
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -104,6 +107,8 @@ export function BaseFilterFields({
   hideLocation = false,
   locationAllLabel,
   afterLocation,
+  beforeGroup,
+  hideDateRange = false,
 }: {
   value: BaseReportFilters;
   onChange: (v: BaseReportFilters) => void;
@@ -118,6 +123,10 @@ export function BaseFilterFields({
   locationAllLabel?: string;
   /** Report-specific fields the reference places between Business Location and Date Range. */
   afterLocation?: ReactNode;
+  /** Fields the reference places before Location Group (e.g. the Daily Sales Report's single Date). */
+  beforeGroup?: ReactNode;
+  /** Reports filtered by a single date rather than a range. */
+  hideDateRange?: boolean;
 }) {
   // Reference (report.js): picking a Location Group narrows the Business Location list to it.
   const locationOptions = (options?.locations ?? [])
@@ -125,6 +134,7 @@ export function BaseFilterFields({
     .map((l) => ({ value: l.id, label: branchLabel(l, isAr) }));
   return (
     <>
+      {beforeGroup}
       <FilterField label={isAr ? "مجموعات الفروع" : "Location Group"}>
         <select
           value={value.locationGroupId}
@@ -171,9 +181,11 @@ export function BaseFilterFields({
       </FilterField>
       )}
       {afterLocation}
-      <FilterField label={isAr ? "نطاق التاريخ" : "Date Range"}>
-        <DateRangeFilter value={value.range} onChange={(range) => onChange({ ...value, range })} isAr={isAr} fiscalYearStartMonth={fiscalYearStartMonth} />
-      </FilterField>
+      {!hideDateRange && (
+        <FilterField label={isAr ? "نطاق التاريخ" : "Date Range"}>
+          <DateRangeFilter value={value.range} onChange={(range) => onChange({ ...value, range })} isAr={isAr} fiscalYearStartMonth={fiscalYearStartMonth} />
+        </FilterField>
+      )}
     </>
   );
 }
@@ -227,6 +239,14 @@ export function ReportDataTable<T>({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
+  // New data (a filter changed) starts again from the first page. Compared by row keys, not array
+  // identity - several pages rebuild their rows array on every render.
+  const rowsSignature = rows.map(rowKey).join("|");
+  const [lastSignature, setLastSignature] = useState(rowsSignature);
+  if (lastSignature !== rowsSignature) {
+    setLastSignature(rowsSignature);
+    setPage(1);
+  }
   const columnVisibility = useColumnVisibility(`report:${storageKey}`, columns.map((c) => c.key));
   const visibleColumns = columns.filter((c) => columnVisibility.isVisible(c.key));
   const exportColumns = visibleColumns.filter((c) => !c.noExport);
@@ -383,12 +403,13 @@ export function ItemFilterFields({
   options: ReportOptions | undefined;
   isAr: boolean;
 }) {
+  const scope = useReportAppScope();
   return (
     <>
       <FilterField label={isAr ? "الفئة" : "Category"}>
         <select value={categoryId} onChange={(e) => onChange({ categoryId: e.target.value, itemIds })} className={cn(selectClass, "w-full")}>
           <option value="">{isAr ? "الكل" : "All"}</option>
-          {(options?.categories ?? []).map((c) => (
+          {(options?.categories ?? []).filter((c) => keyInScope(scope, c.key)).map((c) => (
             <option key={c.key} value={c.key}>
               {pickName(c, isAr)}
             </option>
@@ -397,7 +418,7 @@ export function ItemFilterFields({
       </FilterField>
       <FilterField label={isAr ? "المنتج" : "Product"}>
         <MultiSelectDropdown
-          options={(options?.items ?? []).map((i) => ({ value: i.key, label: `${pickName(i, isAr)} (${i.code})` }))}
+          options={(options?.items ?? []).filter((i) => keyInScope(scope, i.key)).map((i) => ({ value: i.key, label: `${pickName(i, isAr)} (${i.code})` }))}
           value={itemIds}
           onChange={(v) => onChange({ categoryId, itemIds: v })}
           placeholder={isAr ? "الكل" : "All"}
@@ -464,4 +485,25 @@ export function ContactFilterField({ value, onChange, isAr }: { value: PickedCus
       )}
     </div>
   );
+}
+
+/**
+ * Service POS and Product POS are separate apps: a report opened inside one of them covers only
+ * that app's sales (the backend scopes on `app`). POS Laundry - or no app at all - sees everything.
+ */
+export type ReportAppScope = "service" | "product" | undefined;
+
+export function useReportAppScope(): ReportAppScope {
+  const key = useCurrentApp()?.key;
+  return key === "posService" ? "service" : key === "posProduct" ? "product" : undefined;
+}
+
+/** The `app` query param for a scope (nothing for POS Laundry). */
+export const scopeParams = (scope: ReportAppScope) => (scope ? { app: scope } : {});
+
+/** Whether a picker option keyed "pc:"/"sc:"/"p:"/"s:" belongs to the current app. */
+export function keyInScope(scope: ReportAppScope, key: string) {
+  if (!scope) return true;
+  const isService = key.startsWith("sc:") || key.startsWith("s:");
+  return scope === "service" ? isService : !isService;
 }

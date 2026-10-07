@@ -8,6 +8,8 @@ import { Alert } from "../../components/ui/Alert";
 import { Badge } from "../../components/ui/Badge";
 import { errorMessage } from "../paymentAccounts/shared";
 import {
+  useReportAppScope,
+  scopeParams,
   BaseFilterFields,
   ContactFilterField,
   CustomerGroupField,
@@ -54,6 +56,7 @@ const params = (f: Filters) => ({
 export default function CashbackReportPage() {
   const { i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
+  const appScope = useReportAppScope();
   const lang = isAr ? "ar" : "en";
   const { fiscalYearStartMonth } = useReportOrgSettings();
   const initial = (): Filters => ({ ...initialBaseFilters(fiscalYearStartMonth), customerGroupId: "", customer: null });
@@ -61,8 +64,8 @@ export default function CashbackReportPage() {
 
   const { data: options } = useReportOptions();
   const { data: report, isFetching, error } = useQuery({
-    queryKey: ["reports", "cashback", params(filters)],
-    queryFn: async () => (await api.get<ApiSuccess<{ rows: Row[] }>>("/reports/cashback", { params: params(filters) })).data.data,
+    queryKey: ["reports", "cashback", params(filters), appScope],
+    queryFn: async () => (await api.get<ApiSuccess<{ rows: Row[] }>>("/reports/cashback", { params: { ...params(filters), ...scopeParams(appScope) } })).data.data,
     enabled: Boolean(filters.range.from && filters.range.to),
     retry: false,
   });
