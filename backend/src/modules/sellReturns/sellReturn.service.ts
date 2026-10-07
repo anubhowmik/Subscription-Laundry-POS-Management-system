@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
+import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
 
 const { Decimal } = Prisma;
 
@@ -224,7 +225,7 @@ async function createRefundPayment(
   organizationId: string,
   notes?: string,
 ) {
-  await tx.payment.create({
+  const refund = await tx.payment.create({
     data: {
       saleId: sale.id,
       customerId: sale.customerId,
@@ -237,6 +238,7 @@ async function createRefundPayment(
       createdBy,
     },
   });
+  await finalizeNewPayments(tx, [refund.id]);
 
   const paymentMethod = await tx.paymentMethod.findUnique({ where: { id: paymentMethodId }, select: { code: true } });
   if (paymentMethod?.code === "CASH") {
@@ -286,6 +288,7 @@ export async function create(input: CreateSellReturnInput, organizationId: strin
         organizationId,
         saleId: sale.id,
         customerId: sale.customerId,
+        customerGroupId: sale.customerGroupId,
         businessLocationId: sale.businessLocationId,
         creditNoteNumber,
         subtotal: subtotal.toDecimalPlaces(2),

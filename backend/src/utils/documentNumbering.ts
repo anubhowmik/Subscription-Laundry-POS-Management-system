@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 // numberResetYearly is on, the first number claimed of ANY kind after the calendar year rolls
 // over zeroes every sequence together and stamps lastNumberResetYear, rather than each sequence
 // resetting independently the first time it happens to be used that year.
-export type DocumentNumberKind = "invoice" | "quote" | "draft" | "return" | "reissue" | "expense" | "adjustment";
+export type DocumentNumberKind = "invoice" | "quote" | "draft" | "return" | "reissue" | "expense" | "adjustment" | "payment";
 
 export async function claimBusinessLocationNumber(
   tx: Prisma.TransactionClient,
@@ -33,6 +33,7 @@ export async function claimBusinessLocationNumber(
         lastReissueSeq: kind === "reissue" ? 1 : 0,
         lastExpenseSeq: kind === "expense" ? 1 : 0,
         lastAdjustmentSeq: kind === "adjustment" ? 1 : 0,
+        lastPaymentSeq: kind === "payment" ? 1 : 0,
         lastNumberResetYear: currentYear,
       },
     });
@@ -59,6 +60,9 @@ export async function claimBusinessLocationNumber(
       case "adjustment":
         updated = await tx.businessLocation.update({ where: { id: businessLocationId }, data: { lastAdjustmentSeq: { increment: 1 } } });
         break;
+      case "payment":
+        updated = await tx.businessLocation.update({ where: { id: businessLocationId }, data: { lastPaymentSeq: { increment: 1 } } });
+        break;
     }
   }
 
@@ -77,5 +81,7 @@ export async function claimBusinessLocationNumber(
       return `${updated.expenseNumberPrefix}${String(updated.lastExpenseSeq).padStart(6, "0")}`;
     case "adjustment":
       return `${updated.adjustmentNumberPrefix}${String(updated.lastAdjustmentSeq).padStart(6, "0")}`;
+    case "payment":
+      return `${updated.paymentNumberPrefix}${String(updated.lastPaymentSeq).padStart(6, "0")}`;
   }
 }

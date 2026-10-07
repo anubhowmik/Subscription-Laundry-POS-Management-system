@@ -22,7 +22,8 @@ import { TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/Ta
 import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { LoadingState } from "../../components/ui/Spinner";
 import { labelClass, inputClass, selectClass, errorTextClass } from "../../components/ui/formClasses";
-import { Building2, CheckCircle2, Pencil, FileText, Power } from "lucide-react";
+import { Building2, CheckCircle2, Pencil, FileText, Power, Landmark } from "lucide-react";
+import { LocationPaymentAccountsModal } from "../paymentAccounts/LocationPaymentAccountsModal";
 import type { ReactNode } from "react";
 
 const schema = z.object({
@@ -61,7 +62,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function BusinessLocationsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -70,6 +71,7 @@ export default function BusinessLocationsPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
   const [layoutEditing, setLayoutEditing] = useState<BusinessLocation | null>(null);
+  const [paymentOptionsFor, setPaymentOptionsFor] = useState<BusinessLocation | null>(null);
 
   const { data: locations } = useQuery({
     queryKey: ["all-business-locations-admin"],
@@ -377,6 +379,7 @@ export default function BusinessLocationsPage() {
                     <RowActions>
                       <RowActionButton icon={Pencil} label={t("common.edit")} onClick={() => openEdit(loc)} />
                       <RowActionButton icon={FileText} label="Invoice Layout" onClick={() => setLayoutEditing(loc)} />
+                      <RowActionButton icon={Landmark} label={i18n.resolvedLanguage === "ar" ? "خيارات الدفع" : "Payment Options"} onClick={() => setPaymentOptionsFor(loc)} />
                       {user?.isSystemAdmin && (
                         <RowActionButton
                           icon={Power}
@@ -589,6 +592,9 @@ export default function BusinessLocationsPage() {
       )}
 
       {layoutEditing && <InvoiceLayoutModal location={layoutEditing} onClose={() => setLayoutEditing(null)} />}
+      {paymentOptionsFor && (
+        <LocationPaymentAccountsModal location={paymentOptionsFor} isAr={i18n.resolvedLanguage === "ar"} onClose={() => setPaymentOptionsFor(null)} />
+      )}
     </div>
   );
 }

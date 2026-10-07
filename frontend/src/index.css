@@ -195,3 +195,26 @@ table tbody tr:hover {
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Report printing: when a page has a `.print-area` (a report's header + table), the browser's
+   print output is just that block - not the sidebar, top bar, filters or footer around it.
+   Pages with no `.print-area` print as before. Mark extra on-screen-only controls inside the area
+   with Tailwind's `print:hidden`. */
+@media print {
+  body:has(.print-area) * {
+    visibility: hidden;
+  }
+  body:has(.print-area) .print-area,
+  body:has(.print-area) .print-area * {
+    visibility: visible;
+  }
+  body:has(.print-area) .print-area {
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0;
+    width: 100%;
+  }
+  .print-area table {
+    font-size: 10px;
+  }
+}

@@ -18,6 +18,7 @@ import { verifyAndConsumeSessionTx } from "../bnpl/bnpl.service";
 import { BNPL_PAYMENT_CODES } from "../bnpl/bnpl.constants";
 import { TAX_EXEMPTION_REASONS } from "../zatca/taxExemptionReasons";
 import { env } from "../../config/env";
+import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
 
 const { Decimal } = Prisma;
 
@@ -289,7 +290,9 @@ async function priceLine(
       taxAmount: taxAmount.toDecimalPlaces(2),
       discountAmount,
       subtotal: subtotal.toDecimalPlaces(2),
-      total: gross.toDecimalPlaces(2),
+      // subtotal + tax, not `gross`: gross already includes tax only for INCLUSIVE pricing - for the
+      // default EXCLUSIVE pricing it's the pre-tax amount, which left product lines' total short of their VAT.
+      total: subtotal.add(taxAmount).toDecimalPlaces(2),
       manageStock: product.manageStock,
       taxCategoryCode: taxOverride?.categoryCode ?? product.tax?.categoryCode ?? "S",
       note: item.note,
@@ -773,6 +776,7 @@ export async function checkout(
           invoiceNumber: null,
           businessLocationId: input.businessLocationId,
           customerId: input.customerId,
+          customerGroupId: customer.customerGroupId,
           saleDate,
           estimatedReadyAt,
           status: "DRAFT",
@@ -977,6 +981,7 @@ export async function checkout(
         invoiceNumber,
         businessLocationId: input.businessLocationId,
         customerId: input.customerId,
+        customerGroupId: customer.customerGroupId,
         saleDate,
         estimatedReadyAt,
         saleType,
@@ -1072,7 +1077,7 @@ export async function checkout(
     if (appliedCreditAmount.gt(0)) {
       const storeCreditMethod = await tx.paymentMethod.findFirst({ where: { organizationId, code: "STORE_CREDIT" } });
       if (!storeCreditMethod) throw new AppError(500, "Store credit payment method is not configured for this organization");
-      await tx.payment.create({
+      const storeCreditPayment = await tx.payment.create({
         data: {
           saleId: sale.id,
           customerId: input.customerId,
@@ -1083,22 +1088,28 @@ export async function checkout(
           createdBy,
         },
       });
+      await finalizeNewPayments(tx, [storeCreditPayment.id]);
     }
 
     if (input.payments.length > 0) {
-      await tx.payment.createMany({
-        data: input.payments.map((p) => ({
-          saleId: sale.id,
-          customerId: input.customerId,
-          businessLocationId: input.businessLocationId,
-          amount: p.amount,
-          paymentMethodId: p.paymentMethodId,
-          type: "SALE_PAYMENT" as const,
-          referenceNumber: p.referenceNumber,
-          notes: p.notes,
-          createdBy,
-        })),
-      });
+      const createdPaymentIds: string[] = [];
+      for (const p of input.payments) {
+        const created = await tx.payment.create({
+          data: {
+            saleId: sale.id,
+            customerId: input.customerId,
+            businessLocationId: input.businessLocationId,
+            amount: p.amount,
+            paymentMethodId: p.paymentMethodId,
+            type: "SALE_PAYMENT",
+            referenceNumber: p.referenceNumber,
+            notes: p.notes,
+            createdBy,
+          },
+        });
+        createdPaymentIds.push(created.id);
+      }
+      await finalizeNewPayments(tx, createdPaymentIds);
 
       const methods = await tx.paymentMethod.findMany({
         where: { id: { in: input.payments.map((p) => p.paymentMethodId) } },
@@ -1535,7 +1546,7 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
     if (appliedCreditAmount.gt(0)) {
       const storeCreditMethod = await tx.paymentMethod.findFirst({ where: { organizationId, code: "STORE_CREDIT" } });
       if (!storeCreditMethod) throw new AppError(500, "Store credit payment method is not configured for this organization");
-      await tx.payment.create({
+      const storeCreditPayment = await tx.payment.create({
         data: {
           saleId: draft.id,
           customerId: draft.customerId,
@@ -1546,22 +1557,28 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
           createdBy,
         },
       });
+      await finalizeNewPayments(tx, [storeCreditPayment.id]);
     }
 
     if (input.payments.length > 0) {
-      await tx.payment.createMany({
-        data: input.payments.map((p) => ({
-          saleId: draft.id,
-          customerId: draft.customerId,
-          businessLocationId: draft.businessLocationId,
-          amount: p.amount,
-          paymentMethodId: p.paymentMethodId,
-          type: "SALE_PAYMENT" as const,
-          referenceNumber: p.referenceNumber,
-          notes: p.notes,
-          createdBy,
-        })),
-      });
+      const createdPaymentIds: string[] = [];
+      for (const p of input.payments) {
+        const created = await tx.payment.create({
+          data: {
+            saleId: draft.id,
+            customerId: draft.customerId,
+            businessLocationId: draft.businessLocationId,
+            amount: p.amount,
+            paymentMethodId: p.paymentMethodId,
+            type: "SALE_PAYMENT",
+            referenceNumber: p.referenceNumber,
+            notes: p.notes,
+            createdBy,
+          },
+        });
+        createdPaymentIds.push(created.id);
+      }
+      await finalizeNewPayments(tx, createdPaymentIds);
 
       const methods = await tx.paymentMethod.findMany({
         where: { id: { in: input.payments.map((p) => p.paymentMethodId) } },

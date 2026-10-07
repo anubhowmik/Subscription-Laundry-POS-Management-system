@@ -22,6 +22,7 @@ import { labelClass, inputClass, inputSmClass, selectClass } from "../../compone
 import { Wallet } from "lucide-react";
 import { useCurrentApp } from "../../components/layout/Sidebar";
 import type { ReactNode } from "react";
+import { usePaymentAccountOptions } from "../paymentAccounts/shared";
 
 type PaymentStatus = "PAID" | "PARTIAL" | "DUE" | "OVERPAID";
 
@@ -401,6 +402,8 @@ function ExpenseFormModal({
   const [subtotal, setSubtotal] = useState("");
   const [taxPercent, setTaxPercent] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const { data: paymentAccounts } = usePaymentAccountOptions();
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringIntervalDays, setRecurringIntervalDays] = useState("30");
   const [notes, setNotes] = useState("");
@@ -431,6 +434,7 @@ function ExpenseFormModal({
         subtotal: Number(subtotal),
         taxPercent: taxPercent ? Number(taxPercent) : undefined,
         paidAmount: paidAmount ? Number(paidAmount) : undefined,
+        paymentAccountId: paymentAccountId || null,
         isRecurring,
         recurringIntervalDays: isRecurring ? Number(recurringIntervalDays) : undefined,
         notes: notes || undefined,
@@ -548,6 +552,17 @@ function ExpenseFormModal({
         <div>
           <label className={labelClass}>{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
           <input type="number" min={0} step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>{isAr ? "حساب الدفع" : "Payment Account"}</label>
+          <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)} className={selectClass}>
+            <option value="">{isAr ? "لا يوجد" : "None"}</option>
+            {(paymentAccounts ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="rounded-lg border border-slate-200 p-3">

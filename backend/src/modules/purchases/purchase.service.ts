@@ -3,6 +3,8 @@ import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { assertLocationAllowed, resolveBusinessLocationFilter } from "../../utils/locationScope";
+import { syncDocumentAccountTransaction } from "../paymentAccounts/paymentAccountLink";
+import { assertPaymentAccountUsable } from "../paymentAccounts/paymentAccount.service";
 
 const { Decimal } = Prisma;
 
@@ -19,6 +21,7 @@ interface CreatePurchaseInput {
   businessLocationId: string;
   items: { productId: string; quantity: number; unitCost: number }[];
   paidAmount?: number;
+  paymentAccountId?: string | null;
   notes?: string;
 }
 
@@ -36,6 +39,7 @@ export async function create(
   const location = await prisma.businessLocation.findFirst({ where: { id: input.businessLocationId, organizationId } });
   if (!location) throw new NotFoundError("Business location not found");
   assertLocationAllowed(input.businessLocationId, allowedLocationIds);
+  await assertPaymentAccountUsable(input.paymentAccountId, organizationId);
 
   const products = await prisma.product.findMany({
     where: { id: { in: input.items.map((l) => l.productId) }, organizationId },
@@ -83,6 +87,7 @@ export async function create(
         taxAmount: taxAmount.toDecimalPlaces(2),
         totalAmount: totalAmount.toDecimalPlaces(2),
         paidAmount: paidAmount.toDecimalPlaces(2),
+        paymentAccountId: input.paymentAccountId || null,
         notes: input.notes,
         createdBy,
         items: {
@@ -129,6 +134,14 @@ export async function create(
     // paid immediately - the same net-effect pattern as SellReturn's customer balance update.
     const netBalanceChange = totalAmount.sub(paidAmount);
     await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { increment: netBalanceChange.toDecimalPlaces(2) } } });
+
+    await syncDocumentAccountTransaction(tx, "purchase", {
+      id: purchase.id,
+      paymentAccountId: purchase.paymentAccountId,
+      paidAmount: purchase.paidAmount,
+      date: purchase.purchaseDate,
+      createdBy,
+    });
 
     return purchase;
   });

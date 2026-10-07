@@ -68,7 +68,7 @@ export async function importSales(sheet: ParsedSheet, organizationId: string, us
   }
 
   const phones = [...new Set(parsed.map((p) => p.data.customerPhone))];
-  const customers = await prisma.customer.findMany({ where: { organizationId, phone: { in: phones } }, select: { id: true, phone: true } });
+  const customers = await prisma.customer.findMany({ where: { organizationId, phone: { in: phones } }, select: { id: true, phone: true, customerGroupId: true } });
   const customerByPhone = new Map(customers.map((c) => [c.phone, c]));
   for (const { rowNumber, data } of parsed) {
     if (!customerByPhone.has(data.customerPhone)) errors.push(`Row ${rowNumber}: customer with phone "${data.customerPhone}" was not found`);
@@ -187,6 +187,7 @@ export async function importSales(sheet: ParsedSheet, organizationId: string, us
             organizationId,
             businessLocationId: location.id,
             customerId: customer.id,
+            customerGroupId: customer.customerGroupId,
             invoiceNumber,
             saleDate: lines[0].data.date ?? now,
             status: "FINAL",

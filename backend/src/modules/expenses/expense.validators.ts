@@ -17,6 +17,7 @@ export const createExpenseSchema = z.object({
   subtotal: z.number().min(0),
   taxPercent: z.number().min(0).max(100).optional(),
   paidAmount: z.number().min(0).optional(),
+  paymentAccountId: z.string().uuid().nullable().optional(),
   isRecurring: z.boolean().optional(),
   recurringIntervalDays: z.number().int().positive().optional(),
   receiptUrl: z.string().optional(),
@@ -25,6 +26,7 @@ export const createExpenseSchema = z.object({
 
 export const updateExpenseSchema = z.object({
   paidAmount: z.number().min(0).optional(),
+  paymentAccountId: z.string().uuid().nullable().optional(),
   notes: z.string().optional(),
   receiptUrl: z.string().optional(),
 });

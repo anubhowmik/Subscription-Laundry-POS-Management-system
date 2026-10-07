@@ -32,6 +32,20 @@ import PriceListsPage from "./pages/priceLists/PriceListsPage";
 import CustomerGroupsPage from "./pages/customerGroups/CustomerGroupsPage";
 import ImportContactsPage from "./pages/importContacts/ImportContactsPage";
 import ReportsPage from "./pages/reports/ReportsPage";
+import DailyProductsReportPage from "./pages/reports/DailyProductsReportPage";
+import CompaniesReportPage from "./pages/reports/CompaniesReportPage";
+import DetailedCompaniesReportPage from "./pages/reports/DetailedCompaniesReportPage";
+import ProductsReportPage from "./pages/reports/ProductsReportPage";
+import SalesReportPage from "./pages/reports/SalesReportPage";
+import DetailedSalesReportPage from "./pages/reports/DetailedSalesReportPage";
+import BranchSalesReportPage from "./pages/reports/BranchSalesReportPage";
+import TaxReportPage from "./pages/reports/TaxReportPage";
+import RegisterReportPage from "./pages/reports/RegisterReportPage";
+import CompensationsReportPage from "./pages/reports/CompensationsReportPage";
+import CashbackReportPage from "./pages/reports/CashbackReportPage";
+import LoyaltyPointsReportPage from "./pages/reports/LoyaltyPointsReportPage";
+import CashRegisterReportPage from "./pages/reports/CashRegisterReportPage";
+import CustomerVisitsReportPage from "./pages/reports/CustomerVisitsReportPage";
 import StockAdjustmentsPage from "./pages/inventory/StockAdjustmentsPage";
 import StockAdjustmentCreatePage from "./pages/inventory/StockAdjustmentCreatePage";
 import StockTransfersPage from "./pages/inventory/StockTransfersPage";
@@ -55,6 +69,12 @@ import SellReturnReceiptPage from "./pages/sellReturns/SellReturnReceiptPage";
 import ChartOfAccountsPage from "./pages/accounting/ChartOfAccountsPage";
 import JournalEntriesPage from "./pages/accounting/JournalEntriesPage";
 import AccountingReportsPage from "./pages/accounting/AccountingReportsPage";
+import PaymentAccountsPage from "./pages/paymentAccounts/PaymentAccountsPage";
+import AccountBookPage from "./pages/paymentAccounts/AccountBookPage";
+import SellPaymentsPage from "./pages/paymentAccounts/SellPaymentsPage";
+import CashFlowPage from "./pages/paymentAccounts/CashFlowPage";
+import PaymentAccountReportPage from "./pages/paymentAccounts/PaymentAccountReportPage";
+import { BalanceSheetPage, TrialBalancePage } from "./pages/paymentAccounts/AccountReportsPages";
 import InvoiceLayoutsPage from "./pages/settings/InvoiceLayoutsPage";
 import ZatcaPage from "./pages/zatca/ZatcaPage";
 import PublicQuotePage from "./pages/publicQuote/PublicQuotePage";
@@ -182,6 +202,49 @@ export default function App() {
             <Route element={<PermissionRoute anyOf={["reports.sales", "reports.inventory"]} />}>
               <Route path="reports" element={<ReportsPage />} />
             </Route>
+            {/* The EJADA reference's Reports dropdown, one sub-report at a time (ReportController). */}
+            <Route element={<PermissionRoute anyOf={["reports.daily_products"]} />}>
+              <Route path="reports/daily-products" element={<DailyProductsReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.companies"]} />}>
+              <Route path="reports/companies" element={<CompaniesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.detailed_companies"]} />}>
+              <Route path="reports/detailed-companies" element={<DetailedCompaniesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.products"]} />}>
+              <Route path="reports/products" element={<ProductsReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.sales_report"]} />}>
+              <Route path="reports/sales-report" element={<SalesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.detailed_sales"]} />}>
+              <Route path="reports/detailed-sales" element={<DetailedSalesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.branch_sales"]} />}>
+              <Route path="reports/branch-sales" element={<BranchSalesReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.tax"]} />}>
+              <Route path="reports/tax" element={<TaxReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.register"]} />}>
+              <Route path="reports/register" element={<RegisterReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.compensations"]} />}>
+              <Route path="reports/compensations" element={<CompensationsReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.cashback"]} />}>
+              <Route path="reports/cashback" element={<CashbackReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.loyalty_points"]} />}>
+              <Route path="reports/loyalty-points" element={<LoyaltyPointsReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.cash_register"]} />}>
+              <Route path="reports/cash-register" element={<CashRegisterReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.customer_visits"]} />}>
+              <Route path="reports/customer-visits" element={<CustomerVisitsReportPage />} />
+            </Route>
             <Route element={<PermissionRoute anyOf={["messages.manage"]} />}>
               <Route path="messages" element={<MessagesPage />} />
             </Route>
@@ -203,6 +266,19 @@ export default function App() {
               <Route path="accounting/chart-of-accounts" element={<ChartOfAccountsPage />} />
               <Route path="accounting/journal-entries" element={<JournalEntriesPage />} />
               <Route path="accounting/reports" element={<AccountingReportsPage />} />
+            </Route>
+            {/* The EJADA reference's own "Payment Accounts" dropdown (AccountController /
+                AccountReportsController / ReportController@sellPaymentReport). */}
+            <Route element={<PermissionRoute anyOf={["payment_accounts.access"]} />}>
+              <Route path="payment-accounts" element={<PaymentAccountsPage />} />
+              <Route path="payment-accounts/balance-sheet" element={<BalanceSheetPage />} />
+              <Route path="payment-accounts/trial-balance" element={<TrialBalancePage />} />
+              <Route path="payment-accounts/cash-flow" element={<CashFlowPage />} />
+              <Route path="payment-accounts/payment-account-report" element={<PaymentAccountReportPage />} />
+              <Route path="payment-accounts/:id" element={<AccountBookPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["sell_payment_report.view", "payment_accounts.access"]} />}>
+              <Route path="payment-accounts/sell-payments" element={<SellPaymentsPage />} />
             </Route>
           </Route>
 

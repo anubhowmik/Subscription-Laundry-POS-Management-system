@@ -4,6 +4,8 @@ import { AppError, NotFoundError } from "../../utils/AppError";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { claimBusinessLocationNumber } from "../../utils/documentNumbering";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
+import { syncDocumentAccountTransaction } from "../paymentAccounts/paymentAccountLink";
+import { assertPaymentAccountUsable } from "../paymentAccounts/paymentAccount.service";
 
 const { Decimal } = Prisma;
 
@@ -49,6 +51,7 @@ interface CreateExpenseInput {
   subtotal: number;
   taxPercent?: number;
   paidAmount?: number;
+  paymentAccountId?: string | null;
   isRecurring?: boolean;
   recurringIntervalDays?: number;
   receiptUrl?: string;
@@ -58,6 +61,7 @@ interface CreateExpenseInput {
 export async function create(input: CreateExpenseInput, organizationId: string, createdBy: string) {
   const category = await prisma.expenseCategory.findFirst({ where: { id: input.categoryId, organizationId } });
   if (!category) throw new NotFoundError("Expense category not found");
+  await assertPaymentAccountUsable(input.paymentAccountId, organizationId);
 
   const subtotal = new Decimal(input.subtotal).toDecimalPlaces(2);
   const taxPercent = new Decimal(input.taxPercent ?? 0);
@@ -74,7 +78,7 @@ export async function create(input: CreateExpenseInput, organizationId: string, 
 
   return prisma.$transaction(async (tx) => {
     const expenseNumber = await claimBusinessLocationNumber(tx, input.businessLocationId, "expense");
-    return tx.expense.create({
+    const created = await tx.expense.create({
       data: {
         organizationId,
         expenseNumber,
@@ -89,6 +93,7 @@ export async function create(input: CreateExpenseInput, organizationId: string, 
         paidAmount,
         dueAmount,
         paymentStatus,
+        paymentAccountId: input.paymentAccountId || null,
         isRecurring: input.isRecurring ?? false,
         recurringIntervalDays: input.recurringIntervalDays,
         nextRecurrenceAt,
@@ -97,6 +102,14 @@ export async function create(input: CreateExpenseInput, organizationId: string, 
         createdBy,
       },
     });
+    await syncDocumentAccountTransaction(tx, "expense", {
+      id: created.id,
+      paymentAccountId: created.paymentAccountId,
+      paidAmount: created.paidAmount,
+      date: created.expenseDate,
+      createdBy,
+    });
+    return created;
   });
 }
 
@@ -129,6 +142,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
         businessLocation: { select: { branchName: true } },
         supplier: { select: { nameEn: true, nameAr: true } },
         createdByUser: { select: { fullNameEn: true } },
+        paymentAccount: { select: { name: true } },
       },
     }),
     prisma.expense.count({ where }),
@@ -153,6 +167,7 @@ export async function getById(id: string, organizationId: string, allowedLocatio
 
 interface UpdateExpenseInput {
   paidAmount?: number;
+  paymentAccountId?: string | null;
   notes?: string;
   receiptUrl?: string;
 }
@@ -164,16 +179,28 @@ export async function update(id: string, input: UpdateExpenseInput, organization
   const paidAmount = input.paidAmount != null ? Decimal.min(new Decimal(input.paidAmount), expense.totalAmount).toDecimalPlaces(2) : expense.paidAmount;
   const dueAmount = expense.totalAmount.sub(paidAmount);
   const paymentStatus = computePaymentStatus(paidAmount, expense.totalAmount);
+  if (input.paymentAccountId !== undefined) await assertPaymentAccountUsable(input.paymentAccountId, organizationId);
 
-  return prisma.expense.update({
-    where: { id },
-    data: {
-      paidAmount,
-      dueAmount,
-      paymentStatus,
-      notes: input.notes ?? expense.notes,
-      receiptUrl: input.receiptUrl ?? expense.receiptUrl,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.expense.update({
+      where: { id },
+      data: {
+        paidAmount,
+        dueAmount,
+        paymentStatus,
+        ...(input.paymentAccountId !== undefined ? { paymentAccountId: input.paymentAccountId || null } : {}),
+        notes: input.notes ?? expense.notes,
+        receiptUrl: input.receiptUrl ?? expense.receiptUrl,
+      },
+    });
+    await syncDocumentAccountTransaction(tx, "expense", {
+      id: updated.id,
+      paymentAccountId: updated.paymentAccountId,
+      paidAmount: updated.paidAmount,
+      date: updated.expenseDate,
+      createdBy: updated.createdBy,
+    });
+    return updated;
   });
 }
 

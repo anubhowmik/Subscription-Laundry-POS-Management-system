@@ -236,7 +236,9 @@ export function FiltersMenu({
       if (popoverRef.current?.contains(target)) return;
       setOpen(false);
     }
-    function onScrollOrResize() {
+    function onScrollOrResize(e: Event) {
+      // Scrolling the panel's own (overflow-y-auto) body must not close it.
+      if (e.target instanceof Node && popoverRef.current?.contains(e.target)) return;
       setOpen(false);
     }
     document.addEventListener("mousedown", onClickOutside);

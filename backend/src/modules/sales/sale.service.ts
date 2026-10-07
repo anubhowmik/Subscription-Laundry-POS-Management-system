@@ -7,6 +7,7 @@ import { NotFoundError, ValidationError } from "../../utils/AppError";
 import { resolveBusinessLocationFilter } from "../../utils/locationScope";
 import { renderQrPngDataUrl } from "../zatca/qrCode.service";
 import { sendTemplatedSms } from "../notifications/notifications.service";
+import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
 
 const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
 
@@ -419,7 +420,7 @@ export async function payDue(id: string, input: PayDueInput, organizationId: str
   }
 
   return prisma.$transaction(async (tx) => {
-    await tx.payment.create({
+    const duePayment = await tx.payment.create({
       data: {
         saleId: sale.id,
         customerId: sale.customerId,
@@ -432,6 +433,7 @@ export async function payDue(id: string, input: PayDueInput, organizationId: str
         createdBy: userId,
       },
     });
+    await finalizeNewPayments(tx, [duePayment.id]);
 
     const newPaidAmount = sale.paidAmount.add(amount);
     const newDueAmount = sale.totalAmount.sub(newPaidAmount);

@@ -11,6 +11,7 @@ export const createPurchaseSchema = z.object({
   businessLocationId: z.string().uuid(),
   items: z.array(purchaseLineSchema).min(1, "At least one item is required"),
   paidAmount: z.number().min(0).optional(),
+  paymentAccountId: z.string().uuid().nullable().optional(),
   notes: z.string().optional(),
 });
 

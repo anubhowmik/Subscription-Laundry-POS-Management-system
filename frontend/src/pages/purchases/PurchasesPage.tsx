@@ -20,6 +20,7 @@ import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
 import { ShoppingBag, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { usePaymentAccountOptions } from "../paymentAccounts/shared";
 
 type ReturnReason = "DEFECTIVE" | "WRONG_ITEM" | "OVERSTOCK" | "OTHER";
 
@@ -681,6 +682,8 @@ function PurchaseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose:
   const [productResults, setProductResults] = useState<ProductPick[]>([]);
   const [lines, setLines] = useState<PurchaseLine[]>([]);
   const [paidAmount, setPaidAmount] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const { data: paymentAccounts } = usePaymentAccountOptions();
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -722,6 +725,7 @@ function PurchaseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose:
         businessLocationId,
         items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: l.unitCost })),
         paidAmount: paidAmount ? Number(paidAmount) : undefined,
+        paymentAccountId: paymentAccountId || null,
         notes: notes || undefined,
       }),
     onSuccess: onSaved,
@@ -852,6 +856,17 @@ function PurchaseFormModal({ isAr, onClose, onSaved }: { isAr: boolean; onClose:
         <div>
           <label className={labelClass}>{isAr ? "المبلغ المدفوع" : "Paid Amount"}</label>
           <input type="number" min={0} value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder="0" className={cn(inputClass, "ltr-nums")} />
+        </div>
+        <div>
+          <label className={labelClass}>{isAr ? "حساب الدفع" : "Payment Account"}</label>
+          <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)} className={selectClass}>
+            <option value="">{isAr ? "لا يوجد" : "None"}</option>
+            {(paymentAccounts ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className={labelClass}>{isAr ? "ملاحظات" : "Notes"}</label>

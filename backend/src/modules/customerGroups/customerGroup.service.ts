@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { parsePagination, parseSort } from "../../utils/pagination";
 import { NotFoundError, ValidationError } from "../../utils/AppError";
+import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
 
 const { Decimal } = Prisma;
 
@@ -104,7 +105,7 @@ export async function payDue(id: string, input: PayGroupDueInput, organizationId
       const applyAmount = Decimal.min(remaining, sale.dueAmount);
       if (applyAmount.lte(0)) continue;
 
-      await tx.payment.create({
+      const groupPayment = await tx.payment.create({
         data: {
           saleId: sale.id,
           customerId: sale.customerId,
@@ -118,6 +119,7 @@ export async function payDue(id: string, input: PayGroupDueInput, organizationId
           createdBy: userId,
         },
       });
+      await finalizeNewPayments(tx, [groupPayment.id]);
 
       const newPaidAmount = sale.paidAmount.add(applyAmount);
       const newDueAmount = sale.totalAmount.sub(newPaidAmount);

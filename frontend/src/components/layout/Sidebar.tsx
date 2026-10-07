@@ -53,6 +53,13 @@ import {
   Send,
   ArrowLeftRight,
   Warehouse,
+  Landmark,
+  ArrowRightLeft,
+  PieChart,
+  ArrowDownCircle,
+  VenetianMask as UserSecret,
+  BanknoteArrowDown as MoneyCheck,
+  Briefcase,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "../../api/client";
@@ -234,10 +241,51 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/coupons", labelKey: "nav.coupons", permissions: ["coupons.manage"], icon: Ticket },
       { to: "/price-lists", labelKey: "nav.priceLists", permissions: ["price-lists.manage"], icon: Tags },
       { to: "/register-sessions", labelKey: "nav.registerSessions", permissions: ["pos.register.manage"], icon: Archive },
-      { to: "/reports", labelKey: "nav.reports", permissions: ["reports.sales", "reports.inventory"], icon: BarChart3 },
       { to: "/accounting/chart-of-accounts", labelKey: "nav.chartOfAccounts", permissions: ["accounting.view"], icon: BookOpen },
       { to: "/accounting/journal-entries", labelKey: "nav.journalEntries", permissions: ["accounting.view"], icon: ScrollText },
       { to: "/accounting/reports", labelKey: "nav.accountingReports", permissions: ["accounting.view"], icon: Scale },
+    ],
+  },
+  {
+    // Matches the EJADA reference's own "Reports" dropdown (AdminSidebarMenu.php, laundry branch),
+    // rebuilt one sub-report at a time in the reference's own order: Daily Products Report first.
+    // "Reports Overview" keeps this app's earlier combined report screen reachable until each of
+    // its tabs is replaced by its reference counterpart.
+    labelKey: "nav.section.reports",
+    collapsible: true,
+    icon: PieChart,
+    items: [
+      { to: "/reports/daily-products", labelKey: "nav.dailyProductsReport", permissions: ["reports.daily_products"], icon: ArrowDownCircle },
+      { to: "/reports/companies", labelKey: "nav.companiesReport", permissions: ["reports.companies"], icon: ArrowDownCircle },
+      { to: "/reports/detailed-companies", labelKey: "nav.detailedCompaniesReport", permissions: ["reports.detailed_companies"], icon: ArrowDownCircle },
+      { to: "/reports/products", labelKey: "nav.productsReport", permissions: ["reports.products"], icon: ArrowDownCircle },
+      { to: "/reports/sales-report", labelKey: "nav.salesReportV2", permissions: ["reports.sales_report"], icon: ArrowDownCircle },
+      { to: "/reports/detailed-sales", labelKey: "nav.detailedSalesReport", permissions: ["reports.detailed_sales"], icon: UserSecret },
+      { to: "/reports/branch-sales", labelKey: "nav.branchSalesReport", permissions: ["reports.branch_sales"], icon: UserSecret },
+      { to: "/reports/tax", labelKey: "nav.taxReportV2", permissions: ["reports.tax"], icon: UserSecret },
+      { to: "/reports/register", labelKey: "nav.registerReport", permissions: ["reports.register"], icon: Briefcase },
+      { to: "/reports/compensations", labelKey: "nav.compensationsReport", permissions: ["reports.compensations"], icon: MoneyCheck },
+      { to: "/reports/cashback", labelKey: "nav.cashbackReport", permissions: ["reports.cashback"], icon: MoneyCheck },
+      { to: "/reports/loyalty-points", labelKey: "nav.loyaltyPointsReport", permissions: ["reports.loyalty_points"], icon: MoneyCheck },
+      { to: "/reports/cash-register", labelKey: "nav.cashRegisterReport", permissions: ["reports.cash_register"], icon: MoneyCheck },
+      { to: "/reports/customer-visits", labelKey: "nav.customerVisitsReport", permissions: ["reports.customer_visits"], icon: Users },
+      { to: "/reports", labelKey: "nav.reportsOverview", permissions: ["reports.sales", "reports.inventory"], icon: BarChart3 },
+    ],
+  },
+  {
+    // Matches the EJADA reference's own "Payment Accounts" dropdown (AdminSidebarMenu.php's
+    // `lang_v1.payment_accounts`, order 13) - its six items in the reference's own order and icons.
+    // A separate system from the double-entry GL pages above (see schema.prisma's PaymentAccount).
+    labelKey: "nav.section.paymentAccounts",
+    collapsible: true,
+    icon: Landmark,
+    items: [
+      { to: "/payment-accounts", labelKey: "nav.listAccounts", permissions: ["payment_accounts.access"], icon: List },
+      { to: "/payment-accounts/sell-payments", labelKey: "nav.sellPayments", permissions: ["sell_payment_report.view", "payment_accounts.access"], icon: List },
+      { to: "/payment-accounts/balance-sheet", labelKey: "nav.balanceSheet", permissions: ["payment_accounts.access"], icon: BookOpen },
+      { to: "/payment-accounts/trial-balance", labelKey: "nav.trialBalance", permissions: ["payment_accounts.access"], icon: Scale },
+      { to: "/payment-accounts/cash-flow", labelKey: "nav.cashFlow", permissions: ["payment_accounts.access"], icon: ArrowRightLeft },
+      { to: "/payment-accounts/payment-account-report", labelKey: "nav.paymentAccountReport", permissions: ["payment_accounts.access"], icon: FileText },
     ],
   },
   {

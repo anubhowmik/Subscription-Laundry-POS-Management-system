@@ -43,6 +43,7 @@ import organizationRoutes from "../modules/organizations/organization.routes";
 import exportRoutes from "../modules/exports/export.routes";
 import geoRoutes from "../modules/geo/geo.routes";
 import accountingRoutes from "../modules/accounting/accounting.routes";
+import paymentAccountRoutes from "../modules/paymentAccounts/paymentAccount.routes";
 import invoiceLayoutRoutes from "../modules/invoiceLayouts/invoiceLayout.routes";
 import platformRoutes from "../modules/platform/platform.routes";
 import billingRoutes from "../modules/billing/billing.routes";
@@ -118,6 +119,7 @@ router.use("/zatca/certificates", zatcaCertificateRoutes);
 router.use("/exports", exportRoutes);
 router.use("/geo", geoRoutes);
 router.use("/accounting", accountingRoutes);
+router.use("/payment-accounts", paymentAccountRoutes);
 router.use("/invoice-layouts", invoiceLayoutRoutes);
 
 export default router;

@@ -447,6 +447,8 @@ model Organization {
   customers              Customer[]
   accounts               Account[]
   journalEntries         JournalEntry[]
+  paymentAccountTypes    PaymentAccountType[]
+  paymentAccounts        PaymentAccount[]
   categories             Category[]
   brands                 Brand[]
   units                  Unit[]
@@ -633,7 +635,7 @@ model User {
   updatedAt           DateTime   @updatedAt
   deletedAt           DateTime?
 
-  organization                     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization                     Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   businessLocations                UserBusinessLocation[]
   userGroups                       UserUserGroup[]
   refreshTokens                    RefreshToken[]
@@ -643,11 +645,11 @@ model User {
   payments                         Payment[]
   inventoryTxns                    InventoryTransaction[]
   saleItemStatusChanges            SaleItemStatusHistory[]
-  registerSessionsOpened           RegisterSession[]          @relation("RegisterSessionOpenedBy")
-  registerSessionsClosed           RegisterSession[]          @relation("RegisterSessionClosedBy")
+  registerSessionsOpened           RegisterSession[]           @relation("RegisterSessionOpenedBy")
+  registerSessionsClosed           RegisterSession[]           @relation("RegisterSessionClosedBy")
   heldSales                        HeldSale[]
-  compensationsCreated             Compensation[]             @relation("CompensationCreatedBy")
-  compensationsResolved            Compensation[]             @relation("CompensationResolvedBy")
+  compensationsCreated             Compensation[]              @relation("CompensationCreatedBy")
+  compensationsResolved            Compensation[]              @relation("CompensationResolvedBy")
   loyaltyTransactions              LoyaltyTransaction[]
   cashbackTransactions             CashbackTransaction[]
   bookingsCreated                  Booking[]
@@ -658,8 +660,8 @@ model User {
   messagesSent                     Message[]
   messageReads                     MessageRead[]
   announcementsCreated             Announcement[]
-  stockTransfersCreated            StockTransfer[]            @relation("StockTransferCreatedBy")
-  stockTransfersReceived           StockTransfer[]            @relation("StockTransferReceivedBy")
+  stockTransfersCreated            StockTransfer[]             @relation("StockTransferCreatedBy")
+  stockTransfersReceived           StockTransfer[]             @relation("StockTransferReceivedBy")
   expensesCreated                  Expense[]
   stockAdjustmentsCreated          StockAdjustment[]
   customerRestrictions             UserCustomer[]
@@ -667,6 +669,8 @@ model User {
   transferFromLocationRestrictions UserTransferFromLocation[]
   bnplSessionsCreated              BnplSession[]
   emailVerificationCodes           EmailVerificationCode[]
+  paymentAccountsCreated           PaymentAccount[]
+  paymentAccountTxnsCreated        PaymentAccountTransaction[]
 
   @@index([status])
   @@index([organizationId])
@@ -894,15 +898,17 @@ model BusinessLocation {
   lastExpenseSeq         Int     @default(0)
   adjustmentNumberPrefix String  @default("ADJ-")
   lastAdjustmentSeq      Int     @default(0)
+  paymentNumberPrefix    String  @default("SP-")
+  lastPaymentSeq         Int     @default(0)
   numberResetYearly      Boolean @default(false)
   lastNumberResetYear    Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization                 Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  group                        BusinessLocationGroup?     @relation(fields: [groupId], references: [id])
-  defaultPriceList             PriceList?                 @relation(fields: [defaultPriceListId], references: [id])
+  organization                 Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group                        BusinessLocationGroup?           @relation(fields: [groupId], references: [id])
+  defaultPriceList             PriceList?                       @relation(fields: [defaultPriceListId], references: [id])
   invoiceLayoutSettings        InvoiceLayoutSettings[]
   users                        UserBusinessLocation[]
   userGroups                   UserGroup[]
@@ -923,16 +929,17 @@ model BusinessLocation {
   purchases                    Purchase[]
   purchaseReturns              PurchaseReturn[]
   inventoryPostings            InventoryPosting[]
-  messagesFrom                 Message[]                  @relation("MessageFromLocation")
-  messagesTo                   Message[]                  @relation("MessageToLocation")
+  messagesFrom                 Message[]                        @relation("MessageFromLocation")
+  messagesTo                   Message[]                        @relation("MessageToLocation")
   announcementLocations        AnnouncementLocation[]
-  stockTransfersFrom           StockTransfer[]            @relation("StockTransferFrom")
-  stockTransfersTo             StockTransfer[]            @relation("StockTransferTo")
+  stockTransfersFrom           StockTransfer[]                  @relation("StockTransferFrom")
+  stockTransfersTo             StockTransfer[]                  @relation("StockTransferTo")
   coupons                      Coupon[]
   expenses                     Expense[]
   stockAdjustments             StockAdjustment[]
   userTransferFromRestrictions UserTransferFromLocation[]
   bnplSessions                 BnplSession[]
+  defaultPaymentAccounts       BusinessLocationPaymentAccount[]
 
   @@unique([organizationId, branchCode])
   @@index([organizationId])
@@ -1116,6 +1123,8 @@ model CustomerGroup {
   customers        Customer[]
   coupons          Coupon[]
   userRestrictions UserCustomerGroup[]
+  sales            Sale[]
+  sellReturns      SellReturn[]
 
   @@index([organizationId])
 }
@@ -1195,6 +1204,128 @@ model JournalLine {
 
   @@index([journalEntryId])
   @@index([accountId])
+}
+
+// ---------------------------------------------------------------------------
+// Payment Accounts - the EJADA reference's own `accounts`/`account_types`/`account_transactions`
+// module (AccountController / AccountReportsController). Deliberately SEPARATE from the
+// double-entry Account/JournalEntry ledger above: these are money-holding accounts (cash drawer,
+// bank, cheques) with single-sided credit/debit movements, where balance = credits - debits -
+// exactly the reference's `SUM(IF(type='credit', amount, -amount))`.
+// ---------------------------------------------------------------------------
+
+// Reference's user-defined `account_types` (two levels: a type and its sub-types).
+model PaymentAccountType {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  name                String
+  parentAccountTypeId String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       PaymentAccountType?  @relation("PaymentAccountTypeTree", fields: [parentAccountTypeId], references: [id], onDelete: Cascade)
+  subTypes     PaymentAccountType[] @relation("PaymentAccountTypeTree")
+  accounts     PaymentAccount[]
+
+  @@index([organizationId])
+}
+
+// Reference's own `type` radio on the account form (Bank Account / Cash / Cheque) - Fund Transfer
+// only ever offers BANK accounts as the destination, matching AccountController@getFundTransfer.
+enum PaymentAccountKind {
+  BANK
+  CASH
+  CHEQUE
+}
+
+model PaymentAccount {
+  id             String             @id @default(uuid())
+  organizationId String
+  name           String
+  accountNumber  String
+  kind           PaymentAccountKind @default(BANK)
+  accountTypeId  String?
+  // Reference's six free label/value rows (`account_details[i][label|value]`), stored as-is.
+  accountDetails Json?
+  note           String?
+  isClosed       Boolean            @default(false)
+  isMajor        Boolean            @default(false) // reference's own "Major account" checkbox
+  createdBy      String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization     Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accountType      PaymentAccountType?              @relation(fields: [accountTypeId], references: [id], onDelete: SetNull)
+  createdByUser    User                             @relation(fields: [createdBy], references: [id])
+  transactions     PaymentAccountTransaction[]
+  payments         Payment[]
+  expenses         Expense[]
+  purchases        Purchase[]
+  locationDefaults BusinessLocationPaymentAccount[]
+
+  @@index([organizationId])
+}
+
+enum PaymentAccountTxnType {
+  DEBIT
+  CREDIT
+}
+
+// Reference's `sub_type` - null for a movement driven by a document's payment (sale/expense/purchase).
+enum PaymentAccountTxnSubType {
+  OPENING_BALANCE
+  DEPOSIT
+  FUND_TRANSFER
+}
+
+model PaymentAccountTransaction {
+  id               String                    @id @default(uuid())
+  paymentAccountId String
+  type             PaymentAccountTxnType
+  subType          PaymentAccountTxnSubType?
+  amount           Decimal                   @db.Decimal(14, 2)
+  operationDate    DateTime                  @default(now())
+  note             String?
+  referenceNo      String? // fund transfer's own "CN/Ref No" field
+  createdBy        String
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  // At most one of these is set - the document whose payment this movement mirrors.
+  paymentId  String? @unique
+  expenseId  String? @unique
+  purchaseId String? @unique
+
+  // Deposit/fund-transfer legs point at each other (reference's transfer_transaction_id).
+  transferTransactionId String?                    @unique
+  transferTransaction   PaymentAccountTransaction? @relation("PaymentAccountTransfer", fields: [transferTransactionId], references: [id], onDelete: SetNull)
+  transferredFrom       PaymentAccountTransaction? @relation("PaymentAccountTransfer")
+
+  paymentAccount PaymentAccount @relation(fields: [paymentAccountId], references: [id], onDelete: Cascade)
+  createdByUser  User           @relation(fields: [createdBy], references: [id])
+  payment        Payment?       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  expense        Expense?       @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  purchase       Purchase?      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([paymentAccountId, operationDate])
+}
+
+// Reference's per-location `default_payment_accounts` JSON (Business Location > Payment Options):
+// which payment account a payment of a given method at a given branch is credited to by default.
+// Also drives the reference's location scoping of the account list/reports for branch-restricted users.
+model BusinessLocationPaymentAccount {
+  id                 String @id @default(uuid())
+  businessLocationId String
+  paymentMethodId    String
+  paymentAccountId   String
+
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id], onDelete: Cascade)
+  paymentMethod    PaymentMethod    @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  paymentAccount   PaymentAccount   @relation(fields: [paymentAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([businessLocationId, paymentMethodId])
+  @@index([paymentAccountId])
 }
 
 model Customer {
@@ -1672,8 +1803,9 @@ model PaymentMethod {
   code           String // CASH, CARD, ONLINE
   isActive       Boolean @default(true)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  payments     Payment[]
+  organization     Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payments         Payment[]
+  locationAccounts BusinessLocationPaymentAccount[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1776,6 +1908,10 @@ model Sale {
   deliveryNumber     String? // e.g. DFT-000001 - set only when isQuotation=false; separate sequence from quoteNumber/invoiceNumber
   businessLocationId String
   customerId         String
+  // Reference's `transactions.customer_group_id` - the customer's group stamped onto the sale at
+  // the time it was made, so moving a customer to another group later doesn't rewrite the
+  // Companies / Detailed Companies reports for their past invoices.
+  customerGroupId    String?
   saleDate           DateTime      @default(now())
   estimatedReadyAt   DateTime? // max(estimatedProcessingHours) across service lines, from saleDate - null if no service line has one
   status             SaleStatus    @default(FINAL)
@@ -1881,6 +2017,7 @@ model Sale {
   organization         Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   businessLocation     BusinessLocation       @relation(fields: [businessLocationId], references: [id])
   customer             Customer               @relation(fields: [customerId], references: [id])
+  customerGroup        CustomerGroup?         @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
   createdByUser        User                   @relation(fields: [createdBy], references: [id])
   registerSession      RegisterSession?       @relation(fields: [registerSessionId], references: [id])
   coupon               Coupon?                @relation(fields: [couponId], references: [id])
@@ -1907,6 +2044,7 @@ model Sale {
   @@index([status])
   @@index([paymentStatus])
   @@index([organizationId, importBatch])
+  @@index([customerGroupId])
 }
 
 model SaleItem {
@@ -1956,6 +2094,7 @@ model SellReturn {
   organizationId     String
   saleId             String
   customerId         String
+  customerGroupId    String? // copied from the returned sale's own snapshot (see Sale.customerGroupId)
   businessLocationId String
   creditNoteNumber   String? // human-readable, e.g. CN-000001 - claimed from BusinessLocation.lastReturnSeq (P7-5)
   returnDate         DateTime      @default(now())
@@ -1981,6 +2120,7 @@ model SellReturn {
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sale             Sale             @relation(fields: [saleId], references: [id])
   customer         Customer         @relation(fields: [customerId], references: [id])
+  customerGroup    CustomerGroup?   @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
   businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
   createdByUser    User             @relation(fields: [createdBy], references: [id])
   items            SellReturnItem[]
@@ -2152,17 +2292,20 @@ model Purchase {
   taxAmount          Decimal        @default(0) @db.Decimal(12, 2)
   totalAmount        Decimal        @db.Decimal(12, 2)
   paidAmount         Decimal        @default(0) @db.Decimal(12, 2)
+  paymentAccountId   String? // reference's purchase payment `account_id` - debited by paidAmount
   notes              String?
   createdBy          String
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  supplier         Supplier         @relation(fields: [supplierId], references: [id])
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  createdByUser    User             @relation(fields: [createdBy], references: [id])
-  items            PurchaseItem[]
-  purchaseReturns  PurchaseReturn[]
+  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier                  Supplier                   @relation(fields: [supplierId], references: [id])
+  businessLocation          BusinessLocation           @relation(fields: [businessLocationId], references: [id])
+  createdByUser             User                       @relation(fields: [createdBy], references: [id])
+  items                     PurchaseItem[]
+  purchaseReturns           PurchaseReturn[]
+  paymentAccount            PaymentAccount?            @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  paymentAccountTransaction PaymentAccountTransaction?
 
   @@unique([organizationId, referenceNumber])
   @@index([organizationId])
@@ -2271,6 +2414,7 @@ model Expense {
   taxAmount             Decimal       @default(0) @db.Decimal(12, 2)
   totalAmount           Decimal       @db.Decimal(12, 2)
   paidAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  paymentAccountId      String? // reference's expense payment `account_id` - debited by paidAmount
   dueAmount             Decimal       @default(0) @db.Decimal(12, 2)
   paymentStatus         PaymentStatus @default(DUE)
   isRecurring           Boolean       @default(false)
@@ -2282,11 +2426,13 @@ model Expense {
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  category         ExpenseCategory  @relation(fields: [categoryId], references: [id])
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  supplier         Supplier?        @relation(fields: [supplierId], references: [id])
-  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category                  ExpenseCategory            @relation(fields: [categoryId], references: [id])
+  businessLocation          BusinessLocation           @relation(fields: [businessLocationId], references: [id])
+  supplier                  Supplier?                  @relation(fields: [supplierId], references: [id])
+  createdByUser             User                       @relation(fields: [createdBy], references: [id])
+  paymentAccount            PaymentAccount?            @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  paymentAccountTransaction PaymentAccountTransaction?
 
   @@unique([businessLocationId, expenseNumber])
   @@index([organizationId])
@@ -2640,14 +2786,20 @@ model Payment {
   referenceNumber    String?
   paymentDate        DateTime    @default(now())
   notes              String?
+  // Reference's auto-generated `payment_ref_no` (SP-000001) - claimed per branch at creation.
+  paymentRefNo       String?
+  // Reference's `transaction_payments.account_id` - which payment account this payment landed in.
+  paymentAccountId   String?
   createdBy          String
   createdAt          DateTime    @default(now())
 
-  sale             Sale?            @relation(fields: [saleId], references: [id])
-  customer         Customer         @relation(fields: [customerId], references: [id])
-  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
-  paymentMethod    PaymentMethod    @relation(fields: [paymentMethodId], references: [id])
-  createdByUser    User             @relation(fields: [createdBy], references: [id])
+  paymentAccount            PaymentAccount?            @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  paymentAccountTransaction PaymentAccountTransaction?
+  sale                      Sale?                      @relation(fields: [saleId], references: [id])
+  customer                  Customer                   @relation(fields: [customerId], references: [id])
+  businessLocation          BusinessLocation           @relation(fields: [businessLocationId], references: [id])
+  paymentMethod             PaymentMethod              @relation(fields: [paymentMethodId], references: [id])
+  createdByUser             User                       @relation(fields: [createdBy], references: [id])
 
   @@index([saleId])
   @@index([customerId])

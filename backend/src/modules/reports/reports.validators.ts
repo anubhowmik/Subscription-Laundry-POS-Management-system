@@ -39,3 +39,64 @@ export const vatBreakdownReportQuerySchema = z.object({
   to: z.string().optional(),
   businessLocationId: z.string().uuid().optional(),
 });
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+export const dailyProductsReportQuerySchema = z.object({
+  locationGroupId: z.string().uuid().optional(),
+  // Comma-separated branch ids (the reference's multi-select `location_id[]`).
+  locationIds: z.string().optional(),
+  from: dateOnly.optional(),
+  to: dateOnly.optional(),
+  sheet: z.enum(["all", "products", "categories"]).optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+});
+
+// Shared by every page under the Reports dropdown (reference's report.js filter frame).
+const reportFrameQuery = {
+  locationGroupId: z.string().uuid().optional(),
+  locationIds: z.string().optional(),
+  from: dateOnly.optional(),
+  to: dateOnly.optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+};
+
+export const companiesReportQuerySchema = z.object({ ...reportFrameQuery, customerGroupId: z.string().uuid().optional() });
+export const detailedCompaniesReportQuerySchema = companiesReportQuerySchema;
+
+const itemKey = /^(p|s):[0-9a-f-]{36}$/i;
+export const productsReportQuerySchema = z.object({
+  ...reportFrameQuery,
+  customerGroupId: z.string().uuid().optional(),
+  categoryId: z.string().regex(/^(pc|sc):[0-9a-f-]{36}$/i, "Invalid category").optional(),
+  // Comma-separated "p:<productId>" / "s:<serviceId>" keys (the reference's multi-select `product_id[]`).
+  itemIds: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.split(",").every((k) => itemKey.test(k)), "Invalid product"),
+});
+
+const shippingStatus = /^(PENDING|IN_PROGRESS|READY|DELIVERED|CANCELLED)$/;
+export const salesReportV2QuerySchema = z.object({
+  ...reportFrameQuery,
+  // Comma-separated derived shipping statuses (the reference's multi-select `shipping_status[]`).
+  shippingStatuses: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.split(",").every((k) => shippingStatus.test(k)), "Invalid shipping status"),
+});
+
+export const detailedSalesReportQuerySchema = z.object(reportFrameQuery);
+export const branchSalesReportQuerySchema = z.object(reportFrameQuery);
+export const taxReportQuerySchema = z.object(reportFrameQuery);
+export const registerReportQuerySchema = z.object({ ...reportFrameQuery, userId: z.string().uuid().optional(), status: z.enum(["open", "close"]).optional() });
+export const compensationsReportQuerySchema = z.object({
+  ...reportFrameQuery,
+  customerGroupId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  status: z.enum(["PENDING", "APPROVED", "REJECTED", "PAID"]).optional(),
+});
+export const reportCustomerSearchQuerySchema = z.object({ search: z.string().max(100).optional() });
+export const cashbackReportQuerySchema = z.object({ ...reportFrameQuery, customerGroupId: z.string().uuid().optional(), customerId: z.string().uuid().optional() });
+export const loyaltyPointsReportQuerySchema = cashbackReportQuerySchema;
+export const cashRegisterReportQuerySchema = z.object({ ...reportFrameQuery, status: z.enum(["open", "close"]).optional() });
+export const customerVisitsReportQuerySchema = cashbackReportQuerySchema;

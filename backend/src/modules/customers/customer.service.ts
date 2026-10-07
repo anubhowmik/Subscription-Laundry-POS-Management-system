@@ -5,6 +5,7 @@ import { AppError, ConflictError, NotFoundError } from "../../utils/AppError";
 import type { ParsedSheet } from "../../utils/spreadsheet";
 import { mapSheetRows } from "../../utils/spreadsheet";
 import { CONTACT_HEADER_MAP, CUSTOMER_GROUP_HEADER, PRICE_LIST_HEADER, INVOICE_LAYOUT_HEADER, parseContactRow, type ParsedContactRow } from "../../utils/contactImport";
+import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
 
 const { Decimal } = Prisma;
 
@@ -249,7 +250,7 @@ export async function applyCreditToSale(customerId: string, saleId: string, amou
       where: { id: sale.id },
       data: { paidAmount: newPaidAmount.toDecimalPlaces(2), dueAmount: newDueAmount.toDecimalPlaces(2), paymentStatus },
     });
-    await tx.payment.create({
+    const creditPayment = await tx.payment.create({
       data: {
         saleId: sale.id,
         customerId,
@@ -260,6 +261,7 @@ export async function applyCreditToSale(customerId: string, saleId: string, amou
         createdBy: userId,
       },
     });
+    await finalizeNewPayments(tx, [creditPayment.id]);
     return tx.sale.findUniqueOrThrow({ where: { id: sale.id } });
   });
 }

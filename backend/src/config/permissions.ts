@@ -87,6 +87,25 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "messages.manage", module: "messages", description: "Send and manage branch-to-branch messages" },
   { code: "announcements.manage", module: "announcements", description: "Create and manage company announcements" },
 
+  { code: "reports.daily_products", module: "reports", description: "View the daily products report (per-branch quantity and amount for each item and category)" },
+  { code: "reports.companies", module: "reports", description: "View the companies report (per-branch sales and returns, by customer group)" },
+  { code: "reports.detailed_companies", module: "reports", description: "View the detailed companies report" },
+  { code: "reports.products", module: "reports", description: "View the products report" },
+  { code: "reports.sales_report", module: "reports", description: "View the sales report" },
+  { code: "reports.detailed_sales", module: "reports", description: "View the detailed sales report" },
+  { code: "reports.branch_sales", module: "reports", description: "View the branches sales report" },
+  { code: "reports.tax", module: "reports", description: "View the tax report" },
+  { code: "reports.register", module: "reports", description: "View the register report" },
+  { code: "reports.compensations", module: "reports", description: "View the compensations report" },
+  { code: "reports.cashback", module: "reports", description: "View the cashback report" },
+  { code: "reports.loyalty_points", module: "reports", description: "View the loyalty points report" },
+  { code: "reports.cash_register", module: "reports", description: "View the cash register report" },
+  { code: "reports.customer_visits", module: "reports", description: "View the customer visits report" },
+  { code: "payment_accounts.access", module: "payment_accounts", description: "Manage payment accounts, deposits, fund transfers and account reports" },
+  { code: "payment_accounts.edit_transaction", module: "payment_accounts", description: "Edit opening balance, deposit and fund transfer movements" },
+  { code: "payment_accounts.delete_transaction", module: "payment_accounts", description: "Delete deposit and fund transfer movements" },
+  { code: "sell_payment_report.view", module: "payment_accounts", description: "View the sell payments report" },
+
   { code: "settings.manage", module: "settings", description: "Manage system settings" },
 
   // Application-level access gates for the Home launcher's five applications (POS Laundry /
