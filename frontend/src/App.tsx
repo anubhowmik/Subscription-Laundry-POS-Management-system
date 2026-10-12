@@ -28,6 +28,8 @@ import LicensesPage from "./pages/licenses/LicensesPage";
 import OrganizationSettingsPage from "./pages/settings/OrganizationSettingsPage";
 import BusinessLocationsPage from "./pages/businessLocations/BusinessLocationsPage";
 import CouponsPage from "./pages/coupons/CouponsPage";
+import PromotionsPage from "./pages/promotions/PromotionsPage";
+import DiscountsPage from "./pages/promotions/DiscountsPage";
 import PriceListsPage from "./pages/priceLists/PriceListsPage";
 import CustomerGroupsPage from "./pages/customerGroups/CustomerGroupsPage";
 import ImportContactsPage from "./pages/importContacts/ImportContactsPage";
@@ -50,6 +52,10 @@ import DailySalesReportPage from "./pages/reports/DailySalesReportPage";
 import LflSalesReportPage from "./pages/reports/LflSalesReportPage";
 import SalesAnalysisReportPage from "./pages/reports/SalesAnalysisReportPage";
 import SalesPerformanceReportPage from "./pages/reports/SalesPerformanceReportPage";
+import CustomersRevenueReportPage from "./pages/reports/CustomersRevenueReportPage";
+import CustomersRetentionReportPage from "./pages/reports/CustomersRetentionReportPage";
+import CampaignPerformanceReportPage from "./pages/reports/CampaignPerformanceReportPage";
+import ConsumerBehaviourReportPage from "./pages/reports/ConsumerBehaviourReportPage";
 import CategoriesPage from "./pages/categories/CategoriesPage";
 import StockAdjustmentsPage from "./pages/inventory/StockAdjustmentsPage";
 import StockAdjustmentCreatePage from "./pages/inventory/StockAdjustmentCreatePage";
@@ -195,8 +201,14 @@ export default function App() {
             >
               <Route path="compensations" element={<CompensationsPage />} />
             </Route>
-            <Route element={<PermissionRoute anyOf={["coupons.manage"]} />}>
+            <Route element={<PermissionRoute anyOf={["coupons.view", "coupons.manage"]} />}>
               <Route path="coupons" element={<CouponsPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["promotions.view"]} />}>
+              <Route path="promotions" element={<PromotionsPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["discount.access"]} />}>
+              <Route path="discounts" element={<DiscountsPage />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["price-lists.manage"]} />}>
               <Route path="price-lists" element={<PriceListsPage />} />
@@ -265,6 +277,27 @@ export default function App() {
             </Route>
             <Route element={<PermissionRoute anyOf={["reports.sales_performance"]} />}>
               <Route path="reports/sales-performance" element={<SalesPerformanceReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.customers_revenue"]} />}>
+              <Route path="reports/customers-revenue" element={<CustomersRevenueReportPage key="revenue" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.campaign_performance"]} />}>
+              <Route path="reports/campaign-performance" element={<CampaignPerformanceReportPage key="campaign" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.discount_coupon"]} />}>
+              <Route path="reports/discount-coupon" element={<CampaignPerformanceReportPage key="coupon" variant="coupon" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.consumer_behaviour"]} />}>
+              <Route path="reports/consumer-behaviour" element={<ConsumerBehaviourReportPage />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.new_customers"]} />}>
+              <Route path="reports/new-customers" element={<CustomersRevenueReportPage key="new" variant="new" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.customers_retention"]} />}>
+              <Route path="reports/customers-retention" element={<CustomersRetentionReportPage key="retention" />} />
+            </Route>
+            <Route element={<PermissionRoute anyOf={["reports.decline_customers"]} />}>
+              <Route path="reports/decline-customers" element={<CustomersRetentionReportPage key="decline" variant="decline" />} />
             </Route>
             <Route element={<PermissionRoute anyOf={["categories.view", "services.view"]} />}>
               <Route path="categories" element={<CategoriesPage />} />

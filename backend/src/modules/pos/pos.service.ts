@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
 import { CheckoutInput, HoldSaleInput, ConfirmQuoteInput, SendQuoteNotificationInput } from "./pos.validators";
+import type { z } from "zod";
+import type { applyCouponSchema, applyPromotionSchema } from "../promotions/promotion.validators";
+
+type ApplyPromotionInput = z.infer<typeof applyPromotionSchema>;
 import { computeInvoiceHash, computeXmlInvoiceHash, GENESIS_PREVIOUS_HASH } from "../zatca/hashChain.service";
 import { buildQrTlvBase64, buildSignedQrTlvBase64 } from "../zatca/qrCode.service";
 import { buildInvoiceXml, UblInvoiceLine } from "../zatca/xmlGenerator.service";
@@ -19,6 +23,18 @@ import { BNPL_PAYMENT_CODES } from "../bnpl/bnpl.constants";
 import { TAX_EXEMPTION_REASONS } from "../zatca/taxExemptionReasons";
 import { env } from "../../config/env";
 import { finalizeNewPayments } from "../paymentAccounts/paymentAccountLink";
+import {
+  assertCashbackRedeemAllowed,
+  buildEngineLines,
+  cashBackAmount,
+  resolvePromotion,
+  type PricedCartRow,
+  type ResolvedPromotion,
+} from "../promotions/promotion.service";
+import { isValidCouponOtp, resolveCartCoupon } from "../coupons/coupon.service";
+import { fitCoupon, type CouponLine } from "../coupons/couponEngine";
+import { discountAmountFor, matchDiscounts } from "../discounts/discount.service";
+import type { Coupon, Discount } from "@prisma/client";
 
 const { Decimal } = Prisma;
 
@@ -228,6 +244,9 @@ interface PricedLine {
   note?: string;
   widthM?: Prisma.Decimal;
   heightM?: Prisma.Decimal;
+  promotionId?: string;
+  discountId?: string;
+  couponId?: string;
 }
 
 async function priceLine(
@@ -238,13 +257,18 @@ async function priceLine(
   overrides: { products: Map<string, Prisma.Decimal>; services: Map<string, Prisma.Decimal> },
   groupDiscountPercent: Prisma.Decimal,
   canEditLinePrice: boolean,
+  // Promotions > Discounts: the discount this line carries (already re-checked by
+  // resolveLineDiscounts). Its amount is computed here from the resolved unit price, replacing
+  // whatever amount the client sent.
+  lineDiscount?: Discount,
 ): Promise<PricedLine> {
   // Reference's own laundry dimension-based pricing (carpets/curtains priced per m²) - when both
   // are sent, the quantity actually billed is scaled by the area, on top of however many pieces
   // were entered (e.g. 3 rugs at 2m x 1.5m each = 3 * 3m² = 9 billable units).
   const hasDimensions = item.widthM != null && item.heightM != null;
   const quantity = hasDimensions ? new Decimal(item.quantity).mul(item.widthM!).mul(item.heightM!) : new Decimal(item.quantity);
-  const discountAmount = new Decimal(item.discountAmount ?? 0);
+  const lineDiscountAmount = (unitPrice: Prisma.Decimal) =>
+    lineDiscount ? discountAmountFor(lineDiscount, unitPrice, quantity) : new Decimal(item.discountAmount ?? 0);
 
   // Reference's own `edit_product_price_from_sale_screen` permission gates a per-line unit-price
   // AND tax override (`row_edit_product_price_modal.blade.php`) - a caller without it gets these
@@ -268,6 +292,7 @@ async function priceLine(
         ? new Decimal(item.unitPriceOverride)
         : applyPercentAdjustment(overrides.products.get(product.id) ?? product.sellingPrice, groupDiscountPercent);
     const taxPercent = taxOverride?.percentage ?? product.tax?.percentage ?? new Decimal(0);
+    const discountAmount = lineDiscountAmount(unitPrice);
     const gross = unitPrice.mul(quantity).sub(discountAmount);
     let subtotal: Prisma.Decimal;
     let taxAmount: Prisma.Decimal;
@@ -298,6 +323,7 @@ async function priceLine(
       note: item.note,
       widthM: item.widthM != null ? new Decimal(item.widthM) : undefined,
       heightM: item.heightM != null ? new Decimal(item.heightM) : undefined,
+      discountId: lineDiscount?.id,
     };
   }
 
@@ -312,6 +338,7 @@ async function priceLine(
       ? new Decimal(item.unitPriceOverride)
       : applyPercentAdjustment(overrides.services.get(service.id) ?? service.price, groupDiscountPercent);
   const taxPercent = taxOverride?.percentage ?? service.tax?.percentage ?? new Decimal(0);
+  const discountAmount = lineDiscountAmount(unitPrice);
   const subtotal = unitPrice.mul(quantity).sub(discountAmount);
   const taxAmount = subtotal.mul(taxPercent).div(100);
 
@@ -332,7 +359,159 @@ async function priceLine(
     note: item.note,
     widthM: item.widthM != null ? new Decimal(item.widthM) : undefined,
     heightM: item.heightM != null ? new Decimal(item.heightM) : undefined,
+    discountId: lineDiscount?.id,
   };
+}
+
+/**
+ * Promotions > Discounts at checkout: a line that arrives with a `discountId` keeps it only if
+ * that discount still applies to the item right now (same branch / window / customer group /
+ * selling price group rules the POS used to pre-fill it); its amount is then recomputed from the
+ * real price. A discount that no longer applies is dropped, so its amount is never trusted.
+ */
+async function resolveLineDiscounts(
+  tx: Prisma.TransactionClient,
+  args: { organizationId: string; businessLocationId: string; customerGroupId: string | null; priceListId: string | null; items: { productId?: string; serviceId?: string; discountId?: string }[] },
+) {
+  const keyOf = (item: { productId?: string; serviceId?: string }) => (item.productId ? `p:${item.productId}` : `s:${item.serviceId}`);
+  const wanted = args.items.filter((i) => i.discountId);
+  const matches = wanted.length
+    ? await matchDiscounts(tx, { ...args, itemKeys: wanted.map(keyOf) })
+    : new Map<string, Discount>();
+  return (item: { productId?: string; serviceId?: string; discountId?: string }) => {
+    if (!item.discountId) return undefined;
+    const match = matches.get(keyOf(item));
+    return match?.id === item.discountId ? match : undefined;
+  };
+}
+
+type CartItem = CheckoutInput["items"][number];
+
+/** The priced cart rows the promotion engine reads (see promotions/promotionEngine.ts). */
+function toPricedRows(items: CartItem[], priced: PricedLine[]): PricedCartRow[] {
+  return items.map((item, i) => ({
+    productId: item.productId,
+    serviceId: item.serviceId,
+    pieces: new Decimal(item.quantity),
+    areaFactor: item.widthM != null && item.heightM != null ? new Decimal(item.widthM).mul(item.heightM) : new Decimal(1),
+    unitPrice: priced[i].unitPrice,
+    total: priced[i].total,
+  }));
+}
+
+/**
+ * Turns the engine's segments back into cart rows - pos.js splits a row where the promoted
+ * quantity runs out and gives the promoted part the promotion's line discount, replacing any
+ * manual one; the untouched remainder keeps its share of the row's own discount.
+ */
+function promotionCartItems(resolved: ResolvedPromotion, items: CartItem[]) {
+  return resolved.result.segments.map((seg) => {
+    const src = items[seg.sourceIndex];
+    const discountAmount = seg.discountAmount
+      ? seg.discountAmount.toNumber()
+      : src.discountAmount
+        ? new Decimal(src.discountAmount).mul(seg.pieces).div(src.quantity).toDecimalPlaces(2).toNumber()
+        : undefined;
+    const item = { ...src, quantity: seg.pieces.toNumber(), discountAmount, ...(seg.promoted ? { discountId: undefined } : {}) };
+    return { item, promotionId: seg.promoted ? resolved.promotion.id : undefined };
+  });
+}
+
+/**
+ * Promotions > Coupons at checkout (reference applyCouponSuccess): fits the coupon to the priced
+ * lines and re-prices every line it discounts with the coupon's share added to that line's own
+ * discount, stamping the line with the coupon (reference transaction_sell_lines.coupon_id).
+ * Throws the reference's own messages when the cart doesn't qualify.
+ */
+async function applyCouponToLines(
+  tx: Prisma.TransactionClient,
+  args: {
+    organizationId: string;
+    coupon: Coupon;
+    items: CartItem[];
+    lines: PricedLine[];
+    price: (item: CartItem) => Promise<PricedLine>;
+  },
+) {
+  const engineLines = await buildEngineLines(tx, args.organizationId, toPricedRows(args.items, args.lines));
+  const couponLines: CouponLine[] = args.lines.map((l, i) => ({
+    key: engineLines[i].key,
+    categoryKey: engineLines[i].categoryKey,
+    brandId: engineLines[i].brandId,
+    base: l.unitPrice.mul(l.quantity).sub(l.discountAmount),
+    total: l.total,
+  }));
+  const fit = fitCoupon(args.coupon, couponLines);
+  if (!fit.ok) throw new AppError(400, fit.reason);
+  const lines = await Promise.all(
+    args.lines.map(async (line, i) => {
+      const share = fit.discounts[i];
+      if (share.lte(0)) return line;
+      const repriced = await args.price({ ...args.items[i], discountId: undefined, discountAmount: line.discountAmount.add(share).toNumber() });
+      return { ...repriced, discountId: line.discountId, promotionId: line.promotionId, couponId: args.coupon.id };
+    }),
+  );
+  return { lines, discountAmount: fit.discounts.reduce((s, d) => s.add(d), new Decimal(0)).toDecimalPlaces(2) };
+}
+
+async function paymentCodes(tx: Prisma.TransactionClient, payments: { paymentMethodId: string }[]) {
+  if (!payments.length) return new Map<string, string>();
+  const methods = await tx.paymentMethod.findMany({ where: { id: { in: payments.map((p) => p.paymentMethodId) } }, select: { id: true, code: true } });
+  return new Map(methods.map((m) => [m.id, m.code]));
+}
+
+/**
+ * Promotion rules that bite when an invoice is actually paid: a "Full Cash" promotion must be
+ * paid in full, in cash (the reference locks the payment row to the full amount and the cash
+ * method), and cash back can't be spent while a "Redeem After Offer Expiry" cash back offer runs.
+ */
+async function assertPromotionPaymentRules(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  promotion: { fullCash: boolean; name: string } | null,
+  payments: { paymentMethodId: string; amount: number }[],
+  codes: Map<string, string>,
+  totalAmount: Prisma.Decimal,
+  appliedCreditAmount: Prisma.Decimal,
+) {
+  if (promotion?.fullCash) {
+    const cash = payments.reduce((sum, p) => sum.add(new Decimal(p.amount)), new Decimal(0));
+    const allCash = payments.every((p) => codes.get(p.paymentMethodId) === "CASH");
+    if (!allCash || appliedCreditAmount.gt(0) || cash.lt(totalAmount)) {
+      throw new AppError(400, `The promotion "${promotion.name}" requires the full amount (${totalAmount.toFixed(2)}) paid in cash`);
+    }
+  }
+  if (payments.some((p) => codes.get(p.paymentMethodId) === "CASHBACK")) {
+    await assertCashbackRedeemAllowed(tx, organizationId);
+  }
+}
+
+/** Reference handleCashBackWithPromotions(): the cash back a Cash back promotion earns. */
+async function grantPromotionCashback(
+  tx: Prisma.TransactionClient,
+  args: {
+    promotion: { id: string; name: string; type: string; cashBackValue: Prisma.Decimal | null; pointsForCashBack: Prisma.Decimal | null; cashBackExpirationDays: number | null };
+    customerId: string;
+    saleId: string;
+    invoiceNumber: string;
+    totalAmount: Prisma.Decimal;
+    payments: { paymentMethodId: string; amount: number }[];
+    codes: Map<string, string>;
+    organizationId: string;
+    createdBy: string;
+  },
+) {
+  if (args.promotion.type !== "CASH_BACK") return;
+  // Reference: earned on the final total less any cash back spent on this same invoice.
+  const redeemed = args.payments.filter((p) => args.codes.get(p.paymentMethodId) === "CASHBACK").reduce((sum, p) => sum.add(new Decimal(p.amount)), new Decimal(0));
+  const amount = cashBackAmount(args.promotion, args.totalAmount.sub(redeemed));
+  if (amount.lte(0)) return;
+  const expiresAt = args.promotion.cashBackExpirationDays ? new Date(Date.now() + args.promotion.cashBackExpirationDays * 24 * 60 * 60 * 1000) : undefined;
+  await adjustCashbackTx(tx, args.customerId, amount, "GRANT", `${args.promotion.name} on ${args.invoiceNumber}`, args.organizationId, args.createdBy, {
+    saleId: args.saleId,
+    promotionId: args.promotion.id,
+    expiresAt,
+  });
 }
 
 export async function checkout(
@@ -455,9 +634,64 @@ export async function checkout(
       );
     }
     const canEditLinePrice = actor.isSystemAdmin || callerPermissions.includes("pos.editLinePrice");
-    const lines = await Promise.all(
-      input.items.map((item) => priceLine(tx, item, input.businessLocationId, organizationId, overrides, groupDiscountPercent, canEditLinePrice)),
-    );
+    // --- Coupon (reference SellPosController@applyCoupon): checked first, because a coupon without
+    // "Added Discount" replaces every other discount on the cart (reference applyCouponSuccess
+    // cancels the promotion and zeroes each row's line discount). ---
+    const coupon = input.couponCode?.trim()
+      ? await resolveCartCoupon(tx, {
+          organizationId,
+          code: input.couponCode,
+          businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+          customer: { id: customer.id, customerGroupId: customer.customerGroupId },
+        })
+      : null;
+    if (coupon?.otp && !isValidCouponOtp(coupon.id, customer.id, input.couponOtp)) {
+      throw new AppError(400, "Invalid verification code");
+    }
+    const cartItems: CartItem[] = coupon && !coupon.addedDiscount ? input.items.map((item) => ({ ...item, discountId: undefined, discountAmount: 0 })) : input.items;
+    const lineDiscountOf = await resolveLineDiscounts(tx, {
+      organizationId,
+      businessLocationId: input.businessLocationId,
+      customerGroupId: customer.customerGroupId,
+      priceListId,
+      items: cartItems,
+    });
+    const price = (item: CartItem) => {
+      const lineDiscount = lineDiscountOf(item);
+      // A pre-filled discount that no longer applies takes its amount with it.
+      const priced = item.discountId && !lineDiscount ? { ...item, discountId: undefined, discountAmount: 0 } : item;
+      return priceLine(tx, priced, input.businessLocationId, organizationId, overrides, groupDiscountPercent, canEditLinePrice, lineDiscount);
+    };
+    const baseLines = await Promise.all(cartItems.map(price));
+
+    // --- Promotion (reference SellPosController@applyPromotion + pos.js) - the cashier's picked
+    // promotion, or else the first auto-apply one that matches, re-evaluated here server-side so
+    // the discount never comes from the client. ---
+    const appliedPromotion = await resolvePromotion(tx, {
+      organizationId,
+      promotionId: input.promotionId,
+      coupon,
+      businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+      customer: { id: customer.id, customerGroupId: customer.customerGroupId, priceListId: customer.priceListId },
+      rows: toPricedRows(cartItems, baseLines),
+    });
+    const promotedItems = appliedPromotion ? promotionCartItems(appliedPromotion, cartItems) : null;
+    const pricedItems: CartItem[] = promotedItems ? promotedItems.map((p) => p.item) : cartItems;
+    const promotedLines: PricedLine[] = promotedItems
+      ? await Promise.all(promotedItems.map(async ({ item, promotionId }) => ({ ...(await price(item)), promotionId })))
+      : baseLines;
+    const promotionId = appliedPromotion?.promotion.id ?? null;
+
+    // Coupon on the lines it fits (after the promotion, when one is allowed alongside it).
+    const couponResult = coupon ? await applyCouponToLines(tx, { organizationId, coupon, items: pricedItems, lines: promotedLines, price }) : null;
+    const lines: PricedLine[] = couponResult ? couponResult.lines : promotedLines;
+    const couponId: string | undefined = coupon?.id;
+    const couponDiscountAmount = couponResult?.discountAmount ?? new Decimal(0);
+    // A DRAFT quote hasn't actually "used" the coupon yet - nothing should need reversing if it's
+    // later voided (see voidQuote), so usage is only counted once confirmQuote() runs.
+    if (coupon && !effectiveAsDraft) {
+      await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+    }
 
     // Server-derived from the actual priced lines - never trusts input.mode for this, since mode
     // is just the caller's declared intent (and may be absent entirely on the legacy /pos screen).
@@ -469,60 +703,13 @@ export async function checkout(
     const lineTaxAmount = lines.reduce((sum, l) => sum.add(l.taxAmount), new Decimal(0));
     const lineDiscountAmount = lines.reduce((sum, l) => sum.add(l.discountAmount), new Decimal(0));
 
-    // --- Coupon: validated and priced here, server-side, never trusting a client-sent amount ---
-    let couponId: string | undefined;
-    let couponDiscountAmount = new Decimal(0);
-    if (input.couponCode) {
-      const coupon = await tx.coupon.findFirst({
-        where: { organizationId, code: input.couponCode.trim().toUpperCase(), isActive: true },
-      });
-      if (!coupon) throw new AppError(400, "Invalid or inactive coupon code");
-      const now = new Date();
-      if (coupon.validFrom && coupon.validFrom > now) throw new AppError(400, "This coupon is not active yet");
-      if (coupon.validUntil && coupon.validUntil < now) throw new AppError(400, "This coupon has expired");
-      if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
-        throw new AppError(400, "This coupon has reached its usage limit");
-      }
-      if (lineSubtotal.lt(coupon.minPurchaseAmount)) {
-        throw new AppError(400, `This coupon requires a minimum purchase of ${coupon.minPurchaseAmount.toFixed(2)}`);
-      }
-      // Targeting + per-customer limit - all null on the coupon means unrestricted, matching the
-      // pre-targeting default behavior exactly.
-      if (coupon.businessLocationId && coupon.businessLocationId !== input.businessLocationId) {
-        throw new AppError(400, "This coupon is not valid at this branch");
-      }
-      if (coupon.customerId && coupon.customerId !== input.customerId) {
-        throw new AppError(400, "This coupon is not valid for this customer");
-      }
-      if (coupon.customerGroupId && customer.customerGroupId !== coupon.customerGroupId) {
-        throw new AppError(400, "This coupon is not valid for this customer");
-      }
-      if (coupon.maxUsesPerCustomer != null) {
-        const usedByCustomer = await tx.sale.count({ where: { couponId: coupon.id, customerId: input.customerId, status: "FINAL" } });
-        if (usedByCustomer >= coupon.maxUsesPerCustomer) {
-          throw new AppError(400, "This coupon has already been used by this customer");
-        }
-      }
-      couponId = coupon.id;
-      const raw = coupon.discountMode === "PERCENT" ? lineSubtotal.mul(coupon.discountValue).div(100) : coupon.discountValue;
-      couponDiscountAmount = Decimal.min(raw, lineSubtotal);
-      if (coupon.maxDiscountAmount != null) couponDiscountAmount = Decimal.min(couponDiscountAmount, coupon.maxDiscountAmount);
-      couponDiscountAmount = couponDiscountAmount.toDecimalPlaces(2);
-      // A DRAFT quote hasn't actually "used" the coupon yet - nothing should need reversing if
-      // it's later voided (see voidQuote), so usage is only counted once confirmQuote() runs.
-      if (!effectiveAsDraft) {
-        await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
-      }
-    }
-
-    // The coupon is netted into `subtotal` exactly the way line-level discounts already are
-    // (see priceLine above) - both reduce the taxable base that the ZATCA XML/hash/QR treat as
-    // authoritative, while `discountAmount` stays purely informational disclosure of how much
-    // was taken off in total. Tax is recomputed proportionally on the reduced base; this is a
-    // reasonable approximation for a single-VAT-rate storefront and does not attempt per-line
-    // reallocation across mixed tax categories.
+    // The coupon is already inside the line subtotals (it is a line discount, see applyCouponToLines),
+    // so it reduces the taxable base line by line; couponDiscountAmount only records how much of the
+    // line discounts came from it. Tax on the invoice-level discounts below is recomputed
+    // proportionally on the reduced base - a reasonable approximation for a single-VAT-rate
+    // storefront that does not attempt per-line reallocation across mixed tax categories.
     const effectiveTaxRate = lineSubtotal.gt(0) ? lineTaxAmount.div(lineSubtotal) : new Decimal(0);
-    const subtotalAfterCoupon = lineSubtotal.sub(couponDiscountAmount);
+    const subtotalAfterCoupon = lineSubtotal;
 
     // --- Manual invoice-level discount (the cashier's "Discount, shipping & totals" panel) ---
     // Priced here, server-side, never trusting a client-sent amount - same discipline as the
@@ -575,7 +762,7 @@ export async function checkout(
 
     const subtotal = subtotalAfterInvoiceDiscount.sub(pointsDiscountAmount).add(shippingAmount).toDecimalPlaces(2);
     const taxAmount = subtotal.mul(effectiveTaxRate).toDecimalPlaces(2);
-    const discountAmount = lineDiscountAmount.add(couponDiscountAmount).add(invoiceDiscountAmount).add(pointsDiscountAmount);
+    const discountAmount = lineDiscountAmount.add(invoiceDiscountAmount).add(pointsDiscountAmount);
 
     // Additional expenses (reference's 4 fixed named slots) are a flat, UNTAXED pass-through
     // charge added straight onto the grand total - unlike shippingAmount above, which is a real
@@ -712,6 +899,7 @@ export async function checkout(
             notes: input.notes,
             invoiceTypeCode: customer.vatNumber?.trim() ? "STANDARD" : "SIMPLIFIED",
             couponId,
+            promotionId,
             couponDiscountAmount,
             invoiceDiscountAmount,
             shippingAmount,
@@ -745,6 +933,9 @@ export async function checkout(
             note: l.note,
             widthM: l.widthM,
             heightM: l.heightM,
+            promotionId: l.promotionId,
+            discountId: l.discountId,
+            couponId: l.couponId,
           })),
         });
 
@@ -795,6 +986,7 @@ export async function checkout(
           invoiceHash: null,
           invoiceTypeCode: customer.vatNumber?.trim() ? "STANDARD" : "SIMPLIFIED",
           couponId,
+          promotionId,
           couponDiscountAmount,
           invoiceDiscountAmount,
           shippingAmount,
@@ -829,6 +1021,9 @@ export async function checkout(
           note: l.note,
           widthM: l.widthM,
           heightM: l.heightM,
+          promotionId: l.promotionId,
+          discountId: l.discountId,
+          couponId: l.couponId,
         })),
       });
 
@@ -842,6 +1037,9 @@ export async function checkout(
         },
       });
     }
+
+    const codes = await paymentCodes(tx, input.payments);
+    await assertPromotionPaymentRules(tx, organizationId, appliedPromotion?.promotion ?? null, input.payments, codes, totalAmount, appliedCreditAmount);
 
     const invoiceNumber = await claimBusinessLocationNumber(tx, input.businessLocationId, "invoice");
     // Generated up front (rather than left to Prisma's default) because the XML's cbc:UUID
@@ -1004,6 +1202,7 @@ export async function checkout(
         publicKeyPem,
         registerSessionId: openRegisterSession?.id,
         couponId,
+        promotionId,
         couponDiscountAmount,
         invoiceDiscountAmount,
         shippingAmount,
@@ -1038,6 +1237,9 @@ export async function checkout(
         note: l.note,
         widthM: l.widthM,
         heightM: l.heightM,
+        promotionId: l.promotionId,
+        discountId: l.discountId,
+        couponId: l.couponId,
       })),
     });
 
@@ -1152,6 +1354,20 @@ export async function checkout(
         if (!p.referenceNumber) throw new AppError(400, "A BNPL payment must reference its session id");
         await verifyAndConsumeSessionTx(tx, p.referenceNumber, sale.id, p.amount, organizationId);
       }
+    }
+
+    if (appliedPromotion) {
+      await grantPromotionCashback(tx, {
+        promotion: appliedPromotion.promotion,
+        customerId: input.customerId,
+        saleId: sale.id,
+        invoiceNumber,
+        totalAmount,
+        payments: input.payments,
+        codes,
+        organizationId,
+        createdBy,
+      });
     }
 
     // Customer balance reflects what they still owe (or, if negative, a credit from overpayment).
@@ -1361,6 +1577,12 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
       pointsEarned = Math.floor(totalAmount.div(org.pointsEarnDivisor).toNumber());
       if (org.maxPointsPerOrder != null) pointsEarned = Math.min(pointsEarned, org.maxPointsPerOrder);
     }
+
+    // The promotion was applied (and its discounts frozen) when the quote was saved - its payment
+    // rules and cash back still apply now that it becomes a real invoice.
+    const quotePromotion = draft.promotionId ? await tx.promotion.findFirst({ where: { id: draft.promotionId, deletedAt: null } }) : null;
+    const codes = await paymentCodes(tx, input.payments);
+    await assertPromotionPaymentRules(tx, organizationId, quotePromotion, input.payments, codes, totalAmount, appliedCreditAmount);
 
     const invoiceNumber = await claimBusinessLocationNumber(tx, draft.businessLocationId, "invoice");
     const saleDate = new Date();
@@ -1616,6 +1838,20 @@ export async function confirmQuote(saleId: string, input: ConfirmQuoteInput, org
         if (!p.referenceNumber) throw new AppError(400, "A BNPL payment must reference its session id");
         await verifyAndConsumeSessionTx(tx, p.referenceNumber, draft.id, p.amount, organizationId);
       }
+    }
+
+    if (quotePromotion) {
+      await grantPromotionCashback(tx, {
+        promotion: quotePromotion,
+        customerId: draft.customerId,
+        saleId: draft.id,
+        invoiceNumber,
+        totalAmount,
+        payments: input.payments,
+        codes,
+        organizationId,
+        createdBy,
+      });
     }
 
     await tx.customer.update({
@@ -1894,4 +2130,189 @@ export async function discardHeldSale(id: string, organizationId: string) {
   const held = await prisma.heldSale.findFirst({ where: { id, organizationId } });
   if (!held) throw new NotFoundError("Held sale not found");
   await prisma.heldSale.delete({ where: { id } });
+}
+
+// --- Promotions at the POS (reference SellPosController@applyPromotion) ---------------------
+
+/**
+ * The POS "Apply" button (and the automatic try on Finalize / Save). Runs exactly what checkout()
+ * will run, so the split rows and discounts the cashier sees are the ones the invoice gets.
+ */
+/** What both POS previews (promotion, coupon) need to price a cart exactly like checkout() does. */
+async function previewPricing(
+  tx: Prisma.TransactionClient,
+  input: { businessLocationId: string; customerId: string; priceListId?: string },
+  organizationId: string,
+  actorId: string,
+  callerPermissions: string[],
+) {
+  const customer = await tx.customer.findFirst({ where: { id: input.customerId, organizationId, deletedAt: null } });
+  if (!customer) throw new NotFoundError("Customer not found");
+  const businessLocation = await tx.businessLocation.findFirst({ where: { id: input.businessLocationId, organizationId } });
+  if (!businessLocation) throw new NotFoundError("Business location not found");
+  const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { isSystemAdmin: true } });
+
+  let priceListId = await resolvePriceListId(tx, input.customerId, organizationId, input.businessLocationId);
+  if (input.priceListId) {
+    const overridePriceList = await tx.priceList.findFirst({ where: { id: input.priceListId, organizationId } });
+    if (!overridePriceList) throw new NotFoundError("Selling price group not found");
+    priceListId = overridePriceList.id;
+  }
+  const overrides = await getPriceOverrides(tx, priceListId);
+  const groupDiscountPercent = await resolveGroupDiscountPercent(tx, input.customerId, organizationId);
+  const canEditLinePrice = actor.isSystemAdmin || callerPermissions.includes("pos.editLinePrice");
+  /** checkout()'s price function for this cart's items. */
+  const pricer = async (items: CartItem[]) => {
+    const lineDiscountOf = await resolveLineDiscounts(tx, { organizationId, businessLocationId: input.businessLocationId, customerGroupId: customer.customerGroupId, priceListId, items });
+    return (item: CartItem) => {
+      const lineDiscount = lineDiscountOf(item);
+      // A pre-filled discount that no longer applies takes its amount with it.
+      const priced = item.discountId && !lineDiscount ? { ...item, discountId: undefined, discountAmount: 0 } : item;
+      return priceLine(tx, priced, input.businessLocationId, organizationId, overrides, groupDiscountPercent, canEditLinePrice, lineDiscount);
+    };
+  };
+  return { customer, businessLocation, pricer };
+}
+
+export async function previewPromotion(input: ApplyPromotionInput, organizationId: string, actorId: string, callerPermissions: string[] = []) {
+  assertItemsMatchMode(input.items, input.mode);
+  return prisma.$transaction(async (tx) => {
+    const { customer, businessLocation, pricer } = await previewPricing(tx, input, organizationId, actorId, callerPermissions);
+    const coupon = input.couponCode?.trim()
+      ? await resolveCartCoupon(tx, {
+          organizationId,
+          code: input.couponCode,
+          businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+          customer: { id: customer.id, customerGroupId: customer.customerGroupId },
+        })
+      : null;
+    const items = input.items as CartItem[];
+    const price = await pricer(items);
+    const baseLines = await Promise.all(items.map(price));
+
+    const resolved = await resolvePromotion(tx, {
+      organizationId,
+      promotionId: input.promotionId,
+      coupon,
+      businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+      customer: { id: customer.id, customerGroupId: customer.customerGroupId, priceListId: customer.priceListId },
+      rows: toPricedRows(items, baseLines),
+    });
+    if (!resolved) return { applied: false as const, message: "Conditions do not match" };
+
+    const segments = promotionCartItems(resolved, items);
+    const priced = await Promise.all(segments.map((seg) => price(seg.item)));
+    const { promotion } = resolved;
+    return {
+      applied: true as const,
+      message: "Promotion applied successfully",
+      promotion: { id: promotion.id, name: promotion.name, type: promotion.type, fullCash: promotion.fullCash, discountType: promotion.discountType, discountAmount: promotion.discountAmount },
+      items: resolved.result.segments.map((seg, i) => ({
+        sourceIndex: seg.sourceIndex,
+        quantity: seg.pieces.toNumber(),
+        discountAmount: priced[i].discountAmount.toNumber(),
+        promoted: seg.promoted,
+        free: seg.free,
+      })),
+      cashBack:
+        promotion.type === "CASH_BACK"
+          ? cashBackAmount(promotion, priced.reduce((sum, l) => sum.add(l.total), new Decimal(0))).toNumber()
+          : null,
+    };
+  });
+}
+
+type ApplyCouponInput = z.infer<typeof applyCouponSchema>;
+
+/**
+ * The POS "Apply coupon" button (reference SellPosController@applyCoupon + pos.js
+ * applyCouponSuccess). Runs exactly what checkout() will run and returns, per cart line (the
+ * promotion's split rows when a promotion is on the cart), how much of that line's discount is the
+ * coupon - and whether the coupon wipes the other discounts first.
+ */
+export async function previewCoupon(input: ApplyCouponInput, organizationId: string, actorId: string, callerPermissions: string[] = []) {
+  assertItemsMatchMode(input.items, input.mode);
+  return prisma.$transaction(async (tx) => {
+    const { customer, businessLocation, pricer } = await previewPricing(tx, input, organizationId, actorId, callerPermissions);
+    const coupon = await resolveCartCoupon(tx, {
+      organizationId,
+      code: input.code,
+      businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+      customer: { id: customer.id, customerGroupId: customer.customerGroupId },
+    });
+    const couponInfo = {
+      id: coupon.id,
+      code: coupon.code,
+      name: coupon.name,
+      discountMode: coupon.discountMode,
+      discountValue: coupon.discountValue,
+      addedDiscount: coupon.addedDiscount,
+      otp: coupon.otp,
+    };
+    // An OTP coupon waits for the customer's verification code (reference Send OTP).
+    if (coupon.otp && !isValidCouponOtp(coupon.id, customer.id, input.otp)) {
+      if (input.otp) throw new AppError(400, "Invalid verification code");
+      return { otpRequired: true as const, message: "Send the verification code to the customer", coupon: couponInfo };
+    }
+    const items = (input.items as CartItem[]).map((item) => (coupon.addedDiscount ? item : { ...item, discountId: undefined, discountAmount: 0 }));
+    const price = await pricer(items);
+    const baseLines = await Promise.all(items.map(price));
+    // Without "Added Discount" the coupon replaces the promotion, so a promotion on the cart is ignored here
+    // (the POS cancels it when it applies the coupon).
+    const resolved = await resolvePromotion(tx, {
+      organizationId,
+      promotionId: coupon.addedDiscount ? input.promotionId : undefined,
+      coupon,
+      businessLocation: { id: businessLocation.id, groupId: businessLocation.groupId },
+      customer: { id: customer.id, customerGroupId: customer.customerGroupId, priceListId: customer.priceListId },
+      rows: toPricedRows(items, baseLines),
+    });
+    const promotedItems = resolved ? promotionCartItems(resolved, items) : null;
+    const pricedItems = promotedItems ? promotedItems.map((p) => p.item) : items;
+    const lines = promotedItems ? await Promise.all(promotedItems.map(({ item }) => price(item))) : baseLines;
+    const result = await applyCouponToLines(tx, { organizationId, coupon, items: pricedItems, lines, price });
+    return {
+      otpRequired: false as const,
+      message: "Coupon applied successfully",
+      coupon: couponInfo,
+      // Reference applyCouponSuccess: without "Added Discount" the promotion is cancelled and every
+      // row's line discount zeroed before the coupon goes on.
+      clearsOtherDiscounts: !coupon.addedDiscount,
+      lines: result.lines.map((l, i) => ({ couponDiscount: l.discountAmount.sub(lines[i].discountAmount).toDecimalPlaces(2).toNumber(), matched: Boolean(l.couponId) })),
+      discountAmount: result.discountAmount.toNumber(),
+    };
+  });
+}
+
+/**
+ * Reference SellPosController@getProductRow -> getProductDiscount(): the discount each cart item
+ * gets, used by the POS to pre-fill the line discount as items are added. Checkout re-checks it.
+ */
+export async function matchLineDiscounts(
+  input: { businessLocationId: string; customerId: string; priceListId?: string; itemKeys: string[] },
+  organizationId: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const customer = await tx.customer.findFirst({ where: { id: input.customerId, organizationId, deletedAt: null }, select: { customerGroupId: true } });
+    if (!customer) throw new NotFoundError("Customer not found");
+    let priceListId = await resolvePriceListId(tx, input.customerId, organizationId, input.businessLocationId);
+    if (input.priceListId) {
+      const overridePriceList = await tx.priceList.findFirst({ where: { id: input.priceListId, organizationId } });
+      if (!overridePriceList) throw new NotFoundError("Selling price group not found");
+      priceListId = overridePriceList.id;
+    }
+    const matches = await matchDiscounts(tx, {
+      organizationId,
+      businessLocationId: input.businessLocationId,
+      customerGroupId: customer.customerGroupId,
+      priceListId,
+      itemKeys: input.itemKeys,
+    });
+    return Object.fromEntries(
+      [...matches.entries()].map(([key, d]) => [
+        key,
+        { id: d.id, name: d.name, discountType: d.discountType, discountAmount: d.discountAmount.toString(), startsAt: d.startsAt, endsAt: d.endsAt },
+      ]),
+    );
+  });
 }

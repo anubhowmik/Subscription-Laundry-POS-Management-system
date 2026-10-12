@@ -223,6 +223,9 @@ export interface CheckoutInput {
   payments: CheckoutPaymentInput[];
   notes?: string;
   couponCode?: string;
+  couponOtp?: string;
+  // The promotion applied in the cart (reference POS Apply) - omitted lets checkout try the auto-apply ones.
+  promotionId?: string;
   invoiceDiscountMode?: "PERCENT" | "FIXED";
   invoiceDiscountValue?: number;
   shipping?: number;
@@ -591,65 +594,6 @@ export function useCloseRegister() {
       denominations?: Record<string, number>;
     }) => (await api.post<ApiSuccess<RegisterSessionRow>>(`/register-sessions/${id}/close`, input)).data.data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pos", "register-session"] }),
-  });
-}
-
-// --- Coupons -------------------------------------------------------------------------------
-// Preview is a courtesy check so the cashier gets instant feedback; checkout independently
-// re-validates and computes the discount server-side, so preview can never be used to forge one.
-
-export interface CouponPreview {
-  code: string;
-  discountMode: "PERCENT" | "FIXED";
-  discountValue: string;
-  discountAmount: string;
-}
-
-export function usePreviewCoupon() {
-  return useMutation({
-    mutationFn: async ({
-      code,
-      subtotal,
-      customerId,
-      businessLocationId,
-    }: {
-      code: string;
-      subtotal: number;
-      customerId?: string;
-      businessLocationId?: string;
-    }) => (await api.get<ApiSuccess<CouponPreview>>("/coupons/preview", { params: { code, subtotal, customerId, businessLocationId } })).data.data,
-  });
-}
-
-export interface CouponRow {
-  id: string;
-  code: string;
-  discountMode: "PERCENT" | "FIXED";
-  discountValue: string;
-  minPurchaseAmount: string;
-  maxUses: number | null;
-  usedCount: number;
-  validFrom: string | null;
-  validUntil: string | null;
-  isActive: boolean;
-}
-
-export interface CouponListParams {
-  page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: "asc" | "desc";
-}
-
-/** Backs both the POS "Coupon" picker's plain fetch (no params - reads every active/inactive
- * coupon like before) and CouponsPage.tsx's paginated/sortable list toolbar (params passed). */
-export function useCoupons(params?: CouponListParams) {
-  return useQuery({
-    queryKey: ["coupons", params?.page, params?.limit, params?.sortBy, params?.sortOrder],
-    queryFn: async () => {
-      const res = await api.get<ApiSuccess<CouponRow[]>>("/coupons", { params });
-      return { rows: res.data.data, meta: res.data.meta as PaginationMeta };
-    },
   });
 }
 

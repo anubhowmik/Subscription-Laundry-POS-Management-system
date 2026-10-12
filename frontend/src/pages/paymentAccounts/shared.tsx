@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
+import { cn } from "../../lib/cn";
+import { inputClass } from "../../components/ui/formClasses";
 
 export interface AccountOption {
   id: string;
@@ -57,6 +60,51 @@ export function useAccountingCustomerSearch(search: string) {
         .data.data,
     enabled: search.trim().length > 0,
   });
+}
+
+/** Customer picker for a Filters popover (Sell Payments). The match list stays in flow - inside the
+ * scrolling popover an absolutely positioned list would be clipped. */
+export function AccountingCustomerFilter({
+  value,
+  onChange,
+  isAr,
+}: {
+  value: { id: string; label: string } | null;
+  onChange: (v: { id: string; label: string } | null) => void;
+  isAr: boolean;
+}) {
+  const [search, setSearch] = useState("");
+  const { data: results } = useAccountingCustomerSearch(search);
+  return (
+    <div>
+      <input
+        value={value ? value.label : search}
+        onChange={(e) => {
+          if (value) onChange(null);
+          setSearch(e.target.value);
+        }}
+        placeholder={isAr ? "أي عميل" : "Any customer"}
+        className={cn(inputClass, "w-full")}
+      />
+      {search && !value && (results ?? []).length > 0 && (
+        <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+          {(results ?? []).map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => {
+                onChange({ id: c.id, label: `${isAr ? c.nameAr || c.nameEn : c.nameEn} (${c.phone})` });
+                setSearch("");
+              }}
+              className="block w-full px-3 py-1.5 text-start text-sm transition-colors hover:bg-slate-100"
+            >
+              {isAr ? c.nameAr || c.nameEn : c.nameEn} <span className="ltr-nums text-xs text-slate-400">({c.phone})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function errorMessage(err: unknown, isAr: boolean) {

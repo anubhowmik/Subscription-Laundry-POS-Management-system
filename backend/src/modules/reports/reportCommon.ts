@@ -31,6 +31,13 @@ export const REPORT_PERMISSIONS = [
   "reports.monthly_lfl_sales",
   "reports.sales_analysis",
   "reports.sales_performance",
+  "reports.customers_revenue",
+  "reports.customers_retention",
+  "reports.decline_customers",
+  "reports.new_customers",
+  "reports.campaign_performance",
+  "reports.discount_coupon",
+  "reports.consumer_behaviour",
 ] as const;
 
 export interface ReportLocationQuery {
@@ -41,8 +48,12 @@ export interface ReportLocationQuery {
 }
 
 export function localToday() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return localDay(new Date());
+}
+
+/** "YYYY-MM-DD" of a timestamp in server-local time. */
+export function localDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** "YYYY-MM-DD HH:mm" in server-local time (the reference prints transaction_date as stored). */
@@ -125,7 +136,7 @@ export async function resolveReportLocations(q: ReportLocationQuery, organizatio
  * gets them (/business-location-groups needs business_locations.update, /customer-groups needs
  * customers access). */
 export async function reportOptions(organizationId: string, allowedLocationIds: string[] | null) {
-  const [locationGroups, locations, customerGroups, productCategories, serviceCategories, products, services, users] = await Promise.all([
+  const [locationGroups, locations, customerGroups, productCategories, serviceCategories, products, services, users, promotions, coupons] = await Promise.all([
     prisma.businessLocationGroup.findMany({ where: { organizationId }, orderBy: { nameEn: "asc" }, select: { id: true, nameEn: true, nameAr: true } }),
     prisma.businessLocation.findMany({
       where: { organizationId, ...(allowedLocationIds ? { id: { in: allowedLocationIds } } : {}) },
@@ -139,6 +150,10 @@ export async function reportOptions(organizationId: string, allowedLocationIds: 
     prisma.product.findMany({ where: { organizationId }, orderBy: { nameEn: "asc" }, select: { id: true, nameEn: true, nameAr: true, sku: true, categoryId: true } }),
     prisma.service.findMany({ where: { organizationId }, orderBy: { nameEn: "asc" }, select: { id: true, nameEn: true, nameAr: true, code: true, categoryId: true } }),
     prisma.user.findMany({ where: { organizationId }, orderBy: { fullNameEn: "asc" }, select: { id: true, fullNameEn: true, fullNameAr: true } }),
+    // Reference CRM reports: Promotion::orderBy(updated_at desc) - soft-deleted ones drop out.
+    prisma.promotion.findMany({ where: { organizationId, deletedAt: null }, orderBy: { updatedAt: "desc" }, select: { id: true, name: true, type: true, startsAt: true, endsAt: true } }),
+    // Reference Discount Coupon Report: Coupon::orderBy(updated_at desc).
+    prisma.coupon.findMany({ where: { organizationId }, orderBy: { updatedAt: "desc" }, select: { id: true, code: true, validFrom: true, validUntil: true } }),
   ]);
   // Products and services share one Category / Product picker (a laundry item is a Service here),
   // keyed "pc:"/"sc:" and "p:"/"s:" so the report endpoints can tell them apart.
@@ -147,6 +162,9 @@ export async function reportOptions(organizationId: string, allowedLocationIds: 
     locations,
     customerGroups,
     users,
+    promotions,
+    // Valid From / Until as local days, so the report page can default its range without a timezone shift.
+    coupons: coupons.map((c) => ({ id: c.id, code: c.code, startsAt: c.validFrom ? localDay(c.validFrom) : null, endsAt: c.validUntil ? localDay(c.validUntil) : null })),
     categories: [
       ...productCategories.map((c) => ({ key: `pc:${c.id}`, nameEn: c.code ? `${c.nameEn}-${c.code}` : c.nameEn, nameAr: c.nameAr })),
       ...serviceCategories.map((c) => ({ key: `sc:${c.id}`, nameEn: c.nameEn, nameAr: c.nameAr })),
@@ -159,6 +177,13 @@ export async function reportOptions(organizationId: string, allowedLocationIds: 
 }
 
 export const pickName = (x: { nameEn: string; nameAr: string | null }, isAr: boolean) => (isAr ? x.nameAr || x.nameEn : x.nameEn);
+
+/** Reference's "business name, contact name" customer label. A business contact's own name already
+ * mirrors its business name, so the prefix is only added when the two differ. */
+export const customerLabel = (c: { nameEn: string; nameAr: string | null; businessName?: string | null }, isAr: boolean) => {
+  const name = pickName(c, isAr);
+  return c.businessName && c.businessName !== name && c.businessName !== c.nameEn ? `${c.businessName}, ${name}` : name;
+};
 
 /** The " | "-joined filter line the reference prints under the report header (report.js `filters`). */
 export function locationFiltersText(

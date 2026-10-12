@@ -464,6 +464,8 @@ model Organization {
   registerSessions       RegisterSession[]
   heldSales              HeldSale[]
   coupons                Coupon[]
+  promotions             Promotion[]
+  discounts              Discount[]
   priceLists             PriceList[]
   compensations          Compensation[]
   loyaltyTransactions    LoyaltyTransaction[]
@@ -934,12 +936,12 @@ model BusinessLocation {
   announcementLocations        AnnouncementLocation[]
   stockTransfersFrom           StockTransfer[]                  @relation("StockTransferFrom")
   stockTransfersTo             StockTransfer[]                  @relation("StockTransferTo")
-  coupons                      Coupon[]
   expenses                     Expense[]
   stockAdjustments             StockAdjustment[]
   userTransferFromRestrictions UserTransferFromLocation[]
   bnplSessions                 BnplSession[]
   defaultPaymentAccounts       BusinessLocationPaymentAccount[]
+  discounts                    Discount[]
 
   @@unique([organizationId, branchCode])
   @@index([organizationId])
@@ -1121,7 +1123,6 @@ model CustomerGroup {
   priceList        PriceList?          @relation(fields: [priceListId], references: [id])
   defaultAccount   Account?            @relation(fields: [defaultAccountId], references: [id])
   customers        Customer[]
-  coupons          Coupon[]
   userRestrictions UserCustomerGroup[]
   sales            Sale[]
   sellReturns      SellReturn[]
@@ -1427,7 +1428,6 @@ model Customer {
   cashbackTransactions CashbackTransaction[]
   bookings             Booking[]
   sellReturns          SellReturn[]
-  coupons              Coupon[]
   userRestrictions     UserCustomer[]
   bnplSessions         BnplSession[]
 
@@ -1502,6 +1502,7 @@ model Brand {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   products     Product[]
+  discounts    Discount[]
 
   @@index([organizationId])
 }
@@ -1948,6 +1949,9 @@ model Sale {
 
   registerSessionId     String? // which cashier session this sale was rung up under, if one was open
   couponId              String?
+  // The reference's promotion applied to this invoice (sell lines' promotion_id / the cash-back
+  // promotion that granted cashback on it) - see promotions/promotionEngine.ts.
+  promotionId           String?
   couponDiscountAmount  Decimal @default(0) @db.Decimal(12, 2) // server-computed - never trust a client-sent discount
   invoiceDiscountAmount Decimal @default(0) @db.Decimal(12, 2) // server-computed manual cashier discount (fixed or %), separate from couponDiscountAmount
   shippingAmount        Decimal @default(0) @db.Decimal(12, 2) // flat delivery/handling charge, taxed at the invoice's effective VAT rate like the rest of subtotal
@@ -2028,6 +2032,7 @@ model Sale {
   createdByUser        User                   @relation(fields: [createdBy], references: [id])
   registerSession      RegisterSession?       @relation(fields: [registerSessionId], references: [id])
   coupon               Coupon?                @relation(fields: [couponId], references: [id])
+  promotion            Promotion?             @relation(fields: [promotionId], references: [id])
   priceList            PriceList?             @relation(fields: [priceListId], references: [id])
   items                SaleItem[]
   payments             Payment[]
@@ -2078,8 +2083,19 @@ model SaleItem {
   note              String?
   widthM            Decimal?              @db.Decimal(8, 3)
   heightM           Decimal?              @db.Decimal(8, 3)
+  // Reference's transaction_sell_lines.promotion_id - set on the line(s) a promotion discounted
+  // (or added free, for a Bonus promotion). See promotions/promotionEngine.ts.
+  promotionId       String?
+  // Reference transaction_sell_lines.coupon_id - the coupon that discounted this line.
+  couponId          String?
+  // Reference transaction_sell_lines.discount_id - the Discount (Promotions > Discounts) that set
+  // this line's discount.
+  discountId        String?
 
   sale              Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  discount          Discount?               @relation(fields: [discountId], references: [id])
+  promotion         Promotion?              @relation(fields: [promotionId], references: [id])
+  coupon            Coupon?                 @relation(fields: [couponId], references: [id], onDelete: SetNull)
   product           Product?                @relation(fields: [productId], references: [id])
   service           Service?                @relation(fields: [serviceId], references: [id])
   statusHistory     SaleItemStatusHistory[]
@@ -2668,6 +2684,7 @@ model CashbackTransaction {
   customerId     String
   saleId         String? // set when REDEEM happened at POS checkout
   compensationId String? // set when GRANT came from a compensation settlement
+  promotionId    String? // set when GRANT came from a Cash back promotion at checkout
   type           CashbackTransactionType
   amount         Decimal                 @db.Decimal(12, 2) // signed: + granted/adjusted up, - redeemed/adjusted down
   balanceAfter   Decimal                 @db.Decimal(12, 2)
@@ -2680,6 +2697,7 @@ model CashbackTransaction {
   customer      Customer      @relation(fields: [customerId], references: [id])
   sale          Sale?         @relation(fields: [saleId], references: [id])
   compensation  Compensation? @relation(fields: [compensationId], references: [id])
+  promotion     Promotion?    @relation(fields: [promotionId], references: [id])
   createdByUser User?         @relation(fields: [createdBy], references: [id])
 
   @@index([organizationId])
@@ -2921,41 +2939,191 @@ model HeldSaleItem {
 // and applied server-side at checkout; the client only ever sends the code, never the amount.
 // ---------------------------------------------------------------------------
 
+// Reference: EJADA "Promotions" (app/Promotion.php, PromotionsController, TransactionUtil's
+// checkPromotion()). Item / category targets are stored as this app's own "p:<productId>" /
+// "s:<serviceId>" and "pc:<categoryId>" / "sc:<serviceCategoryId>" keys, because a laundry
+// promotion targets services and products alike (the reference only ever had products).
+enum PromotionType {
+  TRADITIONAL_DISCOUNT
+  QUANTITY_DISCOUNT
+  PRICE_DISCOUNT
+  PRODUCT_GIFTS
+  BOUNCE
+  MULTIPLE_DISCOUNT
+  CASH_BACK
+}
+
+enum PromotionDiscountType {
+  FIXED
+  PERCENTAGE
+}
+
+model Promotion {
+  id                         String                 @id @default(uuid())
+  organizationId             String
+  name                       String
+  type                       PromotionType
+  salesQuantity              Int?
+  salesAmount                Decimal?               @db.Decimal(14, 2)
+  // Conditions - every list empty means "no restriction" on that dimension.
+  locationGroupIds           String[]               @default([])
+  businessLocationIds        String[]               @default([])
+  excludeBusinessLocationIds String[]               @default([])
+  customerGroupIds           String[]               @default([])
+  priceListIds               String[]               @default([])
+  customerIds                String[]               @default([])
+  excludeCustomerIds         String[]               @default([])
+  categoryKeys               String[]               @default([])
+  excludeCategoryKeys        String[]               @default([])
+  brandIds                   String[]               @default([])
+  itemKeys                   String[]               @default([])
+  excludeItemKeys            String[]               @default([])
+  applyIfAllProductsExist    Boolean                @default(false)
+  // Activation time
+  startsAt                   DateTime?              @db.Date
+  endsAt                     DateTime?              @db.Date
+  days                       String[]               @default([]) // "Sat" | "Sun" | ... | "Fri"
+  periods                    Json? // [{ from: "HH:mm", to: "HH:mm" }]
+  // Promotion
+  discountType               PromotionDiscountType?
+  discountAmount             Decimal?               @db.Decimal(14, 4)
+  daQuantity                 Int?
+  bounceQuantity             Int?
+  giftQuantity               Int?
+  giftItemKeys               String[]               @default([])
+  priority                   Int?
+  isActive                   Boolean                @default(true)
+  autoApply                  Boolean                @default(true)
+  fullCash                   Boolean                @default(false)
+  expeditedDiscount          Boolean                @default(true)
+  excludeCustomerGroup       Boolean                @default(true)
+  cashBackValue              Decimal?               @db.Decimal(10, 2)
+  pointsForCashBack          Decimal?               @db.Decimal(10, 2)
+  cashBackExpirationDays     Int?
+  redeemAfterEnd             Boolean                @default(false)
+  createdBy                  String?
+  deletedAt                  DateTime?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lines                PromotionLine[]
+  sales                Sale[]
+  saleItems            SaleItem[]
+  cashbackTransactions CashbackTransaction[]
+
+  @@index([organizationId])
+}
+
+// Reference's promotion_products - one "buy N of X, get M of Y at Z% off" rule of a
+// Multiple Products Discount promotion.
+// Reference: EJADA Promotions > Discounts (app/Discount.php, DiscountController,
+// ProductUtil::getProductDiscount()). A branch's automatic line discount on chosen items, a brand
+// and/or a category - pre-filled as the cart line's discount, re-checked at checkout.
+model Discount {
+  id                 String                @id @default(uuid())
+  organizationId     String
+  name               String
+  itemKeys           String[]              @default([]) // "p:<productId>" / "s:<serviceId>"
+  brandId            String?
+  categoryKey        String? // "pc:<main category>" / "sc:<service category>"
+  businessLocationId String
+  priority           Int?
+  discountType       PromotionDiscountType
+  discountAmount     Decimal               @db.Decimal(14, 4)
+  startsAt           DateTime
+  endsAt             DateTime
+  priceListId        String? // reference `spg` - only for sales priced with this selling price group
+  applicableInCg     Boolean               @default(false)
+  isActive           Boolean               @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  businessLocation BusinessLocation @relation(fields: [businessLocationId], references: [id])
+  brand            Brand?           @relation(fields: [brandId], references: [id])
+  priceList        PriceList?       @relation(fields: [priceListId], references: [id])
+  saleItems        SaleItem[]
+
+  @@index([organizationId])
+  @@index([businessLocationId])
+}
+
+model PromotionLine {
+  id              String  @id @default(uuid())
+  promotionId     String
+  itemKey         String
+  quantity        Decimal @db.Decimal(12, 3)
+  giftItemKey     String
+  giftQuantity    Decimal @db.Decimal(12, 3)
+  discountPercent Decimal @db.Decimal(7, 4)
+  sortOrder       Int     @default(0)
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@index([promotionId])
+}
+
 model Coupon {
   id                String             @id @default(uuid())
   organizationId    String
+  // Reference coupons.name - the coupon's display name; `code` is the reference's `coupon` field.
+  name              String             @default("")
   code              String
   discountMode      CouponDiscountMode
   discountValue     Decimal            @db.Decimal(12, 2)
+  // Reference sales_amount: the cart (or, when the coupon targets products, the matching lines)
+  // must reach this total, tax included.
   minPurchaseAmount Decimal            @default(0) @db.Decimal(12, 2)
-  maxUses           Int? // null = unlimited (org-wide total)
+  maxUses           Int? // reference coupon_limit - invoices that may use it in total; null = unlimited
   usedCount         Int                @default(0)
-  validFrom         DateTime?
-  validUntil        DateTime?
+  // Reference starts_at / ends_at - whole days (ends_at counts through 23:59:59).
+  validFrom         DateTime?          @db.Date
+  validUntil        DateTime?          @db.Date
   isActive          Boolean            @default(true)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
-  // Targeting - all null = unrestricted (matches the existing org-wide default). Deliberately no
-  // category/product targeting here - that requires restructuring discount math from cart-level to
-  // per-line, the same undertaking as the Promotion engine (Tier 3/4), not a small addition.
-  businessLocationId String?
-  customerId         String?
-  customerGroupId    String?
-  maxUsesPerCustomer Int? // null = unlimited (per-customer)
-  maxDiscountAmount  Decimal? @db.Decimal(12, 2) // ceiling on the computed discount - only meaningful for PERCENT mode
+  // Conditions (reference location_group_ids / location_ids / cg_ids / customer_ids /
+  // exclude_customer_ids / category_ids / brand_ids / product_ids) - empty = no restriction.
+  // Category and item keys use the promotion keys: "pc:"/"sc:" categories, "p:"/"s:" items.
+  locationGroupIds    String[]          @default([])
+  businessLocationIds String[]          @default([])
+  customerGroupIds    String[]          @default([])
+  customerIds         String[]          @default([])
+  excludeCustomerIds  String[]          @default([])
+  categoryKeys        String[]          @default([])
+  brandIds            String[]          @default([])
+  itemKeys            String[]          @default([])
+  // Reference days (["Sun","Mon",...]) and periods ([{from:"HH:mm",to:"HH:mm"}]) - when the coupon works.
+  days                String[]          @default([])
+  periods             Json?
+  maxUsesPerCustomer  Int? // reference customer_limit
+  maxDiscountAmount   Decimal?          @db.Decimal(12, 2) // reference max_discount - caps a percentage coupon
+  // Reference added_discount: on = the coupon adds on top of a promotion / line discounts; off = it
+  // replaces them (the reference cancels the promotion and zeroes every line discount).
+  addedDiscount       Boolean           @default(true)
+  // Reference otp: the customer confirms the coupon with a one-time code - stored, see coupon.service.
+  otp                 Boolean           @default(false)
+  // Reference added_by: how the coupon was made - single form, bulk generator, or Excel import.
+  addedBy             CouponSource      @default(SINGLE)
+  createdBy           String?
+  deletedAt           DateTime?
 
   organization            Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  businessLocation        BusinessLocation? @relation(fields: [businessLocationId], references: [id])
-  customer                Customer?         @relation(fields: [customerId], references: [id])
-  customerGroup           CustomerGroup?    @relation(fields: [customerGroupId], references: [id])
   sales                   Sale[]
+  saleItems               SaleItem[]
   compensationResolutions Compensation[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
-  @@index([businessLocationId])
-  @@index([customerId])
+}
+
+enum CouponSource {
+  SINGLE
+  BULK
+  EXCEL
 }
 
 // ---------------------------------------------------------------------------
@@ -2979,6 +3147,7 @@ model PriceList {
   customerGroups      CustomerGroup[]
   defaultForLocations BusinessLocation[]
   sales               Sale[]
+  discounts           Discount[]
 
   @@unique([organizationId, nameEn])
   @@index([organizationId])

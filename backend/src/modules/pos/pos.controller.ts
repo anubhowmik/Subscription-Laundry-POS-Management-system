@@ -2,8 +2,11 @@ import { Request, Response } from "express";
 import * as service from "./pos.service";
 import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
-import { AuthorizationError } from "../../utils/AppError";
+import { AuthorizationError, NotFoundError } from "../../utils/AppError";
+import { prisma } from "../../config/prisma";
+import * as couponService from "../coupons/coupon.service";
 import { getParam } from "../../utils/params";
+import * as promotionService from "../promotions/promotion.service";
 
 function assertLocationAccess(req: Request, businessLocationId: string) {
   if (req.user!.isSystemAdmin) return;
@@ -132,4 +135,38 @@ export async function listDeliveries(req: Request, res: Response) {
   const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
   const { data, meta } = await service.listQuotes(req.query, req.user!.organizationId, allowedLocationIds, false);
   return sendPaginated(res, data, meta);
+}
+
+// Reference TransactionUtil::getActivePromotions() - the POS "Promotion" dropdown - plus whether a
+// running "Redeem After Offer Expiry" cash back offer currently blocks spending cash back.
+export async function listActivePromotions(req: Request, res: Response) {
+  const [promotions, cashbackRedeemBlocked] = await Promise.all([
+    promotionService.listActive(req.user!.organizationId),
+    promotionService.hasCashbackRedeemBlock(req.user!.organizationId),
+  ]);
+  return sendSuccess(res, { promotions, cashbackRedeemBlocked });
+}
+
+export async function applyPromotion(req: Request, res: Response) {
+  assertLocationAccess(req, req.body.businessLocationId);
+  return sendSuccess(res, await service.previewPromotion(req.body, req.user!.organizationId, req.user!.id, req.user!.permissions));
+}
+
+// Promotions > Discounts: which discount each item in the cart gets (POS pre-fill).
+export async function matchDiscounts(req: Request, res: Response) {
+  assertLocationAccess(req, req.body.businessLocationId);
+  return sendSuccess(res, await service.matchLineDiscounts(req.body, req.user!.organizationId));
+}
+
+export async function applyCoupon(req: Request, res: Response) {
+  assertLocationAccess(req, req.body.businessLocationId);
+  return sendSuccess(res, await service.previewCoupon(req.body, req.user!.organizationId, req.user!.id, req.user!.permissions));
+}
+
+export async function sendCouponOtp(req: Request, res: Response) {
+  assertLocationAccess(req, req.body.businessLocationId);
+  const location = await prisma.businessLocation.findFirst({ where: { id: req.body.businessLocationId, organizationId: req.user!.organizationId }, select: { id: true, groupId: true } });
+  if (!location) throw new NotFoundError("Business location not found");
+  const result = await couponService.sendCouponOtp({ organizationId: req.user!.organizationId, code: req.body.code, businessLocation: location, customerId: req.body.customerId });
+  return sendSuccess(res, result, "Verification code sent");
 }

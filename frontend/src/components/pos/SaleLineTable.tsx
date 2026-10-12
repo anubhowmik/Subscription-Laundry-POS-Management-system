@@ -1,9 +1,9 @@
 import { forwardRef, useState } from "react";
-import { X, Search, Plus } from "lucide-react";
+import { X, Search, Plus, Gift } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { useProducts, useServices, type PosProduct, type PosService } from "../../api/posApi";
-import { usePosStore, type PosLine } from "../../stores/posStore";
+import { useLineCouponShare, usePosStore, type PosLine } from "../../stores/posStore";
 import { calcLine } from "../../lib/posCalc";
 import { formatMoney } from "../../lib/format";
 import { inputSmClass } from "../../components/ui/formClasses";
@@ -215,16 +215,19 @@ export const SaleLineTable = forwardRef<HTMLInputElement, Props>(function SaleLi
 
 function SaleLineRow({ line, currency, locale, isAr }: { line: PosLine; currency: string; locale: string; isAr: boolean }) {
   const store = usePosStore();
+  const couponShare = useLineCouponShare(line.key);
+  const couponCode = usePosStore((s) => s.coupon?.code);
   const [editOpen, setEditOpen] = useState(false);
   const overStock = line.manageStock && line.stockOnHand !== undefined && line.quantity > line.stockOnHand;
-  const t = calcLine(line);
+  // The coupon is part of this line's discount (pos.service.ts applyCouponToLines).
+  const t = calcLine(couponShare ? { ...line, discountAmount: line.discountAmount + couponShare } : line);
   const effectivePrice = line.unitPriceOverride ?? line.unitPrice;
   const effectiveTaxPercent = line.taxOverridePercent ?? line.taxPercent;
   const unitPriceIncTax = line.taxType === "INCLUSIVE" ? effectivePrice : effectivePrice * (1 + effectiveTaxPercent / 100);
   const hasOverrides = line.unitPriceOverride != null || line.taxOverrideId != null || line.note || (line.widthM && line.heightM);
 
   return (
-    <tr className={cn("border-b border-slate-100 last:border-0", overStock ? "bg-red-50" : "hover:bg-slate-50/60")}>
+    <tr className={cn("border-b border-slate-100 last:border-0", overStock ? "bg-red-50" : line.promotionId ? "bg-emerald-50/70" : "hover:bg-slate-50/60")}>
       <td className="px-3 py-2">
         <button type="button" onClick={() => setEditOpen(true)} className="text-start" title={isAr ? "تعديل السطر" : "Edit line"}>
           <p className="font-medium text-slate-800 hover:underline">
@@ -233,6 +236,24 @@ function SaleLineRow({ line, currency, locale, isAr }: { line: PosLine; currency
           </p>
           {line.sku && <p className="ltr-nums text-xs text-slate-400">{line.sku}</p>}
           {overStock && <p className="text-[11px] font-medium text-red-600">{isAr ? `المتوفر: ${line.stockOnHand}` : `Only ${line.stockOnHand} in stock`}</p>}
+          {line.autoDiscount && !line.promotionId && (
+            <p className="text-[11px] text-sky-600">
+              {isAr
+                ? `الخصم: ${line.autoDiscount.name} (ينتهي في: ${new Date(line.autoDiscount.endsAt).toLocaleString()})`
+                : `Discount: ${line.autoDiscount.name} applied (Ends at: ${new Date(line.autoDiscount.endsAt).toLocaleString()})`}
+            </p>
+          )}
+          {line.promotionId && (
+            <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+              <Gift className="h-3 w-3" strokeWidth={2} aria-hidden />
+              {line.promoFree ? (isAr ? "بونص مجاني" : "Free bonus") : isAr ? "عرض ترويجي" : "Promotion"}
+            </p>
+          )}
+          {couponShare > 0 && (
+            <p className="text-[11px] font-medium text-green-700">
+              {isAr ? "قسيمة خصم" : "Coupon"} <span className="font-mono">{couponCode}</span> <span className="ltr-nums">−{couponShare.toFixed(2)}</span>
+            </p>
+          )}
         </button>
       </td>
       <td className="px-3 py-2 text-center">

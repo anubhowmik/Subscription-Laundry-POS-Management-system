@@ -28,17 +28,18 @@ const NAV_LINK_CLASSES =
  * not `user`.
  *
  * Translucent + blurred + bottom-border, matching the user's own reference mockup's nav bar
- * exactly (2026-09-08) - `sticky top-0` keeps it pinned through a scroll on Home; a harmless no-op
- * inside AppLayout, which never scrolls this element (only the inner <main> scrolls there).
+ * exactly (2026-09-08) - `sticky top-0` keeps it pinned through a scroll on Home. AppLayout passes
+ * `sticky={false}`: there the whole one-screen frame scrolls up to reveal the footer, and a pinned
+ * header would slide over the Topbar.
  */
-export function Header() {
+export function Header({ sticky = true }: { sticky?: boolean }) {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
   const isHome = pathname === "/";
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md backdrop-saturate-150">
+    <header className={`${sticky ? "sticky top-0 " : ""}z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md backdrop-saturate-150`}>
       <div className="mx-auto flex max-w-[1200px] items-center justify-between px-6 py-4">
         <Link to="/" className="flex min-w-0 items-center gap-2.5 transition-opacity hover:opacity-90">
           <img src={logo} alt="" className="h-9 w-9 shrink-0" aria-hidden />

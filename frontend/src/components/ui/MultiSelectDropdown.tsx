@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { inputClass } from "./formClasses";
 
@@ -16,6 +16,7 @@ export function MultiSelectDropdown({
   placeholder,
   isAr,
   inline = false,
+  searchable = false,
 }: {
   options: MultiSelectOption[];
   value: string[];
@@ -25,8 +26,11 @@ export function MultiSelectDropdown({
   /** Push the list into the flow instead of floating it - for use inside a scrolling popover
    * (e.g. the Filters menu), where an absolute list would be clipped. */
   inline?: boolean;
+  /** A search box at the top of the list - for long lists (items, branches, customers). */
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,6 +44,8 @@ export function MultiSelectDropdown({
 
   const selected = options.filter((o) => value.includes(o.value));
   const toggle = (v: string) => onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
 
   return (
     <div ref={ref} className="relative">
@@ -68,8 +74,22 @@ export function MultiSelectDropdown({
       </button>
       {open && (
         <div className={cn("mt-1 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1", inline ? "max-h-48" : "absolute z-30 max-h-64 shadow-lg")}>
-          {options.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">{isAr ? "لا توجد خيارات" : "No options"}</p>}
-          {options.map((o) => {
+          {searchable && (
+            <div className="sticky top-0 border-b border-slate-100 bg-white px-2 pb-1.5 pt-0.5">
+              <div className="flex items-center gap-1.5 rounded-md bg-slate-50 px-2">
+                <Search className="h-3.5 w-3.5 text-slate-400" strokeWidth={2} aria-hidden />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={isAr ? "بحث" : "Search"}
+                  autoFocus
+                  className="w-full bg-transparent py-1.5 text-sm outline-none"
+                />
+              </div>
+            </div>
+          )}
+          {shown.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">{isAr ? "لا توجد خيارات" : "No options"}</p>}
+          {shown.map((o) => {
             const on = value.includes(o.value);
             return (
               <button key={o.value} type="button" onClick={() => toggle(o.value)} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-slate-50">

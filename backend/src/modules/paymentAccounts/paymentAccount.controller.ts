@@ -4,6 +4,7 @@ import { sendPaginated, sendSuccess } from "../../utils/apiResponse";
 import { writeAuditLog } from "../../utils/audit";
 import * as service from "./paymentAccount.service";
 import * as reports from "./paymentAccountReports.service";
+import { parseAppScope } from "../reports/reportCommon";
 
 function allowedLocationIds(req: Request) {
   return req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
@@ -43,7 +44,7 @@ export async function deleteType(req: Request, res: Response) {
 export async function list(req: Request, res: Response) {
   const [accounts, notLinkedPayments] = await Promise.all([
     service.list(req.query, orgId(req), allowedLocationIds(req)),
-    service.notLinkedPaymentsCount(orgId(req), allowedLocationIds(req)),
+    service.notLinkedPaymentsCount(orgId(req), allowedLocationIds(req), parseAppScope(req.query)),
   ]);
   return sendSuccess(res, accounts, "OK", 200, { notLinkedPayments });
 }
@@ -51,7 +52,7 @@ export async function dropdown(req: Request, res: Response) {
   return sendSuccess(res, await service.dropdown(req.query, orgId(req), allowedLocationIds(req)));
 }
 export async function getById(req: Request, res: Response) {
-  return sendSuccess(res, await service.getById(getParam(req, "id"), orgId(req), allowedLocationIds(req)));
+  return sendSuccess(res, await service.getById(getParam(req, "id"), orgId(req), allowedLocationIds(req), parseAppScope(req.query)));
 }
 export async function create(req: Request, res: Response) {
   const account = await service.create(req.body, orgId(req), req.user!.id);
@@ -118,8 +119,10 @@ export async function paymentAccountReport(req: Request, res: Response) {
   return sendPaginated(res, data, meta);
 }
 export async function linkAccount(req: Request, res: Response) {
-  const payment = await reports.linkAccount(getParam(req, "paymentId"), req.body.paymentAccountId, orgId(req), allowedLocationIds(req));
-  await writeAuditLog({ req, action: "UPDATE", module: "payments", entityId: payment.id, newValues: { paymentAccountId: payment.paymentAccountId } });
+  const source = req.body.source as reports.LinkSource;
+  const payment = await reports.linkAccount(getParam(req, "paymentId"), req.body.paymentAccountId, source, orgId(req), allowedLocationIds(req));
+  const module = source === "PURCHASE" ? "purchases" : source === "EXPENSE" ? "expenses" : "payments";
+  await writeAuditLog({ req, action: "UPDATE", module, entityId: payment.id, newValues: { paymentAccountId: payment.paymentAccountId } });
   return sendSuccess(res, payment, "Account linked successfully");
 }
 export async function sellPayments(req: Request, res: Response) {

@@ -32,6 +32,8 @@ import {
   type PriceListRow,
 } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
+import { promotionCartItems, requestPromotion, type PromotionType } from "../../api/promotionsApi";
+import { matchDiscounts } from "../../api/discountsApi";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { selectClass, inputClass, labelClass } from "../../components/ui/formClasses";
@@ -188,9 +190,13 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
       note: string | null;
       widthM: string | null;
       heightM: string | null;
+      promotionId: string | null;
+      couponId?: string | null;
+      discountId: string | null;
     }
     interface EditableSale {
       isQuotation: boolean;
+      promotion: { id: string; name: string; type: PromotionType } | null;
       items: EditableSaleItem[];
       customer: {
         id: string;
@@ -213,23 +219,47 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
       .get<ApiSuccess<EditableSale>>(`/sales/${editQuoteId}`)
       .then((res) => {
         const sale = res.data.data;
-        const lines: PosLine[] = sale.items.map((item) => ({
-          key: `${item.productId ? "PRODUCT" : "SERVICE"}:${item.productId ?? item.serviceId}`,
-          type: item.productId ? "PRODUCT" : "SERVICE",
-          id: (item.productId ?? item.serviceId)!,
-          nameEn: item.descriptionEn,
-          nameAr: item.descriptionAr ?? item.descriptionEn,
-          unitPrice: Number(item.unitPrice),
-          taxPercent: Number(item.taxPercent),
-          taxType: "EXCLUSIVE",
-          quantity: Number(item.quantity),
-          discountAmount: Number(item.discountAmount),
-          manageStock: false,
-          unit: "",
-          note: item.note ?? undefined,
-          widthM: item.widthM ? Number(item.widthM) : undefined,
-          heightM: item.heightM ? Number(item.heightM) : undefined,
-        }));
+        // A saved draft holds the promotion's split rows; the cart goes back to the rows the
+        // cashier entered - promoted parts lose the promotion discount and merge back into their
+        // item, a Bonus row (added by the promotion on top of the cart) is dropped - so the next
+        // save re-runs the promotion from scratch instead of discounting twice.
+        const byKey = new Map<string, PosLine>();
+        for (const item of sale.items) {
+          if (item.promotionId && sale.promotion?.type === "BOUNCE") continue;
+          const key = `${item.productId ? "PRODUCT" : "SERVICE"}:${item.productId ?? item.serviceId}`;
+          const widthM = item.widthM ? Number(item.widthM) : undefined;
+          const heightM = item.heightM ? Number(item.heightM) : undefined;
+          // SaleItem.quantity is the billed quantity (pieces x width x height for a sized item).
+          const pieces = widthM && heightM ? Math.round((Number(item.quantity) / (widthM * heightM)) * 1000) / 1000 : Number(item.quantity);
+          // A coupon's share is inside the line discount too and isn't stored apart, so a coupon line
+          // also starts clean: the cashier applies the coupon again (any branch discount re-matches).
+          const discount = item.promotionId || item.couponId ? 0 : Number(item.discountAmount);
+          const existing = byKey.get(key);
+          if (existing) {
+            existing.quantity += pieces;
+            existing.discountAmount += discount;
+            continue;
+          }
+          byKey.set(key, {
+            key,
+            type: item.productId ? "PRODUCT" : "SERVICE",
+            id: (item.productId ?? item.serviceId)!,
+            nameEn: item.descriptionEn,
+            nameAr: item.descriptionAr ?? item.descriptionEn,
+            unitPrice: Number(item.unitPrice),
+            taxPercent: Number(item.taxPercent),
+            taxType: "EXCLUSIVE",
+            quantity: pieces,
+            discountAmount: discount,
+            manageStock: false,
+            unit: "",
+            note: item.note ?? undefined,
+            widthM,
+            heightM,
+            manualDiscount: discount > 0 && !item.discountId ? true : undefined,
+          });
+        }
+        const lines: PosLine[] = [...byKey.values()];
         store.loadCart(lines, {
           id: sale.customer.id,
           nameEn: sale.customer.nameEn,
@@ -252,7 +282,71 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editQuoteId]);
 
-  function completeSale(print = false) {
+  // Promotions > Discounts (reference getProductRow -> getProductDiscount): every item in the cart
+  // gets its branch discount pre-filled as the line discount; re-matched when the items, customer,
+  // selling price group or branch change.
+  const cartItemKeys = usePosStore((s) => [...new Set((s.promotion?.originalLines ?? s.lines).map((l) => `${l.type === "PRODUCT" ? "p" : "s"}:${l.id}`))].sort().join(","));
+  const cartCustomerId = usePosStore((s) => s.customer?.id);
+  const cartPriceListId = usePosStore((s) => s.priceListId);
+  // A coupon without "Added Discount" replaced the line discounts - re-match only once it's removed.
+  const discountsReplaced = usePosStore((s) => Boolean(s.coupon && !s.coupon.addedDiscount));
+  useEffect(() => {
+    if (!effectiveLocationId || !cartCustomerId || !cartItemKeys || discountsReplaced) return;
+    let cancelled = false;
+    matchDiscounts({ businessLocationId: effectiveLocationId, customerId: cartCustomerId, priceListId: cartPriceListId ?? undefined, itemKeys: cartItemKeys.split(",") })
+      .then((matches) => {
+        if (!cancelled) store.applyDiscounts(matches);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartItemKeys, cartCustomerId, cartPriceListId, effectiveLocationId, discountsReplaced]);
+
+  /**
+   * Reference pos.js: Finalize / Card / Draft / Quotation first click `#apply_promotion` with no
+   * promotion picked when none is applied yet - the auto-apply promotions get their chance. Done
+   * here before the payment step so the totals the cashier charges are the ones checkout computes
+   * (checkout runs the same auto-apply server-side). Returns true when a promotion was just applied.
+   */
+  async function ensurePromotion() {
+    const state = usePosStore.getState();
+    if (state.promotion || state.coupon || !state.customer || state.lines.length === 0 || !effectiveLocationId) return false;
+    try {
+      const result = await requestPromotion({
+        businessLocationId: effectiveLocationId,
+        customerId: state.customer.id,
+        items: promotionCartItems(state.lines),
+        priceListId: state.priceListId ?? undefined,
+        mode,
+      });
+      if (!result.applied) return false;
+      store.applyPromotion(result);
+      notify(isAr ? `تم تطبيق العرض الترويجي: ${result.promotion.name}` : `Promotion applied: ${result.promotion.name}`);
+      return true;
+    } catch {
+      // Not fatal - checkout re-runs the same promotion check on its own.
+      return false;
+    }
+  }
+
+  function openPayment(open: boolean) {
+    if (!open) return setPaymentOpen(false);
+    void ensurePromotion().finally(() => setPaymentOpen(true));
+  }
+
+  async function saveDraftWithPromotion(kind: "quote" | "delivery") {
+    await ensurePromotion();
+    saveAsDraft(kind);
+  }
+
+  async function completeSale(print = false) {
+    // Add Sale's payment rows are typed before Save - if a promotion only kicks in now, stop so
+    // the cashier can see the new total and adjust the payment before saving again.
+    if (layout === "table" && (await ensurePromotion())) {
+      return notify(isAr ? "تم تطبيق عرض ترويجي - راجع الإجمالي ثم احفظ مرة أخرى" : "A promotion was applied - check the new total, then Save again");
+    }
     const state = usePosStore.getState();
     if (state.lines.length === 0) return notify(isAr ? "السلة فارغة" : "Cart is empty");
     if (!state.customer) return notify(isAr ? "اختر عميلاً" : "Select a customer");
@@ -281,7 +375,7 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
       {
         businessLocationId: effectiveLocationId!,
         customerId: state.customer.id,
-        items: state.lines.map((l) => ({
+        items: (state.promotion?.originalLines ?? state.lines).map((l) => ({
           ...(l.type === "PRODUCT" ? { productId: l.id } : { serviceId: l.id }),
           quantity: l.quantity,
           discountAmount: l.discountAmount,
@@ -290,10 +384,13 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
           note: l.note,
           widthM: l.widthM,
           heightM: l.heightM,
+          discountId: l.autoDiscount?.id,
         })),
+        promotionId: state.promotion?.id,
         payments,
         notes: state.note || undefined,
         couponCode: state.coupon?.code,
+        couponOtp: state.coupon?.otp,
         invoiceDiscountMode: state.invoiceDiscountValue > 0 ? state.invoiceDiscountMode : undefined,
         invoiceDiscountValue: state.invoiceDiscountValue > 0 ? state.invoiceDiscountValue : undefined,
         shipping: state.shipping > 0 ? state.shipping : undefined,
@@ -342,7 +439,7 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
     const payload = {
       businessLocationId: effectiveLocationId!,
       customerId: state.customer.id,
-      items: state.lines.map((l) => ({
+      items: (state.promotion?.originalLines ?? state.lines).map((l) => ({
         ...(l.type === "PRODUCT" ? { productId: l.id } : { serviceId: l.id }),
         quantity: l.quantity,
         discountAmount: l.discountAmount,
@@ -351,10 +448,13 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
         note: l.note,
         widthM: l.widthM,
         heightM: l.heightM,
+        discountId: l.autoDiscount?.id,
       })),
+      promotionId: state.promotion?.id,
       payments: [],
       notes: state.note || undefined,
       couponCode: state.coupon?.code,
+        couponOtp: state.coupon?.otp,
       invoiceDiscountMode: state.invoiceDiscountValue > 0 ? state.invoiceDiscountMode : undefined,
       invoiceDiscountValue: state.invoiceDiscountValue > 0 ? state.invoiceDiscountValue : undefined,
       shipping: state.shipping > 0 ? state.shipping : undefined,
@@ -427,7 +527,7 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
         e.preventDefault();
         // Add Sale has no payment popup (see AddSalePaymentSection) - F2 only applies to the
         // touch-grid POS's click-to-pay modal.
-        if (layout !== "table" && usePosStore.getState().lines.length > 0) setPaymentOpen(true);
+        if (layout !== "table" && usePosStore.getState().lines.length > 0) openPayment(true);
       } else if (e.key === "F3") {
         e.preventDefault();
         const state = usePosStore.getState();
@@ -438,7 +538,7 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
               customerId: state.customer?.id,
               label: `Hold ${new Date().toLocaleTimeString()}`,
               mode,
-              items: state.lines.map((l) => ({
+              items: (state.promotion?.originalLines ?? state.lines).map((l) => ({
                 productId: l.type === "PRODUCT" ? l.id : undefined,
                 serviceId: l.type === "SERVICE" ? l.id : undefined,
                 descriptionEn: l.nameEn,
@@ -579,13 +679,13 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
 
         <AddSaleUtilityBar isAr={isAr} businessLocationId={effectiveLocationId} mode={mode} notify={notify} />
 
-        <AddSaleTotalsSection isAr={isAr} currency={currency} locale={locale} businessLocationId={effectiveLocationId} />
+        <AddSaleTotalsSection isAr={isAr} currency={currency} locale={locale} businessLocationId={effectiveLocationId} mode={mode} notify={notify} />
 
         <AddSalePaymentSection isAr={isAr} currency={currency} locale={locale} paymentMethods={paymentMethods ?? []} rows={paymentRows} setRows={setPaymentRows} />
 
         <div className="flex flex-wrap justify-center gap-3 pt-2">
           {editingDraft ? (
-            <Button onClick={() => saveAsDraft(editingDraft.kind)} disabled={updateQuote.isPending}>
+            <Button onClick={() => void saveDraftWithPromotion(editingDraft.kind)} disabled={updateQuote.isPending}>
               {editingDraft.kind === "delivery" ? (
                 <PackageCheck className="h-4 w-4" strokeWidth={2} aria-hidden />
               ) : (
@@ -603,19 +703,19 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
             </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={() => saveAsDraft("delivery")} disabled={createDelivery.isPending}>
+              <Button variant="outline" onClick={() => void saveDraftWithPromotion("delivery")} disabled={createDelivery.isPending}>
                 <PackageCheck className="h-4 w-4" strokeWidth={2} aria-hidden />
                 {createDelivery.isPending ? "…" : isAr ? "حفظ كتسليم" : "Save as Delivery"}
               </Button>
-              <Button variant="outline" onClick={() => saveAsDraft("quote")} disabled={createQuote.isPending}>
+              <Button variant="outline" onClick={() => void saveDraftWithPromotion("quote")} disabled={createQuote.isPending}>
                 <FileText className="h-4 w-4" strokeWidth={2} aria-hidden />
                 {createQuote.isPending ? "…" : isAr ? "حفظ كعرض سعر" : "Save as Quote"}
               </Button>
-              <Button onClick={() => completeSale(false)} disabled={checkout.isPending}>
+              <Button onClick={() => void completeSale(false)} disabled={checkout.isPending}>
                 <CheckCircle2 className="h-4 w-4" strokeWidth={2} aria-hidden />
                 {checkout.isPending ? "…" : isAr ? "حفظ" : "Save"}
               </Button>
-              <Button variant="secondary" onClick={() => completeSale(true)} disabled={checkout.isPending}>
+              <Button variant="secondary" onClick={() => void completeSale(true)} disabled={checkout.isPending}>
                 <Printer className="h-4 w-4" strokeWidth={2} aria-hidden />
                 {checkout.isPending ? "…" : isAr ? "حفظ وطباعة" : "Save & Print"}
               </Button>
@@ -641,12 +741,12 @@ export default function PosPage({ mode: modeProp, layout = "grid" }: PosPageProp
           businessLocationId={effectiveLocationId}
           paymentMethods={paymentMethods ?? []}
           paymentOpen={paymentOpen}
-          setPaymentOpen={setPaymentOpen}
+          setPaymentOpen={openPayment}
           onCompleteSale={completeSale}
           checkoutPending={checkout.isPending}
-          onSaveAsQuote={() => saveAsDraft("quote")}
+          onSaveAsQuote={() => void saveDraftWithPromotion("quote")}
           saveQuotePending={editingDraft ? updateQuote.isPending : createQuote.isPending}
-          onSaveAsDelivery={() => saveAsDraft("delivery")}
+          onSaveAsDelivery={() => void saveDraftWithPromotion("delivery")}
           saveDeliveryPending={editingDraft ? updateQuote.isPending : createDelivery.isPending}
           notify={notify}
           onRecent={() => navigate("/sales")}
@@ -723,7 +823,7 @@ function AddSaleUtilityBar({
         customerId: customer?.id,
         label: `Hold ${new Date().toLocaleTimeString()}`,
         mode,
-        items: lines.map((l) => ({
+        items: (usePosStore.getState().promotion?.originalLines ?? lines).map((l) => ({
           productId: l.type === "PRODUCT" ? l.id : undefined,
           serviceId: l.type === "SERVICE" ? l.id : undefined,
           descriptionEn: l.nameEn,

@@ -33,6 +33,10 @@ export interface ReportOptions {
   categories: ({ key: string } & Named)[];
   /** Products + services, keyed "p:<id>" / "s:<id>"; `code` is the SKU / service code. */
   items: ({ key: string; code: string; categoryKey: string | null } & Named)[];
+  /** Promotions for the CRM reports' Promotion filter, newest first (reference orderBy updated_at desc). */
+  promotions: { id: string; name: string; type: string; startsAt: string | null; endsAt: string | null }[];
+  /** Valid From / Until as local YYYY-MM-DD. */
+  coupons: { id: string; code: string; startsAt: string | null; endsAt: string | null }[];
 }
 
 export interface ReportLocationFilters {
@@ -41,6 +45,13 @@ export interface ReportLocationFilters {
 }
 
 export const pickName = (x: Named, isAr: boolean) => (isAr ? x.nameAr || x.nameEn : x.nameEn);
+
+/** Reference's "business name, contact name" customer label. A business contact's own name already
+ * mirrors its business name, so the prefix is only added when the two differ. */
+export const customerLabel = (c: Named & { businessName?: string | null }, isAr: boolean) => {
+  const name = pickName(c, isAr);
+  return c.businessName && c.businessName !== name && c.businessName !== c.nameEn ? `${c.businessName}, ${name}` : name;
+};
 export const branchLabel = (l: { branchName: string; branchNameAr: string | null; branchCode: string }, isAr: boolean) =>
   `${isAr ? l.branchNameAr || l.branchName : l.branchName} (${l.branchCode})`;
 
@@ -88,7 +99,7 @@ export function baseActiveCount(f: BaseReportFilters) {
 }
 
 /** Sales A/R's filter-field look: small label over a full-width control. */
-export function FilterField({ label, children }: { label: string; children: ReactNode }) {
+export function FilterField({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
@@ -389,6 +400,22 @@ export function CustomerGroupField({ value, onChange, options, isAr, allLabel }:
   );
 }
 
+/** Reference CRM reports' Promotion select (`promotion_id`, placeholder "All"). */
+export function PromotionFilterField({ value, onChange, options, isAr }: { value: string; onChange: (v: string) => void; options: ReportOptions | undefined; isAr: boolean }) {
+  return (
+    <FilterField label={isAr ? "العرض الترويجي" : "Promotion"}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={cn(selectClass, "w-full")}>
+        <option value="">{isAr ? "الكل" : "All"}</option>
+        {(options?.promotions ?? []).map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </FilterField>
+  );
+}
+
 /** Category select + multi Product picker (reference: picked products win over the category). */
 export function ItemFilterFields({
   categoryId,
@@ -445,7 +472,18 @@ export const exportAmount = (v: string | number) => Number(v).toFixed(2);
 export type PickedCustomer = { id: string; nameEn: string; nameAr: string | null; phone: string };
 
 /** The reference's "Contact" filter (customer name / phone search) - Sales A/R's Customer picker. */
-export function ContactFilterField({ value, onChange, isAr }: { value: PickedCustomer | null; onChange: (c: PickedCustomer | null) => void; isAr: boolean }) {
+export function ContactFilterField({
+  value,
+  onChange,
+  isAr,
+  label,
+}: {
+  value: PickedCustomer | null;
+  onChange: (c: PickedCustomer | null) => void;
+  isAr: boolean;
+  /** Defaults to the reference's "Contact"; the CRM reports call it "Customer". */
+  label?: string;
+}) {
   const [search, setSearch] = useState("");
   const { data: results } = useQuery({
     queryKey: ["reports", "customer-search", search],
@@ -454,7 +492,7 @@ export function ContactFilterField({ value, onChange, isAr }: { value: PickedCus
   });
   return (
     <div>
-      <FilterField label={isAr ? "جهة الاتصال" : "Contact"}>
+      <FilterField label={label ?? (isAr ? "جهة الاتصال" : "Contact")}>
         <input
           value={value ? `${pickName(value, isAr)} / ${value.phone}` : search}
           onChange={(e) => {

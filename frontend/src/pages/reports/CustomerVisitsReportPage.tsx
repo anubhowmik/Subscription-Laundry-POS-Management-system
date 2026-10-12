@@ -19,7 +19,7 @@ import {
   baseActiveCount,
   baseFilterParams,
   initialBaseFilters,
-  pickName,
+  customerLabel,
   useReportOptions,
   useReportOrgSettings,
   type BaseReportFilters,
@@ -71,7 +71,7 @@ export default function CustomerVisitsReportPage() {
   });
 
   const t = report?.totals;
-  const name = (r: Row) => `${r.customer.businessName ? `${r.customer.businessName}, ` : ""}${pickName(r.customer, isAr)}`;
+  const name = (r: Row) => customerLabel(r.customer, isAr);
   const branches = (r: Row) => r.locations.map((l) => `${isAr ? l.branchNameAr || l.branchName : l.branchName} (${l.branchCode})`).join(", ");
   const cities = (r: Row) => [...new Set(r.locations.map((l) => l.city).filter(Boolean))].join(", ");
   const columns: ReportColumn<Row>[] = [

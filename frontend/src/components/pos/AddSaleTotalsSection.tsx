@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { usePosStore, usePosTotals, type DiscountMode } from "../../stores/posStore";
-import { usePreviewCoupon } from "../../api/posApi";
+import { useCouponApply } from "./useCouponApply";
+import { CouponOtpStep } from "./CouponOtpStep";
+import { PromotionPicker } from "./PromotionPicker";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { formatMoney } from "../../lib/format";
@@ -35,7 +37,21 @@ function useSellCustomFieldLabels(isAr: boolean) {
  * visible form section, unlike the touch-grid POS's compact collapsible "Discount, shipping &
  * totals" popover (`InvoicePanel.tsx`'s `FooterSummary`, left untouched there).
  */
-export function AddSaleTotalsSection({ isAr, currency, locale, businessLocationId }: { isAr: boolean; currency: string; locale: string; businessLocationId: string }) {
+export function AddSaleTotalsSection({
+  isAr,
+  currency,
+  locale,
+  businessLocationId,
+  mode,
+  notify,
+}: {
+  isAr: boolean;
+  currency: string;
+  locale: string;
+  businessLocationId: string;
+  mode?: "SERVICE" | "PRODUCT";
+  notify: (msg: string) => void;
+}) {
   const totals = usePosTotals();
   const {
     invoiceDiscountMode,
@@ -59,20 +75,11 @@ export function AddSaleTotalsSection({ isAr, currency, locale, businessLocationI
   } = usePosStore();
   const availablePoints = customer?.rewardPoints ?? 0;
   const sellCustomFieldLabels = useSellCustomFieldLabels(isAr);
-  const preview = usePreviewCoupon();
+  const couponFlow = useCouponApply({ isAr, businessLocationId, mode, notify });
   const [couponCode, setCouponCode] = useState("");
-  const [couponError, setCouponError] = useState<string | null>(null);
 
   async function applyCoupon() {
-    if (!couponCode.trim()) return;
-    setCouponError(null);
-    try {
-      const result = await preview.mutateAsync({ code: couponCode.trim(), subtotal: totals.subtotal, customerId: customer?.id, businessLocationId });
-      setCoupon({ code: result.code, discountAmount: Number(result.discountAmount) });
-      setCouponCode("");
-    } catch {
-      setCouponError(isAr ? "كود الكوبون غير صالح" : "Invalid coupon code");
-    }
+    if (await couponFlow.apply(couponCode)) setCouponCode("");
   }
 
   return (
@@ -109,25 +116,44 @@ export function AddSaleTotalsSection({ isAr, currency, locale, businessLocationI
         </div>
       </div>
 
+      {/* Reference sell/create.blade.php's promotion box (select + Apply / Cancel). */}
+      <PromotionPicker isAr={isAr} businessLocationId={businessLocationId} mode={mode} notify={notify} variant="inline" />
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <label className={labelClass}>{isAr ? "كوبون" : "Coupon"}</label>
+          <label className={labelClass}>{isAr ? "قسيمة خصم" : "Coupon"}</label>
           {coupon ? (
-            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              <span>{coupon.code}</span>
-              <button onClick={() => setCoupon(null)} className="text-emerald-600 hover:text-emerald-900">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              <span className="min-w-0 truncate">
+                <span className="font-mono font-semibold">{coupon.code}</span>
+                <span className="ltr-nums ms-1.5 text-xs">−{coupon.discountAmount.toFixed(2)}</span>
+              </span>
+              <button
+                onClick={() => {
+                  setCoupon(null);
+                  notify(isAr ? "تم إلغاء قسيمة الخصم" : "Coupon cancelled");
+                }}
+                className="text-emerald-600 hover:text-emerald-900"
+                title={isAr ? "الغاء قسيمة الخصم" : "Cancel Coupon"}
+              >
                 <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
               </button>
             </div>
           ) : (
             <div className="flex gap-1">
-              <input value={couponCode} onChange={(e) => setCouponCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyCoupon()} placeholder={isAr ? "أدخل الكود" : "Enter code"} className={cn(inputSmClass, "flex-1")} />
-              <Button size="sm" variant="outline" onClick={applyCoupon} disabled={preview.isPending || !couponCode.trim()}>
+              <input
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
+                placeholder={isAr ? "قسيمة خصم" : "Coupon"}
+                className={cn(inputSmClass, "flex-1 font-mono")}
+              />
+              <Button size="sm" variant="outline" onClick={applyCoupon} disabled={couponFlow.pending || !couponCode.trim()}>
                 {isAr ? "تطبيق" : "Apply"}
               </Button>
             </div>
           )}
-          {couponError && <p className="mt-1 text-xs text-red-600">{couponError}</p>}
+          {couponFlow.otpFor && !coupon && <CouponOtpStep flow={couponFlow} isAr={isAr} className="mt-2" />}
         </div>
 
         <div>

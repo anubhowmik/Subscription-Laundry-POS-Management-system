@@ -171,10 +171,15 @@ export async function resolve(id: string, input: ResolveCompensationInput, organ
 
   if (isNewlyPaid && input.resolutionType === "COUPON" && input.resolutionValue) {
     const code = `COMP-${randomBytes(4).toString("hex").toUpperCase()}`;
-    const coupon = await couponService.create(
-      { code, discountMode: "FIXED", discountValue: input.resolutionValue, minPurchaseAmount: 0, maxUses: 1, isActive: true },
+    // Single use, and only for the customer the claim belongs to.
+    const coupon = await couponService.createCompensationCoupon({
       organizationId,
-    );
+      customerId: compensation.customerId,
+      amount: input.resolutionValue,
+      code,
+      compensationRef: compensation.id.slice(0, 8),
+      createdBy: resolvedBy,
+    });
     resolutionCouponId = coupon.id;
   }
 

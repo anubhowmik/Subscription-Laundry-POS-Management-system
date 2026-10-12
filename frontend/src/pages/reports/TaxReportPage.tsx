@@ -20,6 +20,7 @@ import {
   initialBaseFilters,
   num,
   pickName,
+  customerLabel,
   useReportOptions,
   useReportOrgSettings,
   type BaseReportFilters,
@@ -66,7 +67,7 @@ export default function TaxReportPage() {
   });
 
   const t = report?.totals;
-  const customer = (r: Row) => `${r.customer.businessName ? `${r.customer.businessName}, ` : ""}${pickName(r.customer, isAr)}`;
+  const customer = (r: Row) => customerLabel(r.customer, isAr);
   const methodCounts = t ? t.paymentMethods.map((m) => `${pickName(m, isAr)} - ${m.count}`).join(", ") : "";
   const columns: ReportColumn<Row>[] = [
     { key: "date", label: isAr ? "التاريخ" : "Date", render: (r) => <span className="ltr-nums whitespace-nowrap">{r.date}</span>, exportValue: (r) => r.date },

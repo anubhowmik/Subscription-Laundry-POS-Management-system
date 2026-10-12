@@ -53,7 +53,14 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "pos.access.service", module: "pos", description: "Access the Service POS screen" },
   { code: "pos.access.product", module: "pos", description: "Access the Product POS screen" },
   { code: "pos.register.manage", module: "pos", description: "Open and close the cash register" },
-  { code: "coupons.manage", module: "pos", description: "Create and manage discount coupons" },
+  // Reference's own coupons.view/create/update/delete (Promotions > Coupons). "coupons.manage" is
+  // the earlier single permission, still honoured by the coupon routes for roles that only have it.
+  { code: "coupons.manage", module: "pos", description: "Create and manage discount coupons (all coupon actions)" },
+  ...crud("coupons", "coupons"),
+  // Reference's own promotions.view/create/update/delete (role/create.blade.php "Promotions").
+  ...crud("promotions", "promotions"),
+  // Reference's own `discount.access` (Promotions > Discounts).
+  { code: "discount.access", module: "pos", description: "Create and manage automatic line discounts" },
   { code: "price-lists.manage", module: "pos", description: "Create price lists and assign them to customers" },
   { code: "bnpl.manage", module: "pos", description: "Configure BNPL (Tamara/Tabby/MISPay) providers for the organization" },
   // Reference's own `edit_product_price_from_sale_screen` - a per-line unit price/tax override at
@@ -106,6 +113,14 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: "reports.monthly_lfl_sales", module: "reports", description: "View the monthly like-for-like sales report" },
   { code: "reports.sales_analysis", module: "reports", description: "View the sales analysis report" },
   { code: "reports.sales_performance", module: "reports", description: "View the sales performance report" },
+  // CRM Reports dropdown (reference report.crm_reports).
+  { code: "reports.customers_revenue", module: "reports", description: "View the customers revenue report" },
+  { code: "reports.customers_retention", module: "reports", description: "View the customers retention report" },
+  { code: "reports.decline_customers", module: "reports", description: "View the decline customers report" },
+  { code: "reports.new_customers", module: "reports", description: "View the new customers report" },
+  { code: "reports.campaign_performance", module: "reports", description: "View the campaign performance report" },
+  { code: "reports.discount_coupon", module: "reports", description: "View the discount coupon report" },
+  { code: "reports.consumer_behaviour", module: "reports", description: "View the consumer behaviour report" },
   { code: "payment_accounts.access", module: "payment_accounts", description: "Manage payment accounts, deposits, fund transfers and account reports" },
   { code: "payment_accounts.edit_transaction", module: "payment_accounts", description: "Edit opening balance, deposit and fund transfer movements" },
   { code: "payment_accounts.delete_transaction", module: "payment_accounts", description: "Delete deposit and fund transfer movements" },

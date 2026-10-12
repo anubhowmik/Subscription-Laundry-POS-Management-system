@@ -1,18 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Printer, CalendarDays } from "lucide-react";
+import { Printer } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Spinner } from "../../components/ui/Spinner";
-import { IconInput } from "../../components/ui/IconInput";
-import { labelClass, selectClass } from "../../components/ui/formClasses";
+import { TableContainer, TableToolbar } from "../../components/ui/Table";
+import { FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { cn } from "../../lib/cn";
+import { inputClass, selectClass } from "../../components/ui/formClasses";
+import { FilterField, scopeParams, useReportAppScope } from "../reports/reportShared";
 import { todayValue } from "./shared";
 
 interface AccountBalance {
@@ -39,54 +41,67 @@ interface TrialBalanceData {
 function useReportFilters() {
   const [businessLocationId, setBusinessLocationId] = useState("");
   const [endDate, setEndDate] = useState(todayValue());
-  return { businessLocationId, setBusinessLocationId, endDate, setEndDate };
+  const appScope = useReportAppScope();
+  // Reference: the report opens on today across all locations - that resting state is not a filter.
+  const activeCount = (businessLocationId ? 1 : 0) + (endDate !== todayValue() ? 1 : 0);
+  const clear = () => {
+    setBusinessLocationId("");
+    setEndDate(todayValue());
+  };
+  const params = { endDate, ...(businessLocationId ? { businessLocationId } : {}), ...scopeParams(appScope) };
+  return { businessLocationId, setBusinessLocationId, endDate, setEndDate, activeCount, clear, params };
 }
 
-function ReportFilters({ isAr, filters }: { isAr: boolean; filters: ReturnType<typeof useReportFilters> }) {
+/** The Sales A/R table toolbar (Filters popover + Print) on top of the report body. */
+function ReportShell({
+  title,
+  isAr,
+  loading,
+  filters,
+  children,
+}: {
+  title: string;
+  isAr: boolean;
+  loading: boolean;
+  filters: ReturnType<typeof useReportFilters>;
+  children: ReactNode;
+}) {
   const { t } = useTranslation();
-  const { locations } = useBusinessLocation();
-  return (
-    <Card className="p-5 print:hidden">
-      <h3 className="mb-3 text-sm font-semibold text-slate-700">{isAr ? "عوامل التصفية" : "Filters"}:</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <label className={labelClass}>{isAr ? "موقع العمل" : "Business Location"}:</label>
-          <select value={filters.businessLocationId} onChange={(e) => filters.setBusinessLocationId(e.target.value)} className={selectClass}>
-            <option value="">{t("common.all")}</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.branchName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelClass}>{isAr ? "تصفية حسب التاريخ" : "Filter by date"}:</label>
-          <IconInput icon={CalendarDays} type="date" value={filters.endDate} onChange={(e) => filters.setEndDate(e.target.value)} className="ltr-nums" />
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function ReportShell({ title, endDate, isAr, loading, children }: { title: string; endDate: string; isAr: boolean; loading: boolean; children: ReactNode }) {
   const { user } = useAuth();
+  const { locations } = useBusinessLocation();
   const orgName = user?.organization ? (isAr ? user.organization.nameAr || user.organization.nameEn : user.organization.nameEn) : "";
   return (
-    <Card className="print-area overflow-hidden">
+    <TableContainer className="print-area">
+      <TableToolbar className="print:hidden">
+        <FiltersMenu activeCount={filters.activeCount} onClear={filters.clear} isAr={isAr}>
+          <FilterField label={isAr ? "موقع العمل" : "Business Location"}>
+            <select value={filters.businessLocationId} onChange={(e) => filters.setBusinessLocationId(e.target.value)} className={cn(selectClass, "w-full")}>
+              <option value="">{t("common.all")}</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.branchName}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label={isAr ? "تصفية حسب التاريخ" : "Filter by date"}>
+            <input type="date" value={filters.endDate} onChange={(e) => filters.setEndDate(e.target.value || todayValue())} className={cn(inputClass, "w-full ltr-nums")} />
+          </FilterField>
+        </FiltersMenu>
+        <div className="ms-auto">
+          <Button size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" strokeWidth={2} aria-hidden /> {isAr ? "طباعة" : "Print"}
+          </Button>
+        </div>
+      </TableToolbar>
       <div className="border-b border-slate-100 px-5 py-4">
         <h3 className="text-base font-semibold text-slate-800">
           {orgName ? `${orgName} - ` : ""}
-          {title} - <span className="ltr-nums">{new Date(`${endDate}T00:00:00`).toLocaleDateString(isAr ? "ar-SA" : "en-US")}</span>
+          {title} - <span className="ltr-nums">{new Date(`${filters.endDate}T00:00:00`).toLocaleDateString(isAr ? "ar-SA" : "en-US")}</span>
         </h3>
       </div>
       <div className="p-5">{loading ? <Spinner /> : children}</div>
-      <div className="flex justify-end border-t border-slate-100 px-5 py-3 print:hidden">
-        <Button onClick={() => window.print()}>
-          <Printer className="h-4 w-4" strokeWidth={2} aria-hidden /> {isAr ? "طباعة" : "Print"}
-        </Button>
-      </div>
-    </Card>
+    </TableContainer>
   );
 }
 
@@ -111,28 +126,22 @@ export function BalanceSheetPage() {
   const filters = useReportFilters();
 
   const { data, isFetching } = useQuery({
-    queryKey: ["payment-accounts", "balance-sheet", filters.businessLocationId, filters.endDate],
-    queryFn: async () =>
-      (
-        await api.get<ApiSuccess<BalanceSheetData>>("/payment-accounts/reports/balance-sheet", {
-          params: { endDate: filters.endDate, ...(filters.businessLocationId ? { businessLocationId: filters.businessLocationId } : {}) },
-        })
-      ).data.data,
+    queryKey: ["payment-accounts", "balance-sheet", filters.params],
+    queryFn: async () => (await api.get<ApiSuccess<BalanceSheetData>>("/payment-accounts/reports/balance-sheet", { params: filters.params })).data.data,
   });
 
   return (
     <div className="space-y-6">
-      <PageHeader title={isAr ? "الميزانية العمومية" : "Balance Sheet"} />
-      <ReportFilters isAr={isAr} filters={filters} />
-      <ReportShell title={isAr ? "الميزانية العمومية" : "Balance Sheet"} endDate={filters.endDate} isAr={isAr} loading={isFetching && !data}>
+      <PageHeader title={isAr ? "الميزانية" : "Balance Sheet"} />
+      <ReportShell title={isAr ? "الميزانية" : "Balance Sheet"} isAr={isAr} loading={isFetching && !data} filters={filters}>
         {data && (
           <div className="overflow-hidden rounded-lg border border-slate-200">
             <div className="grid grid-cols-1 md:grid-cols-2">
               <div className="border-b border-slate-200 md:border-b-0 md:border-e">
-                <div className="bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700">{isAr ? "الالتزامات" : "Liability"}</div>
+                <div className="bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700">{isAr ? "الخصوم" : "Liability"}</div>
                 <table className="w-full px-4">
                   <tbody className="[&_td]:px-4 [&_th]:px-4">
-                    <Row label={`${isAr ? "مستحقات الموردين" : "Supplier Due"}:`} value={money(data.supplierDue)} />
+                    <Row label={`${isAr ? "مستحقات المورد" : "Supplier Due"}:`} value={money(data.supplierDue)} />
                   </tbody>
                 </table>
               </div>
@@ -140,8 +149,8 @@ export function BalanceSheetPage() {
                 <div className="bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700">{isAr ? "الأصول" : "Assets"}</div>
                 <table className="w-full">
                   <tbody className="[&_td]:px-4 [&_th]:px-4">
-                    <Row label={`${isAr ? "مستحقات العملاء" : "Customer Due"}:`} value={money(data.customerDue)} />
-                    <Row label={`${isAr ? "مخزون آخر المدة" : "Closing Stock"}:`} value={money(data.closingStock)} />
+                    <Row label={`${isAr ? "مستحقات العميل" : "Customer Due"}:`} value={money(data.customerDue)} />
+                    <Row label={`${isAr ? "مخزون اخر المدة" : "Closing Stock"}:`} value={money(data.closingStock)} />
                     <Row label={`${isAr ? "أرصدة الحسابات" : "Account Balances"}:`} />
                     {data.accountBalances.map((a) => (
                       <Row key={a.id} label={`${a.name}:`} value={money(a.balance)} indent />
@@ -152,7 +161,7 @@ export function BalanceSheetPage() {
             </div>
             <div className="grid grid-cols-1 bg-slate-100 md:grid-cols-2">
               <div className="flex justify-between px-4 py-3 text-sm font-semibold text-slate-800 md:border-e md:border-slate-200">
-                <span>{isAr ? "إجمالي الالتزامات" : "Total Liability"}:</span>
+                <span>{isAr ? "إجمالي الخصوم" : "Total Liability"}:</span>
                 {money(data.totalLiability)}
               </div>
               <div className="flex justify-between px-4 py-3 text-sm font-semibold text-slate-800">
@@ -179,21 +188,15 @@ export function TrialBalancePage() {
   const filters = useReportFilters();
 
   const { data, isFetching } = useQuery({
-    queryKey: ["payment-accounts", "trial-balance", filters.businessLocationId, filters.endDate],
-    queryFn: async () =>
-      (
-        await api.get<ApiSuccess<TrialBalanceData>>("/payment-accounts/reports/trial-balance", {
-          params: { endDate: filters.endDate, ...(filters.businessLocationId ? { businessLocationId: filters.businessLocationId } : {}) },
-        })
-      ).data.data,
+    queryKey: ["payment-accounts", "trial-balance", filters.params],
+    queryFn: async () => (await api.get<ApiSuccess<TrialBalanceData>>("/payment-accounts/reports/trial-balance", { params: filters.params })).data.data,
   });
 
   const cell = "px-4 py-2.5 text-sm";
   return (
     <div className="space-y-6">
       <PageHeader title={isAr ? "ميزان المراجعة" : "Trial Balance"} />
-      <ReportFilters isAr={isAr} filters={filters} />
-      <ReportShell title={isAr ? "ميزان المراجعة" : "Trial Balance"} endDate={filters.endDate} isAr={isAr} loading={isFetching && !data}>
+      <ReportShell title={isAr ? "ميزان المراجعة" : "Trial Balance"} isAr={isAr} loading={isFetching && !data} filters={filters}>
         {data && (
           <div className="overflow-hidden rounded-lg border border-slate-200">
             <table className="w-full">
@@ -206,12 +209,12 @@ export function TrialBalancePage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 <tr>
-                  <th className={`${cell} text-start font-semibold text-slate-700`}>{isAr ? "مستحقات الموردين" : "Supplier Due"}:</th>
+                  <th className={`${cell} text-start font-semibold text-slate-700`}>{isAr ? "مستحقات المورد" : "Supplier Due"}:</th>
                   <td className={cell} />
                   <td className={`${cell} text-end`}>{money(data.supplierDue)}</td>
                 </tr>
                 <tr>
-                  <th className={`${cell} text-start font-semibold text-slate-700`}>{isAr ? "مستحقات العملاء" : "Customer Due"}:</th>
+                  <th className={`${cell} text-start font-semibold text-slate-700`}>{isAr ? "مستحقات العميل" : "Customer Due"}:</th>
                   <td className={`${cell} text-end`}>{money(data.customerDue)}</td>
                   <td className={cell} />
                 </tr>

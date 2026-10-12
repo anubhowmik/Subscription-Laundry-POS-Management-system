@@ -24,6 +24,7 @@ export async function getLedger(customerId: string, organizationId: string) {
 interface AdjustCashbackOptions {
   saleId?: string;
   compensationId?: string;
+  promotionId?: string;
   expiresAt?: Date;
 }
 
@@ -61,6 +62,7 @@ export async function adjustCashbackTx(
       createdBy,
       saleId: opts?.saleId,
       compensationId: opts?.compensationId,
+      promotionId: opts?.promotionId,
       expiresAt: opts?.expiresAt,
     },
   });

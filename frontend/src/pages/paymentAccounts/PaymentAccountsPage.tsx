@@ -16,7 +16,8 @@ import { Alert } from "../../components/ui/Alert";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, RowActions, RowActionButton, RowActionLink } from "../../components/ui/Table";
 import { selectClass } from "../../components/ui/formClasses";
-import { TableExportButtons, ColumnVisibilityMenu } from "../../components/ui/TableToolbarControls";
+import { TableExportButtons, ColumnVisibilityMenu, FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { FilterField, scopeParams, useReportAppScope } from "../reports/reportShared";
 import { useColumnVisibility } from "../../hooks/useColumnVisibility";
 import {
   AccountFormModal,
@@ -35,6 +36,7 @@ export default function PaymentAccountsPage() {
   const currency = currentLocation?.currency ?? "SAR";
   const locale = isAr ? "ar-SA" : "en-US";
   const qc = useQueryClient();
+  const appScope = useReportAppScope();
 
   const [tab, setTab] = useState<"accounts" | "types">("accounts");
   const [status, setStatus] = useState<"active" | "closed">("active");
@@ -46,9 +48,9 @@ export default function PaymentAccountsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const { data } = useQuery({
-    queryKey: ["payment-accounts", "list", status, search],
+    queryKey: ["payment-accounts", "list", status, search, appScope],
     queryFn: async () => {
-      const res = await api.get<ApiSuccess<PaymentAccountRow[]>>("/payment-accounts", { params: { status, ...(search ? { search } : {}) } });
+      const res = await api.get<ApiSuccess<PaymentAccountRow[]>>("/payment-accounts", { params: { status, ...(search ? { search } : {}), ...scopeParams(appScope) } });
       return { rows: res.data.data, notLinkedPayments: (res.data.meta as { notLinkedPayments?: number } | undefined)?.notLinkedPayments ?? 0 };
     },
   });
@@ -82,12 +84,12 @@ export default function PaymentAccountsPage() {
   const columns = [
     { key: "name", label: isAr ? "الاسم" : "Name" },
     { key: "type", label: isAr ? "نوع الحساب" : "Account Type" },
-    { key: "subType", label: isAr ? "النوع الفرعي" : "Account Sub Type" },
+    { key: "subType", label: isAr ? "نوع الحساب الفرعي" : "Account Sub Type" },
     { key: "number", label: isAr ? "رقم الحساب" : "Account Number" },
     { key: "note", label: isAr ? "ملاحظة" : "Note" },
     { key: "balance", label: isAr ? "الرصيد" : "Balance" },
     { key: "details", label: isAr ? "تفاصيل الحساب" : "Account Details" },
-    { key: "addedBy", label: isAr ? "أضيف بواسطة" : "Added By" },
+    { key: "addedBy", label: isAr ? "أضيفت بواسطة" : "Added By" },
   ];
   const columnVisibility = useColumnVisibility("payment-accounts", columns.map((c) => c.key));
   const show = columnVisibility.isVisible;
@@ -95,13 +97,13 @@ export default function PaymentAccountsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={isAr ? "المحاسبة" : "Accounting"} subtitle={isAr ? "إدارة حساباتك" : "Manage your account"} />
+      <PageHeader title={isAr ? "الحسابات" : "Accounting"} subtitle={isAr ? "ادارة الحسابات" : "Manage your account"} />
 
       {(data?.notLinkedPayments ?? 0) > 0 && (
         <Alert variant="danger">
           {isAr ? (
             <>
-              إجمالي <b>{data!.notLinkedPayments}</b> دفعة غير مرتبطة بأي حساب.{" "}
+              دفعات <b>{data!.notLinkedPayments}</b> غير مرتبطة بأي حساب.{" "}
             </>
           ) : (
             <>
@@ -139,15 +141,16 @@ export default function PaymentAccountsPage() {
       {tab === "accounts" && (
         <TableContainer>
           <TableToolbar>
-            <div className="w-44">
-              <select value={status} onChange={(e) => setStatus(e.target.value as "active" | "closed")} className={selectClass}>
-                <option value="active">{isAr ? "نشط" : "Active"}</option>
-                <option value="closed">{isAr ? "مغلق" : "Closed"}</option>
-              </select>
-            </div>
-            <div className="w-64">
-              <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("common.search")} />
-            </div>
+            <SearchInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("common.search")} className="max-w-xs" />
+            {/* Reference: the account-status select (Active / Closed), opening on Active. */}
+            <FiltersMenu activeCount={status === "closed" ? 1 : 0} onClear={() => setStatus("active")} isAr={isAr}>
+              <FilterField label={isAr ? "حالة الحساب" : "Account Status"}>
+                <select value={status} onChange={(e) => setStatus(e.target.value as "active" | "closed")} className={cn(selectClass, "w-full")}>
+                  <option value="active">{isAr ? "نشط" : "Active"}</option>
+                  <option value="closed">{isAr ? "مغلق" : "Closed"}</option>
+                </select>
+              </FilterField>
+            </FiltersMenu>
             <div className="ms-auto flex items-center gap-1.5">
               <ColumnVisibilityMenu columns={columns} isVisible={columnVisibility.isVisible} onToggle={columnVisibility.toggle} isAr={isAr} />
               <TableExportButtons
@@ -215,7 +218,7 @@ export default function PaymentAccountsPage() {
                       <td className="px-4 py-3">
                         <RowActions align="start">
                           <RowActionButton icon={Pencil} label={t("common.edit")} onClick={() => setFormAccount(a)} />
-                          <RowActionLink icon={BookOpen} label={isAr ? "دفتر الحساب" : "Account Book"} variant="warning" to={`/payment-accounts/${a.id}`} />
+                          <RowActionLink icon={BookOpen} label={isAr ? "دفتر الحسابات" : "Account Book"} variant="warning" to={`/payment-accounts/${a.id}`} />
                           {!a.isClosed ? (
                             <>
                               <RowActionButton icon={ArrowLeftRight} label={isAr ? "تحويل أموال" : "Fund Transfer"} onClick={() => setTransferFrom(a)} />

@@ -1,10 +1,7 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Mail, Phone, MapPin } from "lucide-react";
-import { WaveDivider } from "../ui/WaveDivider";
-// Reversed (light-on-dark) variant - the footer's background stays near-black regardless of the
-// rest of the app's theme (see the bg-[#0d0d0d] note below), and the plain color mark's navy
-// arcs would disappear into it per the logo kit's own usage notes.
-import logo from "../../assets/logo-reversed.svg";
+import { Mail, Phone, MapPin, Languages, ShoppingCart, ShieldCheck, Users } from "lucide-react";
+import logo from "../../assets/logo-color.svg";
 
 /**
  * Placeholder company details/social links - swap these for the real ones whenever they're
@@ -27,28 +24,66 @@ const SOCIAL_LINKS = [
   { key: "linkedin", href: "#", Icon: LinkedinIcon },
 ];
 
+/** WaveDivider's curve, as an open path so it can also be stroked. */
+const CURVE = "M0,54 C240,10 480,0 720,18 C960,36 1200,46 1440,20";
+export const CURVE_HEIGHT = 54;
+
+const PRODUCTS = [
+  { key: "home.apps.pos.name", Icon: ShoppingCart },
+  { key: "home.apps.usersRules.name", Icon: Users },
+  { key: "home.apps.zatca.name", Icon: ShieldCheck },
+] as const;
+
+/**
+ * Standard three-column footer in the app's own look - white surface, slate borders, Nordic Indigo
+ * (sky-*) accents and Vanilla Mist icon tiles, the Kalam script face for the tagline - instead of
+ * the old near-black marketing footer. Its top edge is the Home page's WaveDivider curve, traced by
+ * an indigo line; the curve rises CURVE_HEIGHT px above the footer, so whatever sits above it
+ * needs that much free space (AppLayout adds a spacer). AppLayout puts it at the end of the page at full width
+ * (under the sidebar too); Home / auth / billing close their pages with it.
+ */
 export function Footer() {
   const { t, i18n } = useTranslation();
   const isAr = i18n.resolvedLanguage === "ar";
   const year = new Date().getFullYear();
+  const gradientId = useId();
 
   return (
-    // Deliberately NOT bg-sky-600 - the footer keeps its original near-black background from
-    // before the Nordic Indigo/Vanilla Mist rebrand (per explicit user request), while every
-    // other sky-600 surface in the app (buttons, active nav, etc.) picked up the new brand color.
-    <footer className="relative bg-[#0d0d0d] text-white">
-      <WaveDivider fillClassName="text-[#0d0d0d]" />
-      <div className="mx-auto max-w-5xl px-6 pb-12 pt-16">
-        <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
+    <footer className="relative bg-white">
+      {/* Curved top edge (same curve as WaveDivider), outlined with the brand gradient. */}
+      <svg
+        aria-hidden
+        viewBox="0 0 1440 54"
+        preserveAspectRatio="none"
+        className="pointer-events-none absolute inset-x-0 block w-full"
+        style={{ top: -CURVE_HEIGHT + 1, height: CURVE_HEIGHT }}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="var(--color-sky-600)" />
+            <stop offset="55%" stopColor="var(--color-sky-400)" />
+            <stop offset="100%" stopColor="var(--color-sky-200)" />
+          </linearGradient>
+        </defs>
+        <path d={`${CURVE} L1440,54 L0,54 Z`} fill="white" />
+        <path d={CURVE} fill="none" stroke={`url(#${gradientId})`} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="mx-auto max-w-6xl px-6 pb-6 pt-8">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1.2fr]">
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
-                <img src={logo} alt="" className="h-5 w-5 shrink-0" aria-hidden />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 ring-1 ring-sky-200">
+                <img src={logo} alt="" className="h-6 w-6 shrink-0" aria-hidden />
               </div>
-              <span className="text-base font-semibold text-white">{t("app.name")}</span>
+              <div className="min-w-0">
+                <div className="text-base font-semibold text-slate-900">{t("app.name")}</div>
+                <div className="text-xs text-slate-500">{t("app.tagline")}</div>
+              </div>
             </div>
-            <p className="mt-3 max-w-xs text-sm leading-relaxed text-white/50">{t("home.tagline")}</p>
-            <div className="mt-5 flex items-center gap-2">
+            <p style={{ fontFamily: "var(--font-script-2)" }} className="mt-3 max-w-xs text-[15px] leading-relaxed text-slate-500">
+              {t("home.tagline")}
+            </p>
+            <div className="mt-4 flex items-center gap-2">
               {SOCIAL_LINKS.map(({ key, href, Icon }) => (
                 <a
                   key={key}
@@ -56,7 +91,7 @@ export function Footer() {
                   target="_blank"
                   rel="noreferrer"
                   aria-label={t(`footer.social.${key}`)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.07] text-white/70 transition-colors hover:bg-white/[0.14] hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-all hover:-translate-y-0.5 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 hover:shadow-[0_6px_14px_-6px_rgba(38,59,170,0.45)]"
                 >
                   <Icon className="h-4 w-4" />
                 </a>
@@ -65,52 +100,56 @@ export function Footer() {
           </div>
 
           <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-white/40">{t("footer.product")}</h3>
-            <ul className="mt-3 space-y-2.5 text-sm text-white/70">
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-app-pos-500" aria-hidden />
-                {t("home.apps.pos.name")}
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-app-users-500" aria-hidden />
-                {t("home.apps.usersRules.name")}
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-app-zatca-500" aria-hidden />
-                {t("home.apps.zatca.name")}
-              </li>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-sky-700">{t("footer.product")}</h3>
+            <ul className="mt-3 space-y-2.5 text-sm text-slate-600">
+              {PRODUCTS.map(({ key, Icon }) => (
+                <li key={key} className="flex items-center gap-2.5">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                    <Icon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                  </span>
+                  {t(key)}
+                </li>
+              ))}
             </ul>
           </div>
 
           <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-white/40">{t("footer.contact")}</h3>
-            <ul className="mt-3 space-y-2.5 text-sm text-white/70">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-sky-700">{t("footer.contact")}</h3>
+            <ul className="mt-3 space-y-2.5 text-sm text-slate-600">
               <li className="flex items-center gap-2.5">
-                <Mail className="h-4 w-4 shrink-0 text-white/40" strokeWidth={2} aria-hidden />
-                <a href={`mailto:${COMPANY.email}`} className="hover:text-white">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                  <Mail className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                </span>
+                <a href={`mailto:${COMPANY.email}`} className="truncate transition-colors hover:text-sky-700">
                   {COMPANY.email}
                 </a>
               </li>
               <li className="flex items-center gap-2.5">
-                <Phone className="h-4 w-4 shrink-0 text-white/40" strokeWidth={2} aria-hidden />
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                  <Phone className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                </span>
                 <span className="ltr-nums">{COMPANY.phone}</span>
               </li>
               <li className="flex items-center gap-2.5">
-                <MapPin className="h-4 w-4 shrink-0 text-white/40" strokeWidth={2} aria-hidden />
-                <span>{isAr ? COMPANY.addressAr : COMPANY.addressEn}</span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                  <MapPin className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                </span>
+                {isAr ? COMPANY.addressAr : COMPANY.addressEn}
               </li>
             </ul>
           </div>
         </div>
 
-        <div className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-white/10 pt-6 text-xs text-white/40 sm:flex-row">
+        <div className="mt-8 flex flex-col items-center justify-between gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:flex-row">
           <span>
             © <span className="ltr-nums">{year}</span> {isAr ? COMPANY.nameAr : COMPANY.nameEn}. {t("footer.rightsReserved")}
           </span>
           <button
+            type="button"
             onClick={() => i18n.changeLanguage(isAr ? "en" : "ar")}
-            className="rounded-lg border border-white/15 bg-white/[0.07] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.14] hover:text-white"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
           >
+            <Languages className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
             {isAr ? "English" : "العربية"}
           </button>
         </div>

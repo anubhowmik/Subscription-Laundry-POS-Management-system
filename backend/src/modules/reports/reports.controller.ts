@@ -18,6 +18,11 @@ import * as dailySales from "./dailySalesReport.service";
 import * as lflSales from "./lflSalesReport.service";
 import * as salesAnalysis from "./salesAnalysisReport.service";
 import * as salesPerformance from "./salesPerformanceReport.service";
+import * as customersRevenue from "./customersRevenueReport.service";
+import * as customersRetention from "./customersRetentionReport.service";
+import * as newCustomers from "./newCustomersReport.service";
+import * as campaignPerformance from "./campaignPerformanceReport.service";
+import * as consumerBehaviour from "./consumerBehaviourReport.service";
 import { prisma } from "../../config/prisma";
 import { customerSearch } from "../paymentAccounts/paymentAccount.service";
 import { sendSuccess } from "../../utils/apiResponse";
@@ -252,4 +257,81 @@ export async function salesAnalysisReport(req: Request, res: Response) {
 export async function salesPerformanceReport(req: Request, res: Response) {
   const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
   return sendSuccess(res, await salesPerformance.salesPerformanceReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function customersRevenueReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await customersRevenue.customersRevenueReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function customersRevenueReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await customersRevenue.customersRevenueReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function customersRetentionReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await customersRetention.customersRetentionReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function customersRetentionReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await customersRetention.customersRetentionReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function declineCustomersReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await customersRetention.customersRetentionReport(req.query, req.user!.organizationId, allowedLocationIds, "decline"));
+}
+
+export async function declineCustomersReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await customersRetention.customersRetentionReportXlsx(req.query, req.user!.organizationId, allowedLocationIds, "decline");
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function newCustomersReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await newCustomers.newCustomersReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function newCustomersReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await newCustomers.newCustomersReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function campaignPerformanceReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await campaignPerformance.campaignPerformanceReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function campaignPerformanceReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await campaignPerformance.campaignPerformanceReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function discountCouponReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await campaignPerformance.discountCouponReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function discountCouponReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await campaignPerformance.discountCouponReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
+}
+
+export async function consumerBehaviourReport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  return sendSuccess(res, await consumerBehaviour.consumerBehaviourReport(req.query, req.user!.organizationId, allowedLocationIds));
+}
+
+export async function consumerBehaviourReportExport(req: Request, res: Response) {
+  const allowedLocationIds = req.user!.isSystemAdmin ? null : req.user!.allowedLocationIds;
+  const { workbook, filename } = await consumerBehaviour.consumerBehaviourReportXlsx(req.query, req.user!.organizationId, allowedLocationIds);
+  return sendXlsx(res, workbook, filename);
 }

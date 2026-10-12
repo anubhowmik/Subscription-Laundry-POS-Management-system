@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
-import { itemScopeWhere, saleScopeWhere, parseAppScope,
+import { itemScopeWhere, saleScopeWhere, parseAppScope, customerLabel,
   locationFiltersText,
   parseReportLocationQuery,
   reportDateWindow,
@@ -120,7 +120,7 @@ export async function customerVisitsReportXlsx(query: Record<string, unknown>, o
   r++;
   for (const row of report.rows) {
     sheet.getRow(r).values = [
-      `${row.customer.businessName ? `${row.customer.businessName}, ` : ""}${name(row.customer)}`,
+      customerLabel(row.customer, isAr),
       row.customer.phone,
       row.locations.map((l) => `${isAr ? l.branchNameAr || l.branchName : l.branchName} (${l.branchCode})`).join(", "),
       [...new Set(row.locations.map((l) => l.city).filter(Boolean))].join(", "),

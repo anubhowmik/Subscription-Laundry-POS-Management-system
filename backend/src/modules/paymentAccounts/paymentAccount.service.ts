@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError, NotFoundError, ValidationError } from "../../utils/AppError";
+import { parseAppScope, saleScopeWhere, type ReportAppScope } from "../reports/reportCommon";
 
 const { Decimal } = Prisma;
 type Decimal = Prisma.Decimal;
@@ -30,6 +31,27 @@ function intersect(a: string[] | null, b: string[] | null): string[] | null {
   if (b === null) return a;
   const set = new Set(b);
   return a.filter((id) => set.has(id));
+}
+
+/**
+ * App scope for account movements. The accounts are the same money in every app, but Service POS and
+ * Product POS each count only their own movements: a sale payment or refund belongs to its sale's
+ * app (a MIXED invoice to both), a purchase payment to Product POS only, while opening balances,
+ * deposits, fund transfers and expenses belong to every app. POS Laundry (no scope) counts all.
+ */
+export function movementScopeWhere(scope: ReportAppScope): Prisma.PaymentAccountTransactionWhereInput {
+  if (!scope) return {};
+  return {
+    AND: [
+      {
+        OR: [
+          { paymentId: null, purchaseId: null },
+          { payment: { sale: saleScopeWhere(scope) } },
+          ...(scope === "product" ? [{ purchaseId: { not: null } }] : []),
+        ],
+      },
+    ],
+  };
 }
 
 /** credits - debits per account (reference: SUM(IF(type='credit', amount, -amount))). */
@@ -150,7 +172,7 @@ export async function list(query: Record<string, unknown>, organizationId: strin
     orderBy: { createdAt: "asc" },
     include: ACCOUNT_INCLUDE,
   });
-  const balances = await balancesByAccount({ paymentAccountId: { in: accounts.map((a) => a.id) } });
+  const balances = await balancesByAccount({ paymentAccountId: { in: accounts.map((a) => a.id) }, ...movementScopeWhere(parseAppScope(query)) });
   return accounts.map((a) => ({ ...a, balance: (balances.get(a.id) ?? new Decimal(0)).toDecimalPlaces(2) }));
 }
 
@@ -169,11 +191,11 @@ export async function dropdown(query: Record<string, unknown>, organizationId: s
   });
 }
 
-export async function getById(id: string, organizationId: string, allowedLocationIds: string[] | null = null) {
+export async function getById(id: string, organizationId: string, allowedLocationIds: string[] | null = null, scope: ReportAppScope = undefined) {
   const account = await prisma.paymentAccount.findFirst({ where: { id, organizationId }, include: ACCOUNT_INCLUDE });
   if (!account) throw new NotFoundError("Payment account not found");
   await assertInScope(id, allowedLocationIds);
-  const balances = await balancesByAccount({ paymentAccountId: id });
+  const balances = await balancesByAccount({ paymentAccountId: id, ...movementScopeWhere(scope) });
   return { ...account, balance: (balances.get(id) ?? new Decimal(0)).toDecimalPlaces(2) };
 }
 
@@ -322,13 +344,14 @@ const TXN_ORDER: Prisma.PaymentAccountTransactionOrderByWithRelationInput[] = [{
 // ---------------------------------------------------------------------------
 
 export async function accountBook(id: string, query: Record<string, unknown>, organizationId: string, allowedLocationIds: string[] | null = null) {
-  const account = await getById(id, organizationId, allowedLocationIds);
+  const scope = parseAppScope(query);
+  const account = await getById(id, organizationId, allowedLocationIds, scope);
   const from = query.from ? new Date(`${String(query.from)}T00:00:00`) : null;
   const to = query.to ? new Date(`${String(query.to)}T23:59:59.999`) : null;
 
-  // Running balance is always over every movement on the account (not just the filtered ones),
-  // so the Balance column stays the real balance after each shown row.
-  const all = await prisma.paymentAccountTransaction.findMany({ where: { paymentAccountId: id }, orderBy: TXN_ORDER, include: TXN_INCLUDE });
+  // Running balance is over every movement on the account in this app (not just the filtered
+  // ones), so the Balance column stays the app's real balance after each shown row.
+  const all = await prisma.paymentAccountTransaction.findMany({ where: { paymentAccountId: id, ...movementScopeWhere(scope) }, orderBy: TXN_ORDER, include: TXN_INCLUDE });
   let running = new Decimal(0);
   const rows = [];
   for (const t of all) {
@@ -493,15 +516,27 @@ export async function deleteTransaction(id: string, organizationId: string, allo
   });
 }
 
-/** List Accounts page alert: "Total N payments not linked with any account". */
-export async function notLinkedPaymentsCount(organizationId: string, allowedLocationIds: string[] | null) {
-  return prisma.payment.count({
-    where: {
-      paymentAccountId: null,
-      businessLocation: { organizationId },
-      ...(allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {}),
-    },
-  });
+/** Reference's "Total N payments not linked with any account" - the same rows the Payment Account
+ * Report lists under Account "None": sale / sell-return payments (not Store Credit, the
+ * reference's excluded "advance" method), purchase payments and expense payments. */
+export async function notLinkedPaymentsCount(organizationId: string, allowedLocationIds: string[] | null, scope: ReportAppScope = undefined) {
+  const location = allowedLocationIds ? { businessLocationId: { in: allowedLocationIds } } : {};
+  const [payments, purchases, expenses] = await Promise.all([
+    prisma.payment.count({
+      where: {
+        paymentAccountId: null,
+        saleId: { not: null },
+        paymentMethod: { code: { not: "STORE_CREDIT" } },
+        businessLocation: { organizationId },
+        ...location,
+        ...(scope ? { sale: saleScopeWhere(scope) } : {}),
+      },
+    }),
+    // Purchases are Product POS only; expenses belong to every app.
+    scope === "service" ? 0 : prisma.purchase.count({ where: { paymentAccountId: null, organizationId, status: "RECEIVED", paidAmount: { gt: 0 }, ...location } }),
+    prisma.expense.count({ where: { paymentAccountId: null, organizationId, paidAmount: { gt: 0 }, ...location } }),
+  ]);
+  return payments + purchases + expenses;
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
-import { Pencil, Trash2, CalendarDays, ArrowLeftRight, User } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess } from "../../types/api";
 import { confirmAction } from "../../stores/confirmStore";
@@ -14,9 +14,10 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Card } from "../../components/ui/Card";
 import { Alert } from "../../components/ui/Alert";
 import { BackButton } from "../../components/ui/BackButton";
-import { IconInput, IconSelect } from "../../components/ui/IconInput";
-import { TableContainer, TableScroll, Table, THead, Th, RowActions, RowActionButton } from "../../components/ui/Table";
-import { labelClass } from "../../components/ui/formClasses";
+import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, RowActions, RowActionButton } from "../../components/ui/Table";
+import { TableExportButtons, FiltersMenu } from "../../components/ui/TableToolbarControls";
+import { inputClass, selectClass } from "../../components/ui/formClasses";
+import { FilterField, scopeParams, useReportAppScope } from "../reports/reportShared";
 import { EditTransactionModal, type PaymentAccountRow } from "./PaymentAccountModals";
 import { MovementDescriptionCell, errorMessage, localDateTimeValue, useAccountingFilterOptions, type MovementDescription } from "./shared";
 
@@ -48,21 +49,31 @@ export default function AccountBookPage() {
   const locale = isAr ? "ar-SA" : "en-US";
   const qc = useQueryClient();
 
-  // Reference's account book opens on the last 7 days.
-  const [from, setFrom] = useState(daysAgo(6));
-  const [to, setTo] = useState(daysAgo(0));
+  const appScope = useReportAppScope();
+  // Reference's account book opens on the last 7 days - that resting range is not counted as a filter.
+  const defaultFrom = daysAgo(6);
+  const defaultTo = daysAgo(0);
+  const [from, setFrom] = useState(defaultFrom);
+  const [to, setTo] = useState(defaultTo);
   const [type, setType] = useState("");
   const [createdBy, setCreatedBy] = useState("");
+  const activeFilterCount = (from !== defaultFrom ? 1 : 0) + (to !== defaultTo ? 1 : 0) + (type ? 1 : 0) + (createdBy ? 1 : 0);
+  const clearAllFilters = () => {
+    setFrom(defaultFrom);
+    setTo(defaultTo);
+    setType("");
+    setCreatedBy("");
+  };
   const [editTxnId, setEditTxnId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { data, error: loadError } = useQuery({
-    queryKey: ["payment-account-book", id, from, to, type, createdBy],
+    queryKey: ["payment-account-book", id, from, to, type, createdBy, appScope],
     retry: false,
     queryFn: async () =>
       (
         await api.get<ApiSuccess<{ account: PaymentAccountRow; rows: BookRow[] }>>(`/payment-accounts/${id}/book`, {
-          params: { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(type ? { type } : {}), ...(createdBy ? { createdBy } : {}) },
+          params: { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(type ? { type } : {}), ...(createdBy ? { createdBy } : {}), ...scopeParams(appScope) },
         })
       ).data.data,
   });
@@ -91,63 +102,82 @@ export default function AccountBookPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <BackButton to="/payment-accounts" label={isAr ? "قائمة الحسابات" : "List Accounts"} />
-        <PageHeader title={isAr ? "دفتر الحساب" : "Account Book"} />
+        <PageHeader title={isAr ? "دفتر الحسابات" : "Account Book"} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="p-5">
-          <dl className="space-y-3 text-sm">
-            {[
-              [isAr ? "اسم الحساب" : "Account Name", account?.name],
-              [isAr ? "نوع الحساب" : "Account Type", typeLabel],
-              [isAr ? "رقم الحساب" : "Account Number", account?.accountNumber],
-              [isAr ? "الرصيد" : "Balance", account ? formatMoney(account.balance, currency, locale) : ""],
-            ].map(([label, value]) => (
-              <div key={label} className="flex justify-between gap-4 border-b border-slate-100 pb-2 last:border-0">
-                <dt className="font-semibold text-slate-600">{label}:</dt>
-                <dd className="ltr-nums text-end text-slate-800">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
-        <Card className="p-5 lg:col-span-2">
-          <h3 className="mb-3 text-sm font-semibold text-slate-700">{isAr ? "عوامل التصفية" : "Filters"}:</h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelClass}>{isAr ? "من تاريخ" : "Date From"}</label>
-              <IconInput icon={CalendarDays} type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="ltr-nums" />
+      <Card className="p-5 sm:max-w-md">
+        <dl className="space-y-3 text-sm">
+          {[
+            [isAr ? "اسم الحساب" : "Account Name", account?.name],
+            [isAr ? "نوع الحساب" : "Account Type", typeLabel],
+            [isAr ? "رقم الحساب" : "Account Number", account?.accountNumber],
+            [isAr ? "الرصيد" : "Balance", account ? formatMoney(account.balance, currency, locale) : ""],
+          ].map(([label, value]) => (
+            <div key={label} className="flex justify-between gap-4 border-b border-slate-100 pb-2 last:border-0">
+              <dt className="font-semibold text-slate-600">{label}:</dt>
+              <dd className="ltr-nums text-end text-slate-800">{value}</dd>
             </div>
-            <div>
-              <label className={labelClass}>{isAr ? "إلى تاريخ" : "Date To"}</label>
-              <IconInput icon={CalendarDays} type="date" value={to} onChange={(e) => setTo(e.target.value)} className="ltr-nums" />
-            </div>
-            <div>
-              <label className={labelClass}>{isAr ? "نوع الحركة" : "Transaction Type"}:</label>
-              <IconSelect icon={ArrowLeftRight} value={type} onChange={(e) => setType(e.target.value)}>
+          ))}
+        </dl>
+      </Card>
+
+      {loadError && <Alert variant="danger">{errorMessage(loadError, isAr)}</Alert>}
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <TableContainer>
+        <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <FilterField label={isAr ? "من تاريخ" : "Date From"}>
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "إلى تاريخ" : "Date To"}>
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "نوع المعاملة" : "Transaction Type"}>
+              <select value={type} onChange={(e) => setType(e.target.value)} className={cn(selectClass, "w-full")}>
                 <option value="">{t("common.all")}</option>
                 <option value="DEBIT">{isAr ? "مدين" : "Debit"}</option>
                 <option value="CREDIT">{isAr ? "دائن" : "Credit"}</option>
-              </IconSelect>
-            </div>
-            <div>
-              <label className={labelClass}>{isAr ? "أنشئ بواسطة" : "Created By"}:</label>
-              <IconSelect icon={User} value={createdBy} onChange={(e) => setCreatedBy(e.target.value)}>
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "أنشئ بواسطة" : "Created By"}>
+              <select value={createdBy} onChange={(e) => setCreatedBy(e.target.value)} className={cn(selectClass, "w-full")}>
                 <option value="">{t("common.all")}</option>
                 {(users ?? []).map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.fullNameEn}
                   </option>
                 ))}
-              </IconSelect>
-            </div>
+              </select>
+            </FilterField>
+          </FiltersMenu>
+          <div className="ms-auto flex items-center gap-1.5">
+            <TableExportButtons
+              title={`${isAr ? "دفتر الحسابات" : "Account Book"} - ${account?.name ?? ""}`}
+              columns={[
+                { key: "date", label: isAr ? "التاريخ" : "Date" },
+                { key: "description", label: isAr ? "الوصف" : "Description" },
+                { key: "note", label: isAr ? "ملاحظة" : "Note" },
+                { key: "addedBy", label: isAr ? "أضيفت بواسطة" : "Added By" },
+                { key: "debit", label: isAr ? "مدين" : "Debit" },
+                { key: "credit", label: isAr ? "دائن" : "Credit" },
+                { key: "balance", label: isAr ? "الرصيد" : "Balance" },
+              ]}
+              getRows={async () =>
+                rows.map((r) => ({
+                  date: new Date(r.operationDate).toLocaleString(locale),
+                  description: [r.description.subType, r.description.docType, r.description.docNumber, r.description.counterAccountName].filter(Boolean).join(" "),
+                  note: r.note,
+                  addedBy: r.description.addedBy,
+                  debit: r.type === "CREDIT" ? Number(r.amount) : null,
+                  credit: r.type === "DEBIT" ? Number(r.amount) : null,
+                  balance: Number(r.balance),
+                }))
+              }
+              isAr={isAr}
+            />
           </div>
-        </Card>
-      </div>
-
-      {loadError && <Alert variant="danger">{errorMessage(loadError, isAr)}</Alert>}
-      {error && <Alert variant="danger">{error}</Alert>}
-
-      <TableContainer>
+        </TableToolbar>
         <TableScroll>
           <Table>
             <THead>
@@ -155,7 +185,7 @@ export default function AccountBookPage() {
                 <Th>{isAr ? "التاريخ" : "Date"}</Th>
                 <Th>{isAr ? "الوصف" : "Description"}</Th>
                 <Th>{isAr ? "ملاحظة" : "Note"}</Th>
-                <Th>{isAr ? "أضيف بواسطة" : "Added By"}</Th>
+                <Th>{isAr ? "أضيفت بواسطة" : "Added By"}</Th>
                 <Th>{isAr ? "مدين" : "Debit"}</Th>
                 <Th>{isAr ? "دائن" : "Credit"}</Th>
                 <Th>{isAr ? "الرصيد" : "Balance"}</Th>

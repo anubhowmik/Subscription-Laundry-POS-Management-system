@@ -90,6 +90,7 @@ export async function getById(id: string, organizationId: string, allowedLocatio
       customer: { include: { defaultInvoiceLayout: true } },
       businessLocation: { include: { invoiceLayoutSettings: true } },
       createdByUser: { select: { fullNameEn: true } },
+      promotion: { select: { id: true, name: true, type: true } },
       items: { include: { product: true, service: true } },
       payments: { include: { paymentMethod: true } },
       registerSession: { select: { openedAt: true, openedByUser: { select: { fullNameEn: true } } } },

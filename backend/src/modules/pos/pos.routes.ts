@@ -12,6 +12,8 @@ import {
   posSearchQuerySchema,
   sendQuoteNotificationSchema,
 } from "./pos.validators";
+import { applyPromotionSchema, applyCouponSchema, couponOtpSchema } from "../promotions/promotion.validators";
+import { matchDiscountsSchema } from "../discounts/discount.validators";
 
 const router = Router();
 // Any of the three POS-access tiers gets you into this router at all - the finer distinction
@@ -23,6 +25,16 @@ router.use(requirePermission("app.pos_laundry", "app.pos_service", "app.pos_prod
 router.get("/search", validate(posSearchQuerySchema, "query"), controller.search);
 router.get("/taxes", requirePermission("pos.editLinePrice"), controller.listActiveTaxes);
 router.post("/checkout", requirePermission("sales.create"), validate(checkoutSchema), requireModePermission(), controller.checkout);
+
+// Reference POS "Promotion" dropdown + "Apply" (SellPosController@applyPromotion). Apply only
+// previews - checkout() re-runs the same promotion server-side.
+router.get("/promotions", controller.listActivePromotions);
+router.post("/promotions/apply", validate(applyPromotionSchema), requireModePermission(), controller.applyPromotion);
+// Reference SellPosController@applyCoupon - the coupon fitted to the cart as checkout() will.
+router.post("/coupons/apply", validate(applyCouponSchema), requireModePermission(), controller.applyCoupon);
+router.post("/coupons/send-otp", validate(couponOtpSchema), controller.sendCouponOtp);
+// Promotions > Discounts: the discount each added item gets (reference getProductDiscount).
+router.post("/discounts/match", validate(matchDiscountsSchema), controller.matchDiscounts);
 
 router.post("/hold-sale", validate(holdSaleSchema), requireModePermission(), controller.holdSale);
 router.get("/hold-sales", validate(listHeldSalesQuerySchema, "query"), controller.listHeldSales);

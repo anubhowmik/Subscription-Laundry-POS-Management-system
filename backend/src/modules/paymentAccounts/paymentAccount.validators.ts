@@ -46,6 +46,8 @@ export const updateTransactionSchema = z.object({
 
 export const linkAccountSchema = z.object({
   paymentAccountId: z.string().uuid(),
+  // Which record the Payment Account Report row came from - a sale payment, a purchase or an expense.
+  source: z.enum(["SALE", "PURCHASE", "EXPENSE"]).default("SALE"),
 });
 
 export const locationDefaultsSchema = z.object({

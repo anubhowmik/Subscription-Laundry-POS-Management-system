@@ -8,12 +8,12 @@ import { useBusinessLocation } from "../../contexts/LocationContext";
 import { formatMoney } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { Card } from "../../components/ui/Card";
 import { Pagination } from "../../components/ui/Pagination";
 import { TableContainer, TableToolbar, TableScroll, Table, THead, Th } from "../../components/ui/Table";
-import { PageSizeSelect, TableExportButtons } from "../../components/ui/TableToolbarControls";
+import { PageSizeSelect, TableExportButtons, FiltersMenu } from "../../components/ui/TableToolbarControls";
 import { fetchAllRows } from "../../lib/tableExport";
-import { labelClass, inputClass, selectClass } from "../../components/ui/formClasses";
+import { inputClass, selectClass } from "../../components/ui/formClasses";
+import { FilterField, scopeParams, useReportAppScope } from "../reports/reportShared";
 import { MovementDescriptionCell, usePaymentAccountOptions, type MovementDescription } from "./shared";
 
 interface CashFlowRow {
@@ -37,6 +37,7 @@ export default function CashFlowPage() {
   const currency = currentLocation?.currency ?? "SAR";
   const locale = isAr ? "ar-SA" : "en-US";
   const { data: accounts } = usePaymentAccountOptions({ includeClosed: true });
+  const appScope = useReportAppScope();
 
   const [accountId, setAccountId] = useState("");
   const [businessLocationId, setBusinessLocationId] = useState("");
@@ -52,6 +53,7 @@ export default function CashFlowPage() {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(type ? { type } : {}),
+    ...scopeParams(appScope),
   };
   const { data } = useQuery({
     queryKey: ["payment-accounts", "cash-flow", filterParams, page, limit],
@@ -64,6 +66,15 @@ export default function CashFlowPage() {
     setter(v);
     setPage(1);
   };
+  const activeFilterCount = [accountId, businessLocationId, from, to, type].filter(Boolean).length;
+  const clearAllFilters = () => {
+    setAccountId("");
+    setBusinessLocationId("");
+    setFrom("");
+    setTo("");
+    setType("");
+    setPage(1);
+  };
 
   const exportColumns = [
     { key: "date", label: isAr ? "التاريخ" : "Date" },
@@ -72,61 +83,50 @@ export default function CashFlowPage() {
     { key: "debit", label: isAr ? "مدين" : "Debit" },
     { key: "credit", label: isAr ? "دائن" : "Credit" },
     { key: "accountBalance", label: isAr ? "رصيد الحساب" : "Account Balance" },
-    { key: "totalBalance", label: isAr ? "الرصيد الإجمالي" : "Total Balance" },
+    { key: "totalBalance", label: isAr ? "إجمالي الرصيد" : "Total Balance" },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader title={isAr ? "التدفق النقدي" : "Cash Flow"} />
 
-      <Card className="p-5">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">{isAr ? "عوامل التصفية" : "Filters"}:</h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label className={labelClass}>{isAr ? "الحساب" : "Account"}:</label>
-            <select value={accountId} onChange={(e) => reset(setAccountId)(e.target.value)} className={selectClass}>
-              <option value="">{t("common.all")}</option>
-              {(accounts ?? []).map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "موقع العمل" : "Business Location"}:</label>
-            <select value={businessLocationId} onChange={(e) => reset(setBusinessLocationId)(e.target.value)} className={selectClass}>
-              <option value="">{t("common.all")}</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={labelClass}>{isAr ? "من" : "From"}</label>
-              <input type="date" value={from} onChange={(e) => reset(setFrom)(e.target.value)} className={cn(inputClass, "ltr-nums")} />
-            </div>
-            <div>
-              <label className={labelClass}>{isAr ? "إلى" : "To"}</label>
-              <input type="date" value={to} onChange={(e) => reset(setTo)(e.target.value)} className={cn(inputClass, "ltr-nums")} />
-            </div>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "نوع الحركة" : "Transaction Type"}:</label>
-            <select value={type} onChange={(e) => reset(setType)(e.target.value)} className={selectClass}>
-              <option value="">{t("common.all")}</option>
-              <option value="DEBIT">{isAr ? "مدين" : "Debit"}</option>
-              <option value="CREDIT">{isAr ? "دائن" : "Credit"}</option>
-            </select>
-          </div>
-        </div>
-      </Card>
-
       <TableContainer>
         <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <FilterField label={isAr ? "الحساب" : "Account"}>
+              <select value={accountId} onChange={(e) => reset(setAccountId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {(accounts ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "موقع العمل" : "Business Location"}>
+              <select value={businessLocationId} onChange={(e) => reset(setBusinessLocationId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.branchName}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "من" : "From"}>
+              <input type="date" value={from} onChange={(e) => reset(setFrom)(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "إلى" : "To"}>
+              <input type="date" value={to} onChange={(e) => reset(setTo)(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "نوع المعاملة" : "Transaction Type"}>
+              <select value={type} onChange={(e) => reset(setType)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                <option value="DEBIT">{isAr ? "مدين" : "Debit"}</option>
+                <option value="CREDIT">{isAr ? "دائن" : "Credit"}</option>
+              </select>
+            </FilterField>
+          </FiltersMenu>
           <div className="ms-auto flex items-center gap-1.5">
             <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
             <PageSizeSelect value={limit} onChange={(n) => reset(setLimit)(n)} />
@@ -168,7 +168,7 @@ export default function CashFlowPage() {
                 </Th>
                 <Th>
                   <span className="inline-flex items-center gap-1" title={isAr ? "مجموع أرصدة كل الحسابات بعد هذه الحركة" : "Total balance of all accounts after this transaction"}>
-                    {isAr ? "الرصيد الإجمالي" : "Total Balance"} <Info className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                    {isAr ? "إجمالي الرصيد" : "Total Balance"} <Info className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
                   </span>
                 </Th>
               </tr>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Eye, User, MapPin, Banknote, Users, CreditCard, X } from "lucide-react";
+import { Eye } from "lucide-react";
 import { api } from "../../api/client";
 import type { ApiSuccess, PaginationMeta } from "../../types/api";
 import { useBusinessLocation } from "../../contexts/LocationContext";
@@ -10,15 +10,14 @@ import { usePaymentMethods } from "../../api/posApi";
 import { formatMoney } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { Card } from "../../components/ui/Card";
 import { Modal } from "../../components/ui/Modal";
 import { Pagination } from "../../components/ui/Pagination";
-import { IconSelect } from "../../components/ui/IconInput";
 import { TableContainer, TableToolbar, TableScroll, Table, THead, Th, RowActions, RowActionButton } from "../../components/ui/Table";
-import { PageSizeSelect, TableExportButtons } from "../../components/ui/TableToolbarControls";
+import { PageSizeSelect, TableExportButtons, FiltersMenu } from "../../components/ui/TableToolbarControls";
 import { fetchAllRows } from "../../lib/tableExport";
-import { labelClass, inputClass } from "../../components/ui/formClasses";
-import { todayValue, useAccountingCustomerSearch, useAccountingFilterOptions, usePaymentAccountOptions } from "./shared";
+import { inputClass, selectClass } from "../../components/ui/formClasses";
+import { FilterField, scopeParams, useReportAppScope } from "../reports/reportShared";
+import { AccountingCustomerFilter, todayValue, useAccountingFilterOptions, usePaymentAccountOptions } from "./shared";
 
 interface SellPaymentRow {
   id: string;
@@ -46,7 +45,7 @@ export default function SellPaymentsPage() {
   const currency = currentLocation?.currency ?? "SAR";
   const locale = isAr ? "ar-SA" : "en-US";
 
-  const [customerSearch, setCustomerSearch] = useState("");
+  const appScope = useReportAppScope();
   const [customer, setCustomer] = useState<{ id: string; label: string } | null>(null);
   const [businessLocationId, setBusinessLocationId] = useState("");
   const [paymentMethodId, setPaymentMethodId] = useState("");
@@ -60,7 +59,6 @@ export default function SellPaymentsPage() {
   const [limit, setLimit] = useState(25);
   const [viewing, setViewing] = useState<SellPaymentRow | null>(null);
 
-  const { data: customerResults } = useAccountingCustomerSearch(customerSearch);
   const { data: paymentMethods } = usePaymentMethods();
   const { data: accounts } = usePaymentAccountOptions({ includeClosed: true });
   const { data: filterOptions } = useAccountingFilterOptions();
@@ -76,6 +74,7 @@ export default function SellPaymentsPage() {
     ...(to ? { to } : {}),
     ...(accountId ? { accountId } : {}),
     ...(createdBy ? { createdBy } : {}),
+    ...scopeParams(appScope),
   };
   const { data } = useQuery({
     queryKey: ["payment-accounts", "sell-payments", filterParams, page, limit],
@@ -86,6 +85,28 @@ export default function SellPaymentsPage() {
   });
   const reset = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v);
+    setPage(1);
+  };
+  // Reference: the report opens on today's payments, so "today" is the resting state, not a filter.
+  const today = todayValue();
+  const activeFilterCount =
+    (customer ? 1 : 0) +
+    (businessLocationId ? 1 : 0) +
+    (paymentMethodId ? 1 : 0) +
+    (customerGroupId ? 1 : 0) +
+    (from !== today ? 1 : 0) +
+    (to !== today ? 1 : 0) +
+    (accountId ? 1 : 0) +
+    (createdBy ? 1 : 0);
+  const clearAllFilters = () => {
+    setCustomer(null);
+    setBusinessLocationId("");
+    setPaymentMethodId("");
+    setCustomerGroupId("");
+    setFrom(today);
+    setTo(today);
+    setAccountId("");
+    setCreatedBy("");
     setPage(1);
   };
 
@@ -107,112 +128,69 @@ export default function SellPaymentsPage() {
     <div className="space-y-6">
       <PageHeader title={isAr ? "تقرير مدفوعات المبيعات" : "Sell Payment Report"} />
 
-      <Card className="p-5">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">{isAr ? "عوامل التصفية" : "Filters"}</h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="relative">
-            <label className={labelClass}>{isAr ? "العميل" : "Customer"}:</label>
-            {customer ? (
-              <div className={cn(inputClass, "flex items-center justify-between")}>
-                <span className="truncate">{customer.label}</span>
-                <button type="button" onClick={() => reset(setCustomer)(null)} className="text-slate-400 hover:text-red-500" aria-label="clear">
-                  <X className="h-4 w-4" strokeWidth={2} aria-hidden />
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <User className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} aria-hidden />
-                <input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder={t("common.all")} className={cn(inputClass, "ps-9")} />
-                {customerSearch && (customerResults ?? []).length > 0 && (
-                  <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-                    {(customerResults ?? []).map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => {
-                          reset(setCustomer)({ id: c.id, label: `${c.nameEn} (${c.phone})` });
-                          setCustomerSearch("");
-                        }}
-                        className="block w-full px-3 py-1.5 text-start text-sm hover:bg-slate-100"
-                      >
-                        {c.nameEn} <span className="ltr-nums text-xs text-slate-400">{c.phone}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "موقع العمل" : "Business Location"}:</label>
-            <IconSelect icon={MapPin} value={businessLocationId} onChange={(e) => reset(setBusinessLocationId)(e.target.value)}>
-              <option value="">{t("common.all")}</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.branchName}
-                </option>
-              ))}
-            </IconSelect>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "طريقة الدفع" : "Payment Method"}:</label>
-            <IconSelect icon={Banknote} value={paymentMethodId} onChange={(e) => reset(setPaymentMethodId)(e.target.value)}>
-              <option value="">{t("common.all")}</option>
-              {(paymentMethods ?? []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {isAr ? m.nameAr || m.nameEn : m.nameEn}
-                </option>
-              ))}
-            </IconSelect>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "مجموعة العملاء" : "Customer Group"}:</label>
-            <IconSelect icon={Users} value={customerGroupId} onChange={(e) => reset(setCustomerGroupId)(e.target.value)}>
-              <option value="">{t("common.all")}</option>
-              {(customerGroups ?? []).map((g) => (
-                <option key={g.id} value={g.id}>
-                  {isAr ? g.nameAr || g.nameEn : g.nameEn}
-                </option>
-              ))}
-            </IconSelect>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={labelClass}>{isAr ? "من" : "From"}</label>
-              <input type="date" value={from} onChange={(e) => reset(setFrom)(e.target.value)} className={cn(inputClass, "ltr-nums")} />
-            </div>
-            <div>
-              <label className={labelClass}>{isAr ? "إلى" : "To"}</label>
-              <input type="date" value={to} onChange={(e) => reset(setTo)(e.target.value)} className={cn(inputClass, "ltr-nums")} />
-            </div>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "الحساب" : "Account"}:</label>
-            <IconSelect icon={CreditCard} value={accountId} onChange={(e) => reset(setAccountId)(e.target.value)}>
-              <option value="">{t("common.all")}</option>
-              {(accounts ?? []).map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </IconSelect>
-          </div>
-          <div>
-            <label className={labelClass}>{isAr ? "موظف الخدمة" : "Service Staff"}:</label>
-            <IconSelect icon={User} value={createdBy} onChange={(e) => reset(setCreatedBy)(e.target.value)}>
-              <option value="">{t("common.all")}</option>
-              {(users ?? []).map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.fullNameEn}
-                </option>
-              ))}
-            </IconSelect>
-          </div>
-        </div>
-      </Card>
-
       <TableContainer>
         <TableToolbar>
+          <FiltersMenu activeCount={activeFilterCount} onClear={clearAllFilters} isAr={isAr}>
+            <FilterField label={isAr ? "العميل" : "Customer"}>
+              <AccountingCustomerFilter value={customer} onChange={reset(setCustomer)} isAr={isAr} />
+            </FilterField>
+            <FilterField label={isAr ? "موقع العمل" : "Business Location"}>
+              <select value={businessLocationId} onChange={(e) => reset(setBusinessLocationId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.branchName}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "طريقة الدفع" : "Payment Method"}>
+              <select value={paymentMethodId} onChange={(e) => reset(setPaymentMethodId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {(paymentMethods ?? []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {isAr ? m.nameAr || m.nameEn : m.nameEn}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "مجموعة العملاء" : "Customer Group"}>
+              <select value={customerGroupId} onChange={(e) => reset(setCustomerGroupId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {(customerGroups ?? []).map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {isAr ? g.nameAr || g.nameEn : g.nameEn}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "من" : "From"}>
+              <input type="date" value={from} onChange={(e) => reset(setFrom)(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "إلى" : "To"}>
+              <input type="date" value={to} onChange={(e) => reset(setTo)(e.target.value)} className={cn(inputClass, "w-full ltr-nums")} />
+            </FilterField>
+            <FilterField label={isAr ? "الحساب" : "Account"}>
+              <select value={accountId} onChange={(e) => reset(setAccountId)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {(accounts ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+            <FilterField label={isAr ? "موظف الخدمة" : "Service Staff"}>
+              <select value={createdBy} onChange={(e) => reset(setCreatedBy)(e.target.value)} className={cn(selectClass, "w-full")}>
+                <option value="">{t("common.all")}</option>
+                {(users ?? []).map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.fullNameEn}
+                  </option>
+                ))}
+              </select>
+            </FilterField>
+          </FiltersMenu>
           <div className="ms-auto flex items-center gap-1.5">
             <span className="text-xs text-slate-500">{isAr ? "عرض" : "Show"}</span>
             <PageSizeSelect value={limit} onChange={(n) => reset(setLimit)(n)} />

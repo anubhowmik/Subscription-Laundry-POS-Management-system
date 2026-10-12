@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { calcLine } from "../lib/posCalc";
+import type { PromotionApplyResult, PromotionType } from "../api/promotionsApi";
+import type { MatchedDiscount } from "../api/discountsApi";
 
 /**
  * POS state (Zustand). Holds everything the cashier is building: the cart, the selected
@@ -39,6 +41,15 @@ export interface PosLine {
   // Laundry's own dimension-based pricing (carpets/curtains priced per m²).
   widthM?: number;
   heightM?: number;
+  // Set on the rows a promotion split off and discounted (reference's promotion_row_N) - a
+  // Bonus row the promotion added on top of the cart is also `promoFree`.
+  promotionId?: string;
+  promoFree?: boolean;
+  // Promotions > Discounts: the branch discount pre-filled as this line's discount (reference
+  // getProductDiscount). Its amount follows the quantity/price until the cashier types their own
+  // line discount (`manualDiscount`), which drops it - exactly like overwriting the pre-filled value.
+  autoDiscount?: { id: string; name: string; discountType: "FIXED" | "PERCENTAGE"; amount: number; endsAt: string };
+  manualDiscount?: boolean;
 }
 
 export interface PosCustomer {
@@ -80,9 +91,36 @@ export interface PosPayment {
   locked?: boolean;
 }
 
+/**
+ * The promotion applied to the cart (reference POS "Promotion" Apply). `lines` then holds the
+ * split/discounted rows the server returned for display and totals, while `originalLines` keeps
+ * the cart exactly as the cashier built it - that is what checkout sends back (with the promotion
+ * id) for the server to re-run the same promotion on. Editing the cart drops the promotion.
+ */
+export interface AppliedPromotion {
+  id: string;
+  name: string;
+  type: PromotionType;
+  fullCash: boolean;
+  cashBack: number | null;
+  originalLines: PosLine[];
+}
+
+/**
+ * The coupon on the cart (reference POS "Apply Coupon"). It is a line discount on the lines it
+ * fits: `lineDiscounts[i]` is the coupon's share of `lines[i]`, as the server fitted it (the
+ * promotion's split rows when a promotion is on the cart). Any change to the cart drops it - the
+ * cashier applies it again - exactly like a promotion. Without "Added Discount" the coupon
+ * replaces every other discount: the promotion is cancelled and line discounts are cleared.
+ */
 export interface AppliedCoupon {
   code: string;
-  discountAmount: number; // computed server-side by the preview endpoint at apply time
+  name: string;
+  addedDiscount: boolean;
+  discountAmount: number;
+  lineDiscounts: number[];
+  /** The customer's verification code, for a coupon with OTP on - checkout re-checks it. */
+  otp?: string;
 }
 
 // Reference's own 4 fixed additional_expense_key_N/_value_N slots - untaxed flat pass-through
@@ -124,6 +162,7 @@ interface PosState {
   appliedCreditAmount: number; // store credit the cashier wants applied to THIS invoice
   payments: PosPayment[];
   coupon: AppliedCoupon | null;
+  promotion: AppliedPromotion | null;
   note: string;
   customFields: string[]; // reference's sell-level custom_field_1..4, by index
   additionalExpenses: AdditionalExpenseSlot[]; // reference's 4 fixed named expense slots
@@ -160,6 +199,11 @@ interface PosState {
   setAppliedCreditAmount: (amount: number) => void;
   setNote: (note: string) => void;
   setCoupon: (coupon: AppliedCoupon | null) => void;
+  applyCoupon: (coupon: AppliedCoupon) => void;
+  applyPromotion: (result: Extract<PromotionApplyResult, { applied: true }>) => void;
+  cancelPromotion: () => void;
+  /** Server matches for the cart's items, keyed "p:<id>" / "s:<id>". */
+  applyDiscounts: (matches: Record<string, MatchedDiscount>) => void;
   setCustomField: (index: number, value: string) => void;
   setAdditionalExpense: (index: number, slot: AdditionalExpenseSlot) => void;
   setTaxExemptionReasonCode: (code: string | null) => void;
@@ -178,6 +222,29 @@ interface PosState {
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
 
+// The cart as the cashier built it - the promotion's split rows are only a view over it.
+const baseLines = (state: PosState) => state.promotion?.originalLines ?? state.lines;
+// A promotion-split row ("KEY#1") has no counterpart in the original cart; editing it just drops
+// the promotion.
+const isSplitKey = (key: string) => key.includes("#");
+/** A pre-filled discount's amount on the line: "percentage" of the line, "fixed" off each unit. */
+export function autoDiscountAmount(line: PosLine) {
+  if (!line.autoDiscount) return line.discountAmount;
+  const qty = line.widthM != null && line.heightM != null ? line.quantity * line.widthM * line.heightM : line.quantity;
+  const price = line.unitPriceOverride ?? line.unitPrice;
+  const gross = price * qty;
+  const d = line.autoDiscount;
+  const amount = d.discountType === "PERCENTAGE" ? (gross * Math.min(d.amount, 100)) / 100 : Math.min(d.amount, price) * qty;
+  return roundMoney(Math.max(0, Math.min(amount, gross)));
+}
+const withAutoDiscount = (l: PosLine): PosLine => (l.autoDiscount && !l.manualDiscount ? { ...l, discountAmount: autoDiscountAmount(l) } : l);
+const editLine = (state: PosState, key: string, fn: (l: PosLine) => PosLine) => ({
+  promotion: null,
+  coupon: null,
+  lines: isSplitKey(key) ? baseLines(state) : baseLines(state).map((l) => (l.key === key ? withAutoDiscount(fn(l)) : l)),
+});
+const itemKeyOf = (l: PosLine) => `${l.type === "PRODUCT" ? "p" : "s"}:${l.id}`;
+
 export const usePosStore = create<PosState>((set) => ({
   lines: [],
   customer: null,
@@ -188,6 +255,7 @@ export const usePosStore = create<PosState>((set) => ({
   appliedCreditAmount: 0,
   payments: [],
   coupon: null,
+  promotion: null,
   note: "",
   customFields: ["", "", "", ""],
   additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
@@ -201,60 +269,49 @@ export const usePosStore = create<PosState>((set) => ({
   addItem: (item) =>
     set((state) => {
       const key = `${item.type}:${item.id}`;
-      const existing = state.lines.find((l) => l.key === key);
+      const lines = baseLines(state);
+      const existing = lines.find((l) => l.key === key);
       if (existing) {
         // Duplicate scan/click bumps quantity instead of adding a second row.
         return {
-          lines: state.lines.map((l) =>
-            l.key === key ? { ...l, quantity: l.quantity + (item.quantity ?? 1) } : l,
-          ),
+          promotion: null,
+          coupon: null,
+          lines: lines.map((l) => (l.key === key ? withAutoDiscount({ ...l, quantity: l.quantity + (item.quantity ?? 1) }) : l)),
         };
       }
       const line: PosLine = { ...item, key, quantity: item.quantity ?? 1, discountAmount: 0 };
-      return { lines: [...state.lines, line] };
+      return { promotion: null, coupon: null, lines: [...lines, line] };
     }),
 
-  incQty: (key) =>
-    set((state) => ({ lines: state.lines.map((l) => (l.key === key ? { ...l, quantity: l.quantity + 1 } : l)) })),
+  incQty: (key) => set((state) => editLine(state, key, (l) => ({ ...l, quantity: l.quantity + 1 }))),
 
-  decQty: (key) =>
-    set((state) => ({
-      lines: state.lines.map((l) => (l.key === key ? { ...l, quantity: Math.max(1, l.quantity - 1) } : l)),
-    })),
+  decQty: (key) => set((state) => editLine(state, key, (l) => ({ ...l, quantity: Math.max(1, l.quantity - 1) }))),
 
-  setQty: (key, qty) =>
-    set((state) => ({
-      lines: state.lines.map((l) => (l.key === key ? { ...l, quantity: Math.max(1, Math.floor(qty) || 1) } : l)),
-    })),
+  setQty: (key, qty) => set((state) => editLine(state, key, (l) => ({ ...l, quantity: Math.max(1, Math.floor(qty) || 1) }))),
 
   setLineDiscount: (key, amount) =>
-    set((state) => ({
-      lines: state.lines.map((l) => (l.key === key ? { ...l, discountAmount: Math.max(0, amount) } : l)),
-    })),
+    set((state) => editLine(state, key, (l) => ({ ...l, discountAmount: Math.max(0, amount), autoDiscount: undefined, manualDiscount: true }))),
 
-  setLineUnitPriceOverride: (key, price) =>
-    set((state) => ({
-      lines: state.lines.map((l) => (l.key === key ? { ...l, unitPriceOverride: price ?? undefined } : l)),
-    })),
+  setLineUnitPriceOverride: (key, price) => set((state) => editLine(state, key, (l) => ({ ...l, unitPriceOverride: price ?? undefined }))),
 
   setLineTaxOverride: (key, taxId, taxPercent) =>
-    set((state) => ({
-      lines: state.lines.map((l) =>
-        l.key === key ? { ...l, taxOverrideId: taxId ?? undefined, taxOverridePercent: taxId ? taxPercent : undefined } : l,
-      ),
-    })),
+    set((state) => editLine(state, key, (l) => ({ ...l, taxOverrideId: taxId ?? undefined, taxOverridePercent: taxId ? taxPercent : undefined }))),
 
   setLineNote: (key, note) =>
-    set((state) => ({ lines: state.lines.map((l) => (l.key === key ? { ...l, note: note || undefined } : l)) })),
+    set((state) => {
+      // A note doesn't change prices - keep the promotion and note every row of that item.
+      const root = key.split("#")[0];
+      const patch = (l: PosLine) => (l.key.split("#")[0] === root ? { ...l, note: note || undefined } : l);
+      return state.promotion
+        ? { lines: state.lines.map(patch), promotion: { ...state.promotion, originalLines: state.promotion.originalLines.map(patch) } }
+        : { lines: state.lines.map(patch) };
+    }),
 
   setLineDimensions: (key, widthM, heightM) =>
-    set((state) => ({
-      lines: state.lines.map((l) =>
-        l.key === key ? { ...l, widthM: widthM ?? undefined, heightM: heightM ?? undefined } : l,
-      ),
-    })),
+    set((state) => editLine(state, key, (l) => ({ ...l, widthM: widthM ?? undefined, heightM: heightM ?? undefined }))),
 
-  removeLine: (key) => set((state) => ({ lines: state.lines.filter((l) => l.key !== key) })),
+  removeLine: (key) =>
+    set((state) => ({ promotion: null, coupon: null, lines: isSplitKey(key) ? baseLines(state) : baseLines(state).filter((l) => l.key !== key) })),
 
   clear: () =>
     set({
@@ -265,6 +322,7 @@ export const usePosStore = create<PosState>((set) => ({
       redeemPoints: 0,
       appliedCreditAmount: 0,
       coupon: null,
+      promotion: null,
       note: "",
       customFields: ["", "", "", ""],
       additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
@@ -277,8 +335,12 @@ export const usePosStore = create<PosState>((set) => ({
     }),
 
   setCustomer: (customer) =>
-    set({
+    set((state) => ({
       customer,
+      // Reference pos.js cancels the promotion (and the coupon) whenever the customer changes.
+      promotion: null,
+      coupon: null,
+      lines: baseLines(state),
       redeemPoints: 0,
       appliedCreditAmount: 0,
       // Reference's own Add Sale JS pre-fills pay_term_number/pay_term_type from whichever
@@ -286,7 +348,7 @@ export const usePosStore = create<PosState>((set) => ({
       // cashier can still edit them independently afterward.
       payTermNumber: customer?.paymentTermsDays ? customer.paymentTermsDays : null,
       payTermType: customer?.paymentTermsDays ? (customer.payTermType ?? null) : null,
-    }),
+    })),
   setInvoiceDiscount: (invoiceDiscountMode, invoiceDiscountValue) =>
     set({ invoiceDiscountMode, invoiceDiscountValue: Math.max(0, invoiceDiscountValue) }),
   setShipping: (shipping) => set({ shipping: Math.max(0, shipping) }),
@@ -299,12 +361,62 @@ export const usePosStore = create<PosState>((set) => ({
     }),
   setNote: (note) => set({ note }),
   setCoupon: (coupon) => set({ coupon }),
+  // Reference applyCouponSuccess: a coupon without "Added Discount" cancels the promotion and
+  // zeroes every line discount first; `lineDiscounts` were fitted by the server to that cart.
+  applyCoupon: (coupon) =>
+    set((state) =>
+      coupon.addedDiscount
+        ? { coupon }
+        : { coupon, promotion: null, lines: baseLines(state).map((l) => ({ ...l, discountAmount: 0, autoDiscount: undefined, manualDiscount: undefined })) },
+    ),
+  applyPromotion: (result) =>
+    set((state) => {
+      const originals = baseLines(state);
+      const seen = new Map<string, number>();
+      const lines = result.items.map((item) => {
+        const src = originals[item.sourceIndex];
+        const n = seen.get(src.key) ?? 0;
+        seen.set(src.key, n + 1);
+        return {
+          ...src,
+          key: n === 0 ? src.key : `${src.key}#${n}`,
+          quantity: item.quantity,
+          discountAmount: item.discountAmount,
+          promotionId: item.promoted ? result.promotion.id : undefined,
+          promoFree: item.free || undefined,
+        };
+      });
+      const { id, name, type, fullCash } = result.promotion;
+      return { lines, coupon: null, promotion: { id, name, type, fullCash, cashBack: result.cashBack, originalLines: originals } };
+    }),
+  cancelPromotion: () => set((state) => ({ promotion: null, coupon: null, lines: baseLines(state) })),
+  applyDiscounts: (matches) =>
+    set((state) => {
+      // A coupon without "Added Discount" replaced the line discounts - don't put them back under it.
+      if (state.coupon && !state.coupon.addedDiscount) return {};
+      let changed = false;
+      const lines = baseLines(state).map((l) => {
+        if (l.manualDiscount) return l;
+        const m = matches[itemKeyOf(l)];
+        if (!m) {
+          if (!l.autoDiscount) return l;
+          changed = true;
+          return { ...l, autoDiscount: undefined, discountAmount: 0 };
+        }
+        const auto = { id: m.id, name: m.name, discountType: m.discountType, amount: Number(m.discountAmount), endsAt: m.endsAt };
+        if (l.autoDiscount && l.autoDiscount.id === auto.id && l.autoDiscount.amount === auto.amount && l.autoDiscount.discountType === auto.discountType) return l;
+        changed = true;
+        return withAutoDiscount({ ...l, autoDiscount: auto });
+      });
+      // A changed line discount changes the cart, so an applied promotion / coupon is dropped with it.
+      return changed ? { lines, promotion: null, coupon: null } : {};
+    }),
   setCustomField: (index, value) =>
     set((state) => ({ customFields: state.customFields.map((v, i) => (i === index ? value : v)) })),
   setAdditionalExpense: (index, slot) =>
     set((state) => ({ additionalExpenses: state.additionalExpenses.map((s, i) => (i === index ? slot : s)) })),
   setTaxExemptionReasonCode: (code) => set({ taxExemptionReasonCode: code }),
-  setPriceListId: (id) => set({ priceListId: id }),
+  setPriceListId: (id) => set((state) => ({ priceListId: id, promotion: null, coupon: null, lines: baseLines(state) })),
   setPayTerm: (number, type) => set({ payTermNumber: number, payTermType: type }),
   setDocument: (path, originalName) => set({ documentPath: path, documentOriginalName: originalName }),
 
@@ -324,6 +436,7 @@ export const usePosStore = create<PosState>((set) => ({
       redeemPoints: 0,
       appliedCreditAmount: 0,
       coupon: null,
+      promotion: null,
       customFields: ["", "", "", ""],
       additionalExpenses: EMPTY_ADDITIONAL_EXPENSES,
       taxExemptionReasonCode: null,
@@ -358,8 +471,8 @@ export interface PosTotals {
 /**
  * Pure totals from a snapshot of the store. Use usePosTotals() in components; getState() elsewhere.
  *
- * Mirrors pos.service.ts checkout() exactly: the coupon and invoice discount both net into the
- * taxable base sequentially (coupon first, then invoice discount off the coupon-adjusted base),
+ * Mirrors pos.service.ts checkout() exactly: the coupon is a line discount on the lines it fits
+ * (folded into those lines' taxable base), then the invoice discount comes off the result,
  * shipping is added to the taxable base as a real charge (not a flat untaxed add-on), and tax is
  * recomputed on that final base using the cart's blended (line-level) tax rate. Keeping this
  * identical to the backend is what prevents another preview/checkout mismatch like the one found
@@ -371,16 +484,19 @@ export function selectTotals(state: PosState): PosTotals {
   let lineDiscountTotal = 0;
   let quantityTotal = 0;
 
-  for (const line of state.lines) {
-    const t = calcLine(line);
+  let couponDiscountAmount = 0;
+  state.lines.forEach((line, i) => {
+    // The coupon is a line discount (pos.service.ts applyCouponToLines) - it lowers this line's
+    // taxable base, so it is folded into the line before tax, not taken off the invoice after.
+    const couponShare = state.coupon?.lineDiscounts[i] ?? 0;
+    const t = calcLine(couponShare ? { ...line, discountAmount: line.discountAmount + couponShare } : line);
     subtotal += t.subtotal;
     lineTaxAmount += t.taxAmount;
     lineDiscountTotal += line.discountAmount;
+    couponDiscountAmount += couponShare;
     quantityTotal += line.quantity;
-  }
-
-  const couponDiscountAmount = Math.min(state.coupon?.discountAmount ?? 0, subtotal);
-  const subtotalAfterCoupon = subtotal - couponDiscountAmount;
+  });
+  const subtotalAfterCoupon = subtotal;
 
   const rawInvoiceDiscount =
     state.invoiceDiscountMode === "PERCENT"
@@ -443,3 +559,8 @@ export function selectTotals(state: PosState): PosTotals {
  * Defined after selectTotals so the reference is unambiguous under Fast Refresh.
  */
 export const usePosTotals = () => usePosStore(useShallow(selectTotals));
+
+/** The coupon's share of one cart line (0 when no coupon is on the cart or it skipped this line). */
+export function useLineCouponShare(key: string) {
+  return usePosStore((s) => (s.coupon ? s.coupon.lineDiscounts[s.lines.findIndex((l) => l.key === key)] ?? 0 : 0));
+}

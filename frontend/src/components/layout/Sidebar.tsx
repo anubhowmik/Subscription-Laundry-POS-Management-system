@@ -23,7 +23,6 @@ import {
   ClipboardCheck,
   Wallet,
   HandCoins,
-  Ticket,
   Tags,
   Archive,
   BarChart3,
@@ -61,6 +60,7 @@ import {
   BanknoteArrowDown as MoneyCheck,
   Briefcase,
   Percent,
+  BadgePercent,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { api } from "../../api/client";
@@ -237,11 +237,22 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    // The EJADA reference's own "Promotions" dropdown (AdminSidebarMenu.php, `addon.promotions`):
+    // Promotions and Coupons together.
+    labelKey: "nav.section.promotions",
+    collapsible: true,
+    icon: BadgePercent,
+    items: [
+      { to: "/promotions", labelKey: "nav.promotions", permissions: ["promotions.view"], icon: Percent },
+      { to: "/coupons", labelKey: "nav.coupons", permissions: ["coupons.view", "coupons.manage"], icon: Percent },
+      { to: "/discounts", labelKey: "nav.discounts", permissions: ["discount.access"], icon: Percent },
+    ],
+  },
+  {
     labelKey: "nav.section.finance",
     items: [
       { to: "/expenses", labelKey: "nav.expenses", permissions: ["expenses.view"], icon: Wallet },
       { to: "/compensations", labelKey: "nav.compensations", permissions: ["compensations.file", "compensations.approve", "compensations.pay", "compensations.view_own", "compensations.view_all"], icon: HandCoins },
-      { to: "/coupons", labelKey: "nav.coupons", permissions: ["coupons.manage"], icon: Ticket },
       { to: "/price-lists", labelKey: "nav.priceLists", permissions: ["price-lists.manage"], icon: Tags },
       { to: "/register-sessions", labelKey: "nav.registerSessions", permissions: ["pos.register.manage"], icon: Archive },
       { to: "/accounting/chart-of-accounts", labelKey: "nav.chartOfAccounts", permissions: ["accounting.view"], icon: BookOpen },
@@ -287,6 +298,22 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/reports/monthly-lfl-sales", labelKey: "nav.monthlyLflSalesReport", permissions: ["reports.monthly_lfl_sales"], icon: Percent },
       { to: "/reports/sales-analysis", labelKey: "nav.salesAnalysisReport", permissions: ["reports.sales_analysis"], icon: Percent },
       { to: "/reports/sales-performance", labelKey: "nav.salesPerformanceReport", permissions: ["reports.sales_performance"], icon: Percent },
+    ],
+  },
+  {
+    // The EJADA reference's "CRM Reports" dropdown (AdminSidebarMenu.php, `report.crm_reports`),
+    // rebuilt one report at a time in the reference's order.
+    labelKey: "nav.section.crmReports",
+    collapsible: true,
+    icon: PieChart,
+    items: [
+      { to: "/reports/customers-revenue", labelKey: "nav.customersRevenueReport", permissions: ["reports.customers_revenue"], icon: Percent },
+      { to: "/reports/customers-retention", labelKey: "nav.customersRetentionReport", permissions: ["reports.customers_retention"], icon: Percent },
+      { to: "/reports/decline-customers", labelKey: "nav.declineCustomersReport", permissions: ["reports.decline_customers"], icon: Percent },
+      { to: "/reports/new-customers", labelKey: "nav.newCustomersReport", permissions: ["reports.new_customers"], icon: Percent },
+      { to: "/reports/campaign-performance", labelKey: "nav.campaignPerformanceReport", permissions: ["reports.campaign_performance"], icon: Percent },
+      { to: "/reports/discount-coupon", labelKey: "nav.discountCouponReport", permissions: ["reports.discount_coupon"], icon: Percent },
+      { to: "/reports/consumer-behaviour", labelKey: "nav.consumerBehaviourReport", permissions: ["reports.consumer_behaviour"], icon: Percent },
     ],
   },
   {

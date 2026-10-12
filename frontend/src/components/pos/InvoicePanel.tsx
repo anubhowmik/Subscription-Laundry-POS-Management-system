@@ -1,15 +1,16 @@
 import { useState } from "react";
+import { PromotionPicker } from "./PromotionPicker";
+import { useActivePromotions } from "../../api/promotionsApi";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, User, UserPlus, CirclePause, Clock, Receipt, Trash2, Printer, Ticket, FileText, CreditCard, Globe, CalendarClock, Banknote, Wallet, Gift, Plus, PackageCheck } from "lucide-react";
-import { usePosStore, usePosTotals, type DiscountMode, type PosPayment } from "../../stores/posStore";
+import { usePosStore, usePosTotals, useLineCouponShare, type DiscountMode, type PosPayment } from "../../stores/posStore";
 import {
   useCustomers,
   useHeldSales,
   useHoldSale,
   useResumeHeldSale,
   useDiscardHeldSale,
-  usePreviewCoupon,
   BNPL_CODES,
   type PosPaymentMethod,
 } from "../../api/posApi";
@@ -23,6 +24,8 @@ import { CustomerFormModal } from "../customers/CustomerFormModal";
 import { BnplFlowModal } from "./BnplFlowModal";
 import { LineEditModal } from "./LineEditModal";
 import { TAX_EXEMPTION_REASON_CODES, TAX_EXEMPTION_REASONS } from "../../lib/taxExemptionReasons";
+import { useCouponApply } from "./useCouponApply";
+import { CouponOtpStep } from "./CouponOtpStep";
 
 interface SellCustomFieldLabels {
   sellCustomField1Label: string | null;
@@ -124,15 +127,17 @@ export function InvoicePanel(props: Props) {
 
 function ItemRow({ line, currency, locale, isAr }: Props & { line: ReturnType<typeof usePosStore.getState>["lines"][number] }) {
   const store = usePosStore();
+  const couponShare = useLineCouponShare(line.key);
+  const couponCode = usePosStore((s) => s.coupon?.code);
   const [editOpen, setEditOpen] = useState(false);
   const overStock = line.manageStock && line.stockOnHand !== undefined && line.quantity > line.stockOnHand;
   const effectiveQty = line.widthM != null && line.heightM != null ? line.quantity * line.widthM * line.heightM : line.quantity;
   const effectivePrice = line.unitPriceOverride ?? line.unitPrice;
-  const gross = effectivePrice * effectiveQty - line.discountAmount;
+  const gross = effectivePrice * effectiveQty - line.discountAmount - couponShare;
   const hasOverrides = line.unitPriceOverride != null || line.taxOverrideId != null || line.note || (line.widthM && line.heightM);
 
   return (
-    <div className={`flex items-center gap-3 rounded-lg px-2 py-2 transition-colors ${overStock ? "bg-red-50" : "hover:bg-slate-100"}`}>
+    <div className={`flex items-center gap-3 rounded-lg px-2 py-2 transition-colors ${overStock ? "bg-red-50" : line.promotionId ? "bg-emerald-50/70 hover:bg-emerald-50" : "hover:bg-slate-100"}`}>
       <button
         type="button"
         onClick={() => setEditOpen(true)}
@@ -146,6 +151,24 @@ function ItemRow({ line, currency, locale, isAr }: Props & { line: ReturnType<ty
         {overStock && (
           <p className="text-[11px] font-medium text-red-600">
             {isAr ? `المتوفر: ${line.stockOnHand}` : `Only ${line.stockOnHand} in stock`}
+          </p>
+        )}
+        {line.autoDiscount && !line.promotionId && (
+          <p className="truncate text-[11px] text-sky-600" title={`${line.autoDiscount.name} - ${new Date(line.autoDiscount.endsAt).toLocaleString()}`}>
+            {isAr ? `الخصم: ${line.autoDiscount.name}` : `Discount: ${line.autoDiscount.name} applied`}
+          </p>
+        )}
+        {line.promotionId && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+            <Gift className="h-3 w-3" strokeWidth={2} aria-hidden />
+            {line.promoFree ? (isAr ? "بونص مجاني" : "Free bonus") : isAr ? "عرض ترويجي" : "Promotion"}
+          </p>
+        )}
+        {couponShare > 0 && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-green-700">
+            <Ticket className="h-3 w-3" strokeWidth={2} aria-hidden />
+            <span className="font-mono">{couponCode}</span>
+            <span className="ltr-nums">−{couponShare.toFixed(2)}</span>
           </p>
         )}
       </button>
@@ -516,7 +539,7 @@ function QuickActions(props: Props) {
         customerId: customer?.id,
         label: `Hold ${new Date().toLocaleTimeString()}`,
         mode,
-        items: lines.map((l) => ({
+        items: (usePosStore.getState().promotion?.originalLines ?? lines).map((l) => ({
           productId: l.type === "PRODUCT" ? l.id : undefined,
           serviceId: l.type === "SERVICE" ? l.id : undefined,
           descriptionEn: l.nameEn,
@@ -607,6 +630,7 @@ function QuickActions(props: Props) {
         <Receipt className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
         {isAr ? "الفواتير الأخيرة" : "Recent"}
       </button>
+      <PromotionPicker isAr={isAr} businessLocationId={businessLocationId} mode={mode} notify={notify} variant="pill" pillClass={pill} />
       <CouponButton {...props} pill={pill} />
       <button
         onClick={() => {
@@ -627,29 +651,17 @@ function QuickActions(props: Props) {
   );
 }
 
-function CouponButton({ isAr, notify, pill, businessLocationId }: Props & { pill: string }) {
+function CouponButton({ isAr, notify, pill, businessLocationId, mode }: Props & { pill: string }) {
   const store = usePosStore();
   const coupon = usePosStore((s) => s.coupon);
-  const customer = usePosStore((s) => s.customer);
-  const totals = usePosTotals();
-  const preview = usePreviewCoupon();
+  const flow = useCouponApply({ isAr, businessLocationId, mode, notify });
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
 
   async function apply() {
-    if (!code.trim()) return;
-    try {
-      // The pre-tax subtotal is the base checkout() actually applies the coupon percentage to
-      // (see pos.service.ts) - sending anything else here would preview a discount that doesn't
-      // match what the cashier is charged at completion. customerId/businessLocationId are sent
-      // too so preview reflects the same targeting/limit checks checkout() will enforce.
-      const result = await preview.mutateAsync({ code: code.trim(), subtotal: totals.subtotal, customerId: customer?.id, businessLocationId });
-      store.setCoupon({ code: result.code, discountAmount: Number(result.discountAmount) });
-      notify(isAr ? `تم تطبيق الكوبون: خصم ${result.discountAmount}` : `Coupon applied: ${result.discountAmount} off`);
+    if (await flow.apply(code)) {
       setOpen(false);
       setCode("");
-    } catch {
-      notify(isAr ? "كود الكوبون غير صالح" : "Invalid coupon code");
     }
   }
 
@@ -658,11 +670,13 @@ function CouponButton({ isAr, notify, pill, businessLocationId }: Props & { pill
       <button
         onClick={() => {
           store.setCoupon(null);
-          notify(isAr ? "تمت إزالة الكوبون" : "Coupon removed");
+          notify(isAr ? "تم إلغاء قسيمة الخصم" : "Coupon cancelled");
         }}
+        title={`${coupon.name} - ${isAr ? "الغاء قسيمة الخصم" : "Cancel Coupon"}`}
         className={`${pill} !bg-green-100 !text-green-700 hover:!bg-green-200 inline-flex items-center gap-1`}
       >
-        {coupon.code}
+        <span className="font-mono">{coupon.code}</span>
+        <span className="ltr-nums text-[11px]">−{coupon.discountAmount.toFixed(2)}</span>
         <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
       </button>
     );
@@ -672,21 +686,22 @@ function CouponButton({ isAr, notify, pill, businessLocationId }: Props & { pill
     <div className="relative">
       <button onClick={() => setOpen((v) => !v)} className={pill}>
         <Ticket className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-        {isAr ? "كوبون" : "Coupon"}
+        {isAr ? "قسيمة خصم" : "Coupon"}
       </button>
       {open && (
-        <div className="absolute bottom-full start-0 z-20 mb-1 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute bottom-full start-0 z-20 mb-1 w-64 space-y-2 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
           <input
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === "Enter" && apply()}
-            placeholder={isAr ? "أدخل كود الكوبون" : "Enter coupon code"}
+            placeholder={isAr ? "قسيمة خصم" : "Coupon"}
             autoFocus
-            className={`${inputSmClass} w-full`}
+            className={`${inputSmClass} w-full font-mono`}
           />
-          <Button onClick={apply} disabled={preview.isPending || !code.trim()} size="sm" fullWidth className="mt-2">
-            {preview.isPending ? "…" : isAr ? "تطبيق" : "Apply"}
+          <Button onClick={apply} disabled={flow.pending || !code.trim()} size="sm" fullWidth>
+            {flow.pending ? "…" : isAr ? "تطبيق قسيمة الخصم" : "Apply Coupon"}
           </Button>
+          <CouponOtpStep flow={flow} isAr={isAr} />
         </div>
       )}
     </div>
@@ -794,6 +809,9 @@ function PaymentModal(props: Props) {
   const payments = usePosStore((s) => s.payments);
   const store = usePosStore();
   const customer = usePosStore((s) => s.customer);
+  const promotion = usePosStore((s) => s.promotion);
+  const { data: promoState } = useActivePromotions();
+  const cashbackBlocked = promoState?.cashbackRedeemBlocked ?? false;
   const [bnplOpen, setBnplOpen] = useState(false);
 
   const methodById = new Map(paymentMethods.map((m) => [m.id, m]));
@@ -830,6 +848,12 @@ function PaymentModal(props: Props) {
           for the balance. Ours uses the app's own brand accent (sky-* = Nordic Indigo, see
           [[project_color_rebrand_nordic_indigo_laundry_pos]]) instead of the reference's literal
           orange. */}
+      {promotion?.fullCash && (
+        <p className="mb-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
+          <Gift className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+          {isAr ? `العرض "${promotion.name}" يتطلب دفع المبلغ نقدي بالكامل.` : `The promotion "${promotion.name}" requires the full amount paid in cash.`}
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_15rem]">
         <div className="min-w-0 space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -867,7 +891,14 @@ function PaymentModal(props: Props) {
                       locked: true,
                     })
                   }
-                  disabled={totals.due <= 0}
+                  disabled={totals.due <= 0 || cashbackBlocked}
+                  title={
+                    cashbackBlocked
+                      ? isAr
+                        ? "هناك عرض استرداد نقدي فعال حالياً. لا يمكنك استرداد النقاط حتى ينتهي العرض."
+                        : "A cash back offer is running - cash back can't be redeemed until it ends."
+                      : undefined
+                  }
                   className="flex items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-700 transition-colors hover:border-amber-300 hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Gift className="h-4 w-4" strokeWidth={2} aria-hidden />

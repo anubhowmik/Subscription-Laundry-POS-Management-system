@@ -27,6 +27,13 @@ import {
   loyaltyPointsReportQuerySchema,
   cashRegisterReportQuerySchema,
   customerVisitsReportQuerySchema,
+  customersRevenueReportQuerySchema,
+  customersRetentionReportQuerySchema,
+  declineCustomersReportQuerySchema,
+  newCustomersReportQuerySchema,
+  campaignPerformanceReportQuerySchema,
+  discountCouponReportQuerySchema,
+  consumerBehaviourReportQuerySchema,
   dailySalesReportQuerySchema,
   lflSalesReportQuerySchema,
   salesAnalysisReportQuerySchema,
@@ -90,6 +97,22 @@ router.get("/monthly-lfl-sales", requirePermission("reports.monthly_lfl_sales"),
 router.get("/sales-analysis", requirePermission("reports.sales_analysis"), validate(salesAnalysisReportQuerySchema, "query"), controller.salesAnalysisReport);
 // Reference's Sales Reports > Sales Performance Report.
 router.get("/sales-performance", requirePermission("reports.sales_performance"), validate(salesPerformanceReportQuerySchema, "query"), controller.salesPerformanceReport);
+
+// CRM Reports dropdown.
+router.get("/customers-revenue", requirePermission("reports.customers_revenue"), validate(customersRevenueReportQuerySchema, "query"), controller.customersRevenueReport);
+router.get("/customers-revenue/export", requirePermission("reports.customers_revenue"), validate(customersRevenueReportQuerySchema, "query"), controller.customersRevenueReportExport);
+router.get("/customers-retention", requirePermission("reports.customers_retention"), validate(customersRetentionReportQuerySchema, "query"), controller.customersRetentionReport);
+router.get("/customers-retention/export", requirePermission("reports.customers_retention"), validate(customersRetentionReportQuerySchema, "query"), controller.customersRetentionReportExport);
+router.get("/decline-customers", requirePermission("reports.decline_customers"), validate(declineCustomersReportQuerySchema, "query"), controller.declineCustomersReport);
+router.get("/new-customers", requirePermission("reports.new_customers"), validate(newCustomersReportQuerySchema, "query"), controller.newCustomersReport);
+router.get("/new-customers/export", requirePermission("reports.new_customers"), validate(newCustomersReportQuerySchema, "query"), controller.newCustomersReportExport);
+router.get("/campaign-performance", requirePermission("reports.campaign_performance"), validate(campaignPerformanceReportQuerySchema, "query"), controller.campaignPerformanceReport);
+router.get("/campaign-performance/export", requirePermission("reports.campaign_performance"), validate(campaignPerformanceReportQuerySchema, "query"), controller.campaignPerformanceReportExport);
+router.get("/discount-coupon", requirePermission("reports.discount_coupon"), validate(discountCouponReportQuerySchema, "query"), controller.discountCouponReport);
+router.get("/discount-coupon/export", requirePermission("reports.discount_coupon"), validate(discountCouponReportQuerySchema, "query"), controller.discountCouponReportExport);
+router.get("/consumer-behaviour", requirePermission("reports.consumer_behaviour"), validate(consumerBehaviourReportQuerySchema, "query"), controller.consumerBehaviourReport);
+router.get("/consumer-behaviour/export", requirePermission("reports.consumer_behaviour"), validate(consumerBehaviourReportQuerySchema, "query"), controller.consumerBehaviourReportExport);
+router.get("/decline-customers/export", requirePermission("reports.decline_customers"), validate(declineCustomersReportQuerySchema, "query"), controller.declineCustomersReportExport);
 // Reference's Reports > Sales Report (`sales_report` permission). "/sales" below is this app's
 // older summary endpoint used by the Reports Overview page.
 router.get("/sales-report", requirePermission("reports.sales_report"), validate(salesReportV2QuerySchema, "query"), controller.salesReportV2);

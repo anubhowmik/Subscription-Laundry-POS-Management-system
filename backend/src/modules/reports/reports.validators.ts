@@ -105,6 +105,42 @@ export const loyaltyPointsReportQuerySchema = cashbackReportQuerySchema;
 export const cashRegisterReportQuerySchema = z.object({ ...reportFrameQuery, status: z.enum(["open", "close"]).optional() });
 export const customerVisitsReportQuerySchema = cashbackReportQuerySchema;
 
+// CRM Reports dropdown.
+export const customersRevenueReportQuerySchema = z.object({
+  ...reportFrameQuery,
+  customerGroupId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  promotionId: z.string().uuid().optional(),
+});
+export const newCustomersReportQuerySchema = customersRevenueReportQuerySchema;
+export const campaignPerformanceReportQuerySchema = z.object({ ...reportFrameQuery, promotionId: z.string().uuid().optional() });
+export const consumerBehaviourReportQuerySchema = z.object({
+  ...reportFrameQuery,
+  // Reference's required Customer Group select: "all" (All Customers), "ungrouped" (Locations Customers) or a group id.
+  customerGroup: z.union([z.literal("all"), z.literal("ungrouped"), z.string().uuid()]).optional(),
+  customerId: z.string().uuid().optional(),
+});
+export const discountCouponReportQuerySchema = z.object({ ...reportFrameQuery, couponId: z.string().uuid().optional() });
+export const declineCustomersReportQuerySchema = z.object({
+  app: z.enum(["service", "product"]).optional(),
+  locationGroupId: z.string().uuid().optional(),
+  locationIds: z.string().optional(),
+  customerGroupId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  datePoint: dateOnly.optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+});
+export const customersRetentionReportQuerySchema = z.object({
+  app: z.enum(["service", "product"]).optional(),
+  locationGroupId: z.string().uuid().optional(),
+  locationIds: z.string().optional(),
+  customerGroupId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional(),
+  // Reference `date_point` (single date, default today).
+  datePoint: dateOnly.optional(),
+  lang: z.enum(["en", "ar"]).optional(),
+});
+
 // Sales Reports dropdown.
 export const dailySalesReportQuerySchema = z.object({
   // Which app the report was opened from (Service POS / Product POS scope it; POS Laundry omits it).

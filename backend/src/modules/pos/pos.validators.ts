@@ -32,6 +32,9 @@ const cartItemSchema = z
     // priceLine() multiplies the sent quantity by widthM*heightM.
     widthM: z.number().positive().optional(),
     heightM: z.number().positive().optional(),
+    // Promotions > Discounts: the discount the POS pre-filled on this line - checkout re-checks
+    // it and recomputes its amount (see pos.service.ts's resolveLineDiscounts).
+    discountId: z.string().uuid().optional(),
   })
   .refine((item) => Boolean(item.productId) !== Boolean(item.serviceId), {
     message: "Each cart item must reference exactly one of productId or serviceId",
@@ -61,6 +64,11 @@ export const checkoutSchema = z.object({
   payments: z.array(paymentInputSchema).default([]),
   notes: z.string().optional(),
   couponCode: z.string().optional(),
+  // The customer's verification code when the coupon has OTP on.
+  couponOtp: z.string().trim().max(10).optional(),
+  // The promotion the cashier picked from the POS dropdown. Omitted = the auto-apply promotions
+  // are tried instead (see promotion.service.ts's resolvePromotion()).
+  promotionId: z.string().uuid().optional(),
   invoiceDiscountMode: z.enum(["PERCENT", "FIXED"]).optional(),
   invoiceDiscountValue: z.number().min(0).optional(),
   shipping: z.number().min(0).optional(),
